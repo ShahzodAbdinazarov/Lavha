@@ -70,6 +70,7 @@ import org.telegram.messenger.ChatThemeController;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.ImageLoader;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LiteMode;
@@ -1425,6 +1426,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
                 (SharedConfig.frameMetricsEnabled ? "hide frame metrics" : "show frame metrics"),
                 BuildVars.DEBUG_PRIVATE_VERSION ? (SharedConfig.shadowsInSections ? "disable shadows in settings" : "enable shadows in settings") : null,
                 BuildVars.DEBUG_PRIVATE_VERSION ? (SharedConfig.debugViewMetrics ? "disable debug view metrics" : "enable debug view metrics") : null,
+                "Reels fetch test"
         };
 
         builder.setItems(items, (dialog, which) -> {
@@ -1733,10 +1735,92 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             } else if (which == 41) {
                 final SharedPreferences prefs = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
                 prefs.edit().putBoolean("debugViewMetrics", SharedConfig.debugViewMetrics = !SharedConfig.debugViewMetrics).apply();
+            } else if (which == 42) {
+                runReelsFetchTest();
             }
         });
         builder.setNegativeButton(getString(R.string.Cancel), null);
         showDialog(builder.create());
+    }
+
+    // ===== TEMPORARY DEBUG TEST: fetch a single channel video by (username + message_id) without joining, and play it =====
+    private void runReelsFetchTest() {
+        final String TAG = "ReelsTest";
+        final String TEST_CHANNEL_USERNAME = "TelegramTips";
+        final int TEST_MESSAGE_ID = 569;
+        final int account = currentAccount;
+
+        // Force-enable logs so the tgnet/FileLoader streaming path is observable for this test
+        if (!BuildVars.LOGS_ENABLED) {
+            BuildVars.LOGS_ENABLED = true;
+        }
+        FileLog.d(TAG + ": START — stored data = username(\"" + TEST_CHANNEL_USERNAME + "\") + message_id(" + TEST_MESSAGE_ID + ") ONLY; no file_reference stored");
+
+        // ---- Step 1: resolve the public username WITHOUT joining the channel ----
+        getMessagesController().getUserNameResolver().resolve(TEST_CHANNEL_USERNAME, peerId -> {
+            if (peerId == null || peerId == Long.MAX_VALUE) {
+                FileLog.e(TAG + ": Q3 resolve FAILED (peerId=" + peerId + ") — likely FLOOD_WAIT / invalid username (UserNameResolver logs FLOOD_WAIT separately)");
+                return;
+            }
+            if (peerId >= 0) {
+                FileLog.e(TAG + ": resolved peer is not a channel (peerId=" + peerId + ")");
+                return;
+            }
+            final long channelId = -peerId;
+            FileLog.d(TAG + ": resolved channelId=" + channelId + " (resolve only, channel NOT joined)");
+            TLRPC.Chat chat = getMessagesController().getChat(channelId);
+            if (chat == null) {
+                FileLog.e(TAG + ": chat object missing after resolve");
+                return;
+            }
+
+            // ---- Step 2: fetch EXACTLY one message by id (no history scroll) ----
+            TLRPC.TL_channels_getMessages req = new TLRPC.TL_channels_getMessages();
+            req.channel = getMessagesController().getInputChannel(channelId);
+            req.id.add(TEST_MESSAGE_ID);
+            FileLog.d(TAG + ": sending channels.getMessages for single id=" + TEST_MESSAGE_ID + " (exact id, no scroll)");
+            getConnectionsManager().sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+                if (error != null) {
+                    FileLog.e(TAG + ": Q3 getMessages ERROR code=" + error.code + " text=" + error.text);
+                    return;
+                }
+                TLRPC.messages_Messages res = (TLRPC.messages_Messages) response;
+                getMessagesController().putUsers(res.users, false);
+                getMessagesController().putChats(res.chats, false);
+                TLRPC.Message message = null;
+                for (int i = 0; i < res.messages.size(); i++) {
+                    if (res.messages.get(i).id == TEST_MESSAGE_ID) {
+                        message = res.messages.get(i);
+                        break;
+                    }
+                }
+                if (message == null) {
+                    FileLog.e(TAG + ": message id=" + TEST_MESSAGE_ID + " not returned (empty/deleted?)");
+                    return;
+                }
+                if (message.media == null || message.media.document == null) {
+                    FileLog.e(TAG + ": message has no video document, media=" + message.media);
+                    return;
+                }
+                TLRPC.Document doc = message.media.document;
+
+                // ---- Q1: direct stream — which Telegram DC the video bytes come from ----
+                FileLog.d(TAG + ": Q1 fresh document dc_id=" + doc.dc_id + " size=" + doc.size
+                        + " — video bytes will stream DIRECTLY from this Telegram DC via FileLoader/tgnet, no intermediate/external server. Watch FileLoader logs for dc" + doc.dc_id);
+
+                // ---- Q2: fresh file_reference obtained this run, nothing persisted ----
+                FileLog.d(TAG + ": Q2 fresh file_reference length=" + (doc.file_reference == null ? -1 : doc.file_reference.length)
+                        + " obtained THIS run from message_id only (no stored/old reference). If it expires mid-download, FileRefController auto-refreshes.");
+
+                // ---- Step 3: play in the app's own player (PhotoViewer -> VideoPlayer/ExoPlayer + FileLoader streaming) ----
+                final long dialogId = peerId; // negative channel dialog id
+                message.dialog_id = dialogId;
+                MessageObject mo = new MessageObject(account, message, false, true);
+                PhotoViewer.getInstance().setParentActivity(SettingsActivity.this);
+                PhotoViewer.getInstance().openPhoto(mo, dialogId, 0, 0, new PhotoViewer.EmptyPhotoViewerProvider(), false);
+                FileLog.d(TAG + ": opened PhotoViewer — streaming playback started for dc_id=" + doc.dc_id);
+            }));
+        });
     }
 
     private void listCodecs(String type, StringBuilder info) {

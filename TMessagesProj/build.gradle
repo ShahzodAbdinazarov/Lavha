@@ -114,6 +114,10 @@ android {
 
         multiDexEnabled true
 
+        // Telegram API credentials injected from git-ignored apikeys.properties (dummy fallback for clean clones)
+        buildConfigField "int", "APP_ID", getApiKey("APP_ID", "4")
+        buildConfigField "String", "APP_HASH", "\"" + getApiKey("APP_HASH", "014b35b6184100b085b0d0572f9b5103") + "\""
+
         externalNativeBuild {
             cmake {
                 version '3.10.2'
@@ -225,6 +229,22 @@ android {
     namespace 'org.telegram.messenger'
 }
 
+
+// Reads Telegram API credentials from a git-ignored apikeys.properties.
+// Falls back to the public dummy values if the file/key is absent, so a
+// clean clone still compiles (it just won't authenticate against Telegram).
+def getApiKey(String propName, String defValue) {
+    def propsFile = rootProject.file('apikeys.properties')
+    if (propsFile.exists()) {
+        def props = new Properties()
+        props.load(new FileInputStream(propsFile))
+        def value = props[propName]
+        if (value != null && value.toString().trim().length() > 0) {
+            return value.toString().trim()
+        }
+    }
+    return defValue
+}
 
 def getProps(String propName) {
     def propsFile = rootProject.file('local.properties')

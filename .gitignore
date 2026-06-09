@@ -4,6 +4,15 @@ build/
 obj/
 *.iml
 local.properties
+apikeys.properties
+
+# Build / run artifacts
+*.log
+apk_log.txt
+apk_log*.txt
+build_log.txt
+reels_logcat.txt
+*.stackdump
 TMessagesProj/.cxx/
 TMessagesProj/jniLibs/
 TMessagesProj/jniRes/
