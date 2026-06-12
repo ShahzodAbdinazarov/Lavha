@@ -96,6 +96,8 @@
 
     <application
         android:name="org.telegram.messenger.ApplicationLoader"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="true"
         android:restoreAnyVersion="true"
         android:backupAgent=".BackupAgent"

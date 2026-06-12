@@ -118,6 +118,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
     private DispatchQueue workerQueue;
     private boolean isStory;
+    private boolean isReels;
 
     public boolean createdWithAudioTrack() {
         return !audioDisabled;
@@ -239,6 +240,20 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                     DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
                     DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
                     1000,
+                    1000,
+                    DefaultLoadControl.DEFAULT_TARGET_BUFFER_BYTES,
+                    DefaultLoadControl.DEFAULT_PRIORITIZE_TIME_OVER_SIZE_THRESHOLDS,
+                    DefaultLoadControl.DEFAULT_BACK_BUFFER_DURATION_MS,
+                    DefaultLoadControl.DEFAULT_RETAIN_BACK_BUFFER_FROM_KEYFRAME);
+        } else if (isReels) {
+            // Lavha reels: start as fast as a normal video (100ms of buffer) but recover from a
+            // stall like a story (1s instead of the 5s default) — a swiping feed cannot afford
+            // a five-second freeze after a hiccup.
+            loadControl = new DefaultLoadControl(
+                    new DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE),
+                    DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                    DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+                    100,
                     1000,
                     DefaultLoadControl.DEFAULT_TARGET_BUFFER_BYTES,
                     DefaultLoadControl.DEFAULT_PRIORITIZE_TIME_OVER_SIZE_THRESHOLDS,
@@ -1990,6 +2005,10 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
     public void setIsStory() {
         isStory = true;
+    }
+
+    public void setIsReels() {
+        isReels = true;
     }
 
     @Override

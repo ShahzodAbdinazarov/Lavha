@@ -13,6 +13,7 @@ import android.graphics.RectF;
 import android.graphics.drawable.ShapeDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -46,6 +47,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
+import org.telegram.lavha.LavhaUnreadRecountThrottle;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -80,20 +82,24 @@ import me.vkryl.android.animator.BoolAnimator;
 import me.vkryl.android.animator.FactorAnimator;
 
 public class MainTabsActivity extends ViewPagerActivity implements NotificationCenter.NotificationCenterDelegate, FactorAnimator.Target {
-    public static final int TABS_COUNT = 4;
-    private static final int POSITION_CHATS = 0;
-    private static final int POSITION_CONTACTS = 1;
-    private static final int POSITION_CALLS_OR_SETTINGS = 2;
-    private static final int POSITION_PROFILE = 3;
+    public static final int TABS_COUNT = 5;
+    private static final int POSITION_REELS = 0;
+    private static final int POSITION_CHATS = 1;
+    private static final int POSITION_CONTACTS = 2;
+    private static final int POSITION_CALLS_OR_SETTINGS = 3;
+    private static final int POSITION_PROFILE = 4;
 
-    private static final int INDEX_CHATS = 0;
-    private static final int INDEX_CONTACTS = 1;
-    private static final int INDEX_SETTINGS = 2;
-    private static final int INDEX_CALLS = 3;
-    private static final int INDEX_PROFILE = 4;
+    private static final int INDEX_REELS = 0;
+    private static final int INDEX_CHATS = 1;
+    private static final int INDEX_CONTACTS = 2;
+    private static final int INDEX_SETTINGS = 3;
+    private static final int INDEX_CALLS = 4;
+    private static final int INDEX_PROFILE = 5;
 
+    // Settings + Calls share one visible slot (indices 3 & 4 -> the same position), so every index
+    // above that shared slot maps one lower. With Reels added first, the shared slot is at index 3.
     private static int indexToPosition(int index) {
-        return index > 2 ? index - 1 : index;
+        return index > 3 ? index - 1 : index;
     }
 
 
@@ -211,6 +217,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         blur3_updateColors();
         checkContactsTabBadge();
         checkUnreadCount(true);
+        requestFullUnreadRecount();
 
         Bulletin.Delegate delegate = new Bulletin.Delegate() {
             @Override
@@ -257,7 +264,8 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         tabsView.setClipChildren(false);
         tabsView.setPadding(dp(DialogsActivity.MAIN_TABS_MARGIN + 4), dp(DialogsActivity.MAIN_TABS_MARGIN + 4), dp(DialogsActivity.MAIN_TABS_MARGIN + 4), dp(DialogsActivity.MAIN_TABS_MARGIN + 4));
 
-        tabs = new GlassTabView[5];
+        tabs = new GlassTabView[6];
+        tabs[INDEX_REELS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.REELS, R.string.MainTabsReels);
         tabs[INDEX_CHATS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.CHATS, R.string.MainTabsChats);
         tabs[INDEX_CONTACTS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.CONTACTS, R.string.MainTabsContacts);
         tabs[INDEX_SETTINGS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.SETTINGS, R.string.Settings);
@@ -268,6 +276,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         tabs[INDEX_CALLS].setOnLongClickListener(this::openCallsSelector);
         tabs[INDEX_PROFILE].setOnLongClickListener(this::openAccountSelector);
 
+        tabsView.addTabToIgnoreClick(tabs[INDEX_REELS]);
         tabsView.addTabToIgnoreClick(tabs[INDEX_CHATS]);
         tabsView.addTabToIgnoreClick(tabs[INDEX_CONTACTS]);
         tabsView.addTabToIgnoreClick(tabs[INDEX_PROFILE]);
@@ -342,6 +351,20 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
         checkUnreadCount(false);
         return contentView;
+    }
+
+    // The cached main unread count can get stuck (forum topic reads synced from
+    // another device never decrement it), so re-derive it from the database when
+    // the tabs come back to the foreground. resetAllUnreadCounters posts
+    // updateInterfaces, which funnels back into checkUnreadCount.
+    private final LavhaUnreadRecountThrottle unreadRecountThrottle = new LavhaUnreadRecountThrottle(30_000);
+
+    private void requestFullUnreadRecount() {
+        if (!unreadRecountThrottle.shouldRun(SystemClock.elapsedRealtime())) {
+            return;
+        }
+        final MessagesStorage storage = MessagesStorage.getInstance(currentAccount);
+        storage.getStorageQueue().postRunnable(() -> storage.resetAllUnreadCounters(false));
     }
 
     private void checkUnreadCount(boolean animated) {
@@ -629,7 +652,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     @Override
     protected int getStartPosition() {
-        return POSITION_CHATS;
+        return POSITION_REELS;
     }
 
     private DialogsActivity dialogsActivity;
@@ -663,7 +686,11 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     @Override
     protected BaseFragment createBaseFragmentAt(int position) {
-        if (position == POSITION_CONTACTS) {
+        if (position == POSITION_REELS) {
+            Bundle args = new Bundle();
+            args.putBoolean("hasMainTabs", true);
+            return new ReelsActivity(args);
+        } else if (position == POSITION_CONTACTS) {
             Bundle args = new Bundle();
             args.putBoolean("needPhonebook", true);
             args.putBoolean("needFinishFragment", false);
