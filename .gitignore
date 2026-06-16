@@ -6,6 +6,9 @@ obj/
 local.properties
 apikeys.properties
 
+# Handoff / internal docs (must not reach git or APK)
+/docs/handoff/
+
 # Build / run artifacts
 *.log
 apk_log.txt
