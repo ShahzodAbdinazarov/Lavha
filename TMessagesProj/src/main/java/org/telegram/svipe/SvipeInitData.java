@@ -1,4 +1,4 @@
-package org.telegram.lavha;
+package org.telegram.svipe;
 
 import java.net.URLDecoder;
 
@@ -8,7 +8,7 @@ import java.net.URLDecoder;
  * second decode, matching how Telegram computes the hash over fully-decoded values.
  * Pure Java so it can be unit-tested on the JVM.
  */
-public class LavhaInitData {
+public class SvipeInitData {
 
     public static String extract(String webViewUrl) {
         if (webViewUrl == null) return null;

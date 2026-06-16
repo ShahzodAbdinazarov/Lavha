@@ -1,4 +1,4 @@
-package org.telegram.lavha;
+package org.telegram.svipe;
 
 import android.content.SharedPreferences;
 
@@ -13,12 +13,12 @@ import org.telegram.tgnet.TLRPC;
  * Seamless auth for the forked client, fully invisible in the UI. Token chain:
  *   1. cached access token (shared prefs)
  *   2. POST /v1/auth/refresh with the stored refresh token (plain HTTPS, no Telegram traffic)
- *   3. Mini App initData: messages.requestWebView on @Lavha_auth_bot's menu button — Telegram
+ *   3. Mini App initData: messages.requestWebView on @Svipe_auth_bot's menu button — Telegram
  *      returns a signed tgWebAppData payload, the backend verifies it offline. No chat, no
  *      message, nothing syncs to other devices; the web view is never rendered.
  *   4. legacy fallback: "/start <nonce>" to the bot + poll (kept until initData is proven in prod)
  */
-public class LavhaAuth {
+public class SvipeAuth {
 
     public interface TokenCallback {
         void run(String token);
@@ -30,8 +30,8 @@ public class LavhaAuth {
 
     public static String getStoredToken(int account) {
         SharedPreferences p = MessagesController.getMainSettings(account);
-        String t = p.getString(LavhaConfig.PREF_TOKEN, null);
-        long exp = p.getLong(LavhaConfig.PREF_EXPIRES, 0);
+        String t = p.getString(SvipeConfig.PREF_TOKEN, null);
+        long exp = p.getLong(SvipeConfig.PREF_EXPIRES, 0);
         if (t != null && t.length() > 0 && System.currentTimeMillis() < exp - 60000L) {
             return t;
         }
@@ -62,28 +62,28 @@ public class LavhaAuth {
     /** Drops the cached access token so the next ensureToken() re-authenticates (e.g. after 401). */
     public static void invalidateAccessToken(int account) {
         MessagesController.getMainSettings(account).edit()
-                .remove(LavhaConfig.PREF_TOKEN)
-                .remove(LavhaConfig.PREF_EXPIRES)
+                .remove(SvipeConfig.PREF_TOKEN)
+                .remove(SvipeConfig.PREF_EXPIRES)
                 .apply();
     }
 
     private static void refreshToken(int account, TokenCallback cb) {
         SharedPreferences p = MessagesController.getMainSettings(account);
-        String refresh = p.getString(LavhaConfig.PREF_REFRESH, null);
+        String refresh = p.getString(SvipeConfig.PREF_REFRESH, null);
         if (refresh == null || refresh.isEmpty()) {
             cb.run(null);
             return;
         }
         JSONObject body = new JSONObject();
         try { body.put("refresh_token", refresh); } catch (Exception ignore) {}
-        LavhaApi.post("/v1/auth/refresh", body, null, (res, code, err) -> {
+        SvipeApi.post("/v1/auth/refresh", body, null, (res, code, err) -> {
             if (res != null && "ok".equals(res.optString("status"))) {
                 storeTokens(account, res);
                 cb.run(res.optString("access_token"));
             } else {
                 if (code == 401) {
                     // Revoked or expired server-side — forget it so we don't ride a dead token.
-                    p.edit().remove(LavhaConfig.PREF_REFRESH).apply();
+                    p.edit().remove(SvipeConfig.PREF_REFRESH).apply();
                 }
                 cb.run(null);
             }
@@ -101,13 +101,13 @@ public class LavhaAuth {
             req.bot = mc.getInputUser(botId);
             req.peer = mc.getInputPeer(botId);
             req.platform = "android";
-            req.url = LavhaConfig.BASE_URL + "/webapp";
+            req.url = SvipeConfig.webAppUrl();
             req.flags |= 2;
             req.from_bot_menu = true;
             ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
                 String initData = null;
                 if (error == null && response instanceof TLRPC.TL_webViewResultUrl) {
-                    initData = LavhaInitData.extract(((TLRPC.TL_webViewResultUrl) response).url);
+                    initData = SvipeInitData.extract(((TLRPC.TL_webViewResultUrl) response).url);
                 }
                 if (initData == null) {
                     AndroidUtilities.runOnUIThread(() -> cb.run(null));
@@ -115,7 +115,7 @@ public class LavhaAuth {
                 }
                 JSONObject body = new JSONObject();
                 try { body.put("init_data", initData); } catch (Exception ignore) {}
-                LavhaApi.post("/v1/auth/telegram/webapp", body, null, (res, code, err) -> {
+                SvipeApi.post("/v1/auth/telegram/webapp", body, null, (res, code, err) -> {
                     if (res != null && "ok".equals(res.optString("status"))) {
                         storeTokens(account, res);
                         cb.run(res.optString("access_token"));
@@ -130,7 +130,7 @@ public class LavhaAuth {
     // ---- legacy deep-link flow (fallback only) ----
 
     private static void legacyBotAuth(int account, TokenCallback cb) {
-        LavhaApi.post("/v1/auth/telegram/start", new JSONObject(), null, (res, code, err) -> {
+        SvipeApi.post("/v1/auth/telegram/start", new JSONObject(), null, (res, code, err) -> {
             if (res == null) { cb.run(null); return; }
             String nonce = res.optString("nonce", null);
             if (nonce == null || nonce.isEmpty()) { cb.run(null); return; }
@@ -142,7 +142,7 @@ public class LavhaAuth {
     private static void resolveBot(int account, BotCallback cb) {
         MessagesController mc = MessagesController.getInstance(account);
         TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
-        req.username = LavhaConfig.BOT_USERNAME;
+        req.username = SvipeConfig.botUsername();
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
             long botId = 0;
             if (error == null && response instanceof TLRPC.TL_contacts_resolvedPeer) {
@@ -175,7 +175,7 @@ public class LavhaAuth {
         if (attempt > 20) { cb.run(null); return; }
         JSONObject body = new JSONObject();
         try { body.put("nonce", nonce); } catch (Exception ignore) {}
-        LavhaApi.post("/v1/auth/telegram/poll", body, null, (res, code, err) -> {
+        SvipeApi.post("/v1/auth/telegram/poll", body, null, (res, code, err) -> {
             if (res != null && "ok".equals(res.optString("status"))) {
                 storeTokens(account, res);
                 cb.run(res.optString("access_token"));
@@ -189,9 +189,9 @@ public class LavhaAuth {
 
     private static void storeTokens(int account, JSONObject res) {
         SharedPreferences.Editor e = MessagesController.getMainSettings(account).edit();
-        e.putString(LavhaConfig.PREF_TOKEN, res.optString("access_token"));
-        e.putString(LavhaConfig.PREF_REFRESH, res.optString("refresh_token"));
-        e.putLong(LavhaConfig.PREF_EXPIRES, System.currentTimeMillis() + res.optInt("expires_in", 3600) * 1000L);
+        e.putString(SvipeConfig.PREF_TOKEN, res.optString("access_token"));
+        e.putString(SvipeConfig.PREF_REFRESH, res.optString("refresh_token"));
+        e.putLong(SvipeConfig.PREF_EXPIRES, System.currentTimeMillis() + res.optInt("expires_in", 3600) * 1000L);
         e.apply();
     }
 }

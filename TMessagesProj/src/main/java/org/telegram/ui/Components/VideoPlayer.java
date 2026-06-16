@@ -246,7 +246,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                     DefaultLoadControl.DEFAULT_BACK_BUFFER_DURATION_MS,
                     DefaultLoadControl.DEFAULT_RETAIN_BACK_BUFFER_FROM_KEYFRAME);
         } else if (isReels) {
-            // Lavha reels: start as fast as a normal video (100ms of buffer) but recover from a
+            // Svipe reels: start as fast as a normal video (100ms of buffer) but recover from a
             // stall like a story (1s instead of the 5s default) — a swiping feed cannot afford
             // a five-second freeze after a hiccup.
             loadControl = new DefaultLoadControl(

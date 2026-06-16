@@ -1,4 +1,4 @@
-package org.telegram.lavha;
+package org.telegram.svipe;
 
 /**
  * Preload policy for the reels pager. Priorities, top to bottom:
@@ -12,7 +12,7 @@ package org.telegram.lavha;
  * Anything that falls out of the ahead window gets its download cancelled (bytes are kept).
  * Pure Java so it can be unit-tested on the JVM.
  */
-public class LavhaPreloadPlan {
+public class SvipePreloadPlan {
 
     /** Mirrors FileLoader.PRIORITY_NORMAL / PRIORITY_LOW without importing Android code. */
     public static final int NORMAL = 1;

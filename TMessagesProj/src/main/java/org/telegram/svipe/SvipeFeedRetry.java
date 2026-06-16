@@ -1,4 +1,4 @@
-package org.telegram.lavha;
+package org.telegram.svipe;
 
 import org.telegram.tgnet.ConnectionsManager;
 
@@ -7,7 +7,7 @@ import org.telegram.tgnet.ConnectionsManager;
  * pattern: observe NotificationCenter.didUpdateConnectionState and act on the connection state.
  * Kept free of Android dependencies so it can be unit-tested on the JVM.
  */
-public class LavhaFeedRetry {
+public class SvipeFeedRetry {
 
     public static boolean shouldRetry(int connectionState, boolean feedLoadFailed, boolean loadingFeed) {
         if (!feedLoadFailed || loadingFeed) {

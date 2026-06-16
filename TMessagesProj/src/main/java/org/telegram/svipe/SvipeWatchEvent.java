@@ -1,4 +1,4 @@
-package org.telegram.lavha;
+package org.telegram.svipe;
 
 /**
  * Classifies the watch time accumulated on a reel (the player loops, so ExoPlayer never reaches
@@ -8,7 +8,7 @@ package org.telegram.lavha;
  *   otherwise                   -> SWIPE_AWAY (backend grades it by dwell/completion)
  * Pure Java so it can be unit-tested on the JVM.
  */
-public class LavhaWatchEvent {
+public class SvipeWatchEvent {
 
     public static String classify(long watchedMs, long durationMs) {
         if (durationMs > 0) {

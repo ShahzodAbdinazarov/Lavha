@@ -27,11 +27,11 @@ import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
-import org.telegram.lavha.LavhaApi;
-import org.telegram.lavha.LavhaAuth;
-import org.telegram.lavha.LavhaFeedRetry;
-import org.telegram.lavha.LavhaPreloadPlan;
-import org.telegram.lavha.LavhaWatchEvent;
+import org.telegram.svipe.SvipeApi;
+import org.telegram.svipe.SvipeAuth;
+import org.telegram.svipe.SvipeFeedRetry;
+import org.telegram.svipe.SvipePreloadPlan;
+import org.telegram.svipe.SvipeWatchEvent;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.DownloadController;
@@ -63,7 +63,7 @@ import org.telegram.ui.Components.VideoPlayer;
 import java.util.ArrayList;
 
 /**
- * Lavha "Reels" — vertical short-video feed over the Lavha backend with a native TikTok-style
+ * Svipe "Reels" — vertical short-video feed over the Svipe backend with a native TikTok-style
  * action rail (like = total reactions, comments, share, more) and a channel bar (avatar + follow).
  * Everything reuses Telegram's own components (VideoPlayer, ShareAlert, reactions, ReportBottomSheet).
  */
@@ -102,7 +102,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     // priority; the swipe just attaches it to the texture — no setup, no buffer ramp-up.
     private VideoPlayer nextPlayer;
     private int nextPlayerPos = -1;
-    private long playRequestMs; // for the "lavha: first frame" timing log
+    private long playRequestMs; // for the "svipe: first frame" timing log
 
     private static class FeedItem {
         long channelId;
@@ -226,20 +226,20 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         loadingFeed = true;
         feedLoadFailed = false;
         if (!append) setStatus("Kirilmoqda…");
-        LavhaAuth.ensureToken(account, t -> {
+        SvipeAuth.ensureToken(account, t -> {
             if (t == null) {
                 loadingFeed = false;
                 feedLoadFailed = true;
-                if (!append) setStatus("Lavha'ga kirib bo'lmadi. Internet qaytsa o'zi qayta urinadi.");
+                if (!append) setStatus("Svipe'ga kirib bo'lmadi. Internet qaytsa o'zi qayta urinadi.");
                 return;
             }
             token = t;
             if (!append) setStatus("Lenta yuklanmoqda…");
-            LavhaApi.get("/v1/feed", token, (res, code, err) -> {
+            SvipeApi.get("/v1/feed", token, (res, code, err) -> {
                 loadingFeed = false;
                 if (code == 401 && !retried) {
                     // Access token died mid-session: silent re-auth, one retry.
-                    LavhaAuth.invalidateAccessToken(account);
+                    SvipeAuth.invalidateAccessToken(account);
                     requestFeed(append, true);
                     return;
                 }
@@ -349,7 +349,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             if (durationMs > 0) payload.put("video_duration_ms", durationMs);
             payload.put("dwell_ms", dwell);
             payload.put("feed_position", pos);
-            sendEvent(LavhaWatchEvent.classify(watched, durationMs), item, payload);
+            sendEvent(SvipeWatchEvent.classify(watched, durationMs), item, payload);
         } catch (Exception ignore) {}
     }
 
@@ -465,16 +465,16 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     }
 
     /**
-     * Read-ahead per {@link LavhaPreloadPlan}: resolve + head-preload the ahead window (next item
+     * Read-ahead per {@link SvipePreloadPlan}: resolve + head-preload the ahead window (next item
      * at NORMAL priority bypassing the gate, the rest at LOW), and cancel any started preload
      * that fell out of the window. Behind reels are never touched — their bytes stay in cache.
      */
     private void prefetchAround(int pos) {
         for (int i = pos + 1; i <= pos + PREFETCH_AHEAD && i < items.size(); i++) {
             FeedItem it = items.get(i);
-            it.preloadPriority = LavhaPreloadPlan.priorityFor(i, pos) == LavhaPreloadPlan.NORMAL
+            it.preloadPriority = SvipePreloadPlan.priorityFor(i, pos) == SvipePreloadPlan.NORMAL
                     ? FileLoader.PRIORITY_NORMAL : FileLoader.PRIORITY_LOW;
-            it.preloadBypassGate = LavhaPreloadPlan.bypassesGate(i, pos);
+            it.preloadBypassGate = SvipePreloadPlan.bypassesGate(i, pos);
             if (it.mo == null) {
                 resolveItem(it, null); // resolveItem head-preloads itself on completion
             } else {
@@ -483,7 +483,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         }
         for (int i = 0; i < items.size(); i++) {
             FeedItem it = items.get(i);
-            if (LavhaPreloadPlan.shouldCancelPreload(i, pos, PREFETCH_AHEAD, it.preloadStarted)) {
+            if (SvipePreloadPlan.shouldCancelPreload(i, pos, PREFETCH_AHEAD, it.preloadStarted)) {
                 it.preloadStarted = false;
                 stopLoadingFor(it);
             }
@@ -607,7 +607,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                         holder.showLoading(false);
                         holder.textureView.setAlpha(1f);
                         holder.hideCover();
-                        FileLog.d("lavha: first frame pos=" + pos + " in " + (System.currentTimeMillis() - playRequestMs) + "ms prepared=" + prepared);
+                        FileLog.d("svipe: first frame pos=" + pos + " in " + (System.currentTimeMillis() - playRequestMs) + "ms prepared=" + prepared);
                         // The screen is busy with a playing video — perfect moment to warm the next one.
                         if (currentPosition == pos && nextPlayerPos != pos + 1) {
                             prepareNextPlayer(pos + 1);
@@ -639,7 +639,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     /** Build the next reel's player ahead of time: prepared, paused, buffering at LOW priority. */
     private void prepareNextPlayer(int pos) {
         releaseNextPlayer();
-        if (!LavhaPreloadPlan.shouldPrepareNextPlayer(SharedConfig.deviceIsHigh(), pos, items.size())) return;
+        if (!SvipePreloadPlan.shouldPrepareNextPlayer(SharedConfig.deviceIsHigh(), pos, items.size())) return;
         FeedItem item = items.get(pos);
         if (item.mo == null) {
             resolveItem(item, () -> {
@@ -677,7 +677,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             p.setPlayWhenReady(false);
             nextPlayer = p;
             nextPlayerPos = pos;
-            FileLog.d("lavha: prepared next player pos=" + pos);
+            FileLog.d("svipe: prepared next player pos=" + pos);
         } catch (Exception e) {
             FileLog.e(e);
         }
@@ -926,10 +926,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     /** POST with one silent re-auth retry on 401: watch signals must survive token expiry. */
     private void postEvents(JSONObject batch, boolean retried) {
         if (token == null) return;
-        LavhaApi.post("/v1/events", batch, token, (r, c, e) -> {
+        SvipeApi.post("/v1/events", batch, token, (r, c, e) -> {
             if (c == 401 && !retried) {
-                LavhaAuth.invalidateAccessToken(account);
-                LavhaAuth.ensureToken(account, t -> {
+                SvipeAuth.invalidateAccessToken(account);
+                SvipeAuth.ensureToken(account, t -> {
                     if (t != null) {
                         token = t;
                         postEvents(batch, true);
@@ -991,7 +991,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     public void didReceivedNotification(int id, int notificationAccount, Object... args) {
         if (id == NotificationCenter.didUpdateConnectionState) {
             int state = ConnectionsManager.getInstance(account).getConnectionState();
-            if (LavhaFeedRetry.shouldRetry(state, feedLoadFailed, loadingFeed)) {
+            if (SvipeFeedRetry.shouldRetry(state, feedLoadFailed, loadingFeed)) {
                 if (items.isEmpty()) {
                     loadFeed();
                 } else {

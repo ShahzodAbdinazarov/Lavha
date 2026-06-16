@@ -47,7 +47,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
-import org.telegram.lavha.LavhaUnreadRecountThrottle;
+import org.telegram.svipe.SvipeUnreadRecountThrottle;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -357,7 +357,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     // another device never decrement it), so re-derive it from the database when
     // the tabs come back to the foreground. resetAllUnreadCounters posts
     // updateInterfaces, which funnels back into checkUnreadCount.
-    private final LavhaUnreadRecountThrottle unreadRecountThrottle = new LavhaUnreadRecountThrottle(30_000);
+    private final SvipeUnreadRecountThrottle unreadRecountThrottle = new SvipeUnreadRecountThrottle(30_000);
 
     private void requestFullUnreadRecount() {
         if (!unreadRecountThrottle.shouldRun(SystemClock.elapsedRealtime())) {

@@ -1,4 +1,4 @@
-package org.telegram.lavha;
+package org.telegram.svipe;
 
 import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
@@ -11,10 +11,10 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 
 /**
- * Tiny JSON HTTP client for the Lavha backend. All requests run on a background queue;
+ * Tiny JSON HTTP client for the Svipe backend. All requests run on a background queue;
  * callbacks are delivered on the UI thread.
  */
-public class LavhaApi {
+public class SvipeApi {
 
     public interface JsonCallback {
         void run(JSONObject result, int httpCode, String error);
@@ -32,7 +32,7 @@ public class LavhaApi {
         Utilities.globalQueue.postRunnable(() -> {
             HttpURLConnection conn = null;
             try {
-                URL url = new URL(LavhaConfig.BASE_URL + path);
+                URL url = new URL(SvipeConfig.baseUrl() + path);
                 conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod(method);
                 conn.setConnectTimeout(15000);

@@ -4,7 +4,7 @@
     xmlns:aapt="http://schemas.android.com/aapt">
     <aapt:attr name="android:drawable">
         <vector
-            android:name="lavha_splash"
+            android:name="svipe_splash"
             android:width="320dp"
             android:height="320dp"
             android:viewportWidth="44184.96"

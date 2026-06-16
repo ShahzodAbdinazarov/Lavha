@@ -1,4 +1,4 @@
-package org.telegram.lavha;
+package org.telegram.svipe;
 
 /**
  * The in-memory unread counters in MessagesStorage drift: incoming forum-topic
@@ -8,13 +8,13 @@ package org.telegram.lavha;
  * The fork's tab badge heals itself by requesting a full recount on resume;
  * this throttle keeps those requests from hammering the storage queue.
  */
-public class LavhaUnreadRecountThrottle {
+public class SvipeUnreadRecountThrottle {
 
     private final long intervalMs;
     private boolean ranOnce;
     private long lastRunMs;
 
-    public LavhaUnreadRecountThrottle(long intervalMs) {
+    public SvipeUnreadRecountThrottle(long intervalMs) {
         this.intervalMs = intervalMs;
     }
 
