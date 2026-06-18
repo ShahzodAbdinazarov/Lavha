@@ -263,4 +263,8 @@
     <string name="RemindTodayAt">\'Отправить сегодня в\' HH:mm</string>
     <string name="RemindDayAt">\'Отправить\' d MMM \'в\' HH:mm</string>
     <string name="RemindDayYearAt">\'Напомнить\' d MMM yyyy \'в\' HH:mm</string>
+    <!-- Svipe intro page 1 -->
+    <string name="SvipeIntroTitle">Svipe</string>
+    <string name="SvipeIntroMessage">Самые интересные короткие видео из Telegram-каналов в одной ленте.</string>
+    <string name="SvipeIntroStart">Начать свайпинг</string>
 </resources>

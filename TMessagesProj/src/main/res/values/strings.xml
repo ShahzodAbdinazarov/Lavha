@@ -10817,4 +10817,8 @@
     <string name="AIEditorStyleSharedToManyChats_other">Sent AI Style link to **%1$d chats**.</string>
 
     <string name="GuestBotFor"> for </string>
+    <!-- Svipe intro page 1 -->
+    <string name="SvipeIntroTitle">Svipe</string>
+    <string name="SvipeIntroMessage">The most engaging short videos from Telegram channels, all in one feed.</string>
+    <string name="SvipeIntroStart">Start Sviping</string>
 </resources>

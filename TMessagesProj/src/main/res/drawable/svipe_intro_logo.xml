@@ -15,9 +15,8 @@
                 android:name="fit"
                 android:pivotX="22092.48"
                 android:pivotY="22092.48"
-                android:scaleX="0.62"
-                android:scaleY="0.62"
-                android:translateY="0">
+                android:scaleX="0.95"
+                android:scaleY="0.95">
                 <group
                     android:name="pop"
                     android:pivotX="22092.48"
@@ -125,14 +124,12 @@
                     android:propertyName="scaleX"
                     android:valueFrom="0.8"
                     android:valueTo="1.0"
-                    android:startOffset="200"
                     android:duration="550"
                     android:interpolator="@android:anim/overshoot_interpolator"/>
                 <objectAnimator
                     android:propertyName="scaleY"
                     android:valueFrom="0.8"
                     android:valueTo="1.0"
-                    android:startOffset="200"
                     android:duration="550"
                     android:interpolator="@android:anim/overshoot_interpolator"/>
             </set>
@@ -144,7 +141,7 @@
                 android:propertyName="fillAlpha"
                 android:valueFrom="0"
                 android:valueTo="1"
-                android:startOffset="200"
+                android:startOffset="80"
                 android:duration="180"
                 android:valueType="floatType"/>
         </aapt:attr>
@@ -155,7 +152,7 @@
                 android:propertyName="fillAlpha"
                 android:valueFrom="0"
                 android:valueTo="1"
-                android:startOffset="280"
+                android:startOffset="180"
                 android:duration="180"
                 android:valueType="floatType"/>
         </aapt:attr>
@@ -166,7 +163,7 @@
                 android:propertyName="fillAlpha"
                 android:valueFrom="0"
                 android:valueTo="1"
-                android:startOffset="360"
+                android:startOffset="280"
                 android:duration="180"
                 android:valueType="floatType"/>
         </aapt:attr>
@@ -178,27 +175,17 @@
                     android:propertyName="scaleX"
                     android:valueFrom="0"
                     android:valueTo="1.0"
-                    android:startOffset="240"
+                    android:startOffset="150"
                     android:duration="480"
                     android:interpolator="@android:anim/overshoot_interpolator"/>
                 <objectAnimator
                     android:propertyName="scaleY"
                     android:valueFrom="0"
                     android:valueTo="1.0"
-                    android:startOffset="240"
+                    android:startOffset="150"
                     android:duration="480"
                     android:interpolator="@android:anim/overshoot_interpolator"/>
             </set>
-        </aapt:attr>
-    </target>
-    <target android:name="fit">
-        <aapt:attr name="android:animation">
-            <objectAnimator
-                android:propertyName="translateY"
-                android:valueFrom="20000"
-                android:valueTo="0"
-                android:duration="200"
-                android:interpolator="@android:anim/decelerate_interpolator"/>
         </aapt:attr>
     </target>
 </animated-vector>
