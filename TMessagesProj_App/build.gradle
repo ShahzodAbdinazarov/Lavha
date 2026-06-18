@@ -50,10 +50,11 @@ android {
         }
 
         release {
-            storeFile file("../TMessagesProj/config/release.keystore")
-            storePassword RELEASE_STORE_PASSWORD
-            keyAlias RELEASE_KEY_ALIAS
-            keyPassword RELEASE_KEY_PASSWORD
+            // Svipe private upload key (git-ignored; passwords live in ~/.gradle/gradle.properties)
+            storeFile file("../TMessagesProj/config/svipe-upload.keystore")
+            storePassword project.findProperty('SVIPE_UPLOAD_STORE_PASSWORD') ?: ''
+            keyAlias project.findProperty('SVIPE_UPLOAD_KEY_ALIAS') ?: 'svipe-upload'
+            keyPassword project.findProperty('SVIPE_UPLOAD_KEY_PASSWORD') ?: ''
         }
     }
 
@@ -159,7 +160,13 @@ android {
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
             outputFileName = "app.apk"
-            output.versionCodeOverride = defaultConfig.versionCode * 10 + variant.productFlavors.get(0).abiVersionCode
+            // Play App Bundle (bundleAfat): keep a clean versionCode (Play handles ABI splits).
+            // Direct-download APKs keep the *10+abi marker so per-ABI APKs stay distinct/ordered.
+            if (variant.productFlavors.get(0).name == "bundleAfat") {
+                output.versionCodeOverride = defaultConfig.versionCode
+            } else {
+                output.versionCodeOverride = defaultConfig.versionCode * 10 + variant.productFlavors.get(0).abiVersionCode
+            }
         }
     }
 
