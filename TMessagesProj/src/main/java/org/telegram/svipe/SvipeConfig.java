@@ -27,4 +27,8 @@ public class SvipeConfig {
     public static final String PREF_TOKEN = "svipe_access_token";
     public static final String PREF_REFRESH = "svipe_refresh_token";
     public static final String PREF_EXPIRES = "svipe_token_expires";
+
+    /** Persisted offline ready-queue (JSON blob) and the watched-reel ledger (JSON array). */
+    public static final String PREF_REEL_QUEUE = "svipe_reel_queue";
+    public static final String PREF_REEL_WATCHED = "svipe_reel_watched";
 }

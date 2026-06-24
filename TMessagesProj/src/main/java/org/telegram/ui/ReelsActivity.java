@@ -6,6 +6,7 @@ import android.content.Context;
 import android.graphics.SurfaceTexture;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.util.Base64;
 import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -31,6 +32,9 @@ import org.telegram.svipe.SvipeApi;
 import org.telegram.svipe.SvipeAuth;
 import org.telegram.svipe.SvipeFeedRetry;
 import org.telegram.svipe.SvipePreloadPlan;
+import org.telegram.svipe.SvipeQueuePlan;
+import org.telegram.svipe.SvipeReelQueue;
+import org.telegram.svipe.SvipeWatchedSet;
 import org.telegram.svipe.SvipeWatchEvent;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ChatObject;
@@ -46,7 +50,9 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.tgnet.SerializedData;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -60,7 +66,10 @@ import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.ShareAlert;
 import org.telegram.ui.Components.VideoPlayer;
 
+import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 
 /**
  * Svipe "Reels" — vertical short-video feed over the Svipe backend with a native TikTok-style
@@ -104,6 +113,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private int nextPlayerPos = -1;
     private long playRequestMs; // for the "svipe: first frame" timing log
 
+    // Persistent offline ready-queue: play instantly from disk on open, refill in the background.
+    private SvipeReelQueue reelQueue;
+    private SvipeWatchedSet watchedSet;
+    private boolean coldStartDone; // the instant (queue) path has run; feed loads now MERGE, not clear
+    private final HashMap<String, FeedItem> fileNameToItem = new HashMap<>(); // full-download completion lookup
+    private final HashSet<Long> fullDownloadStarted = new HashSet<>();        // docIds with a cacheType-0 load in flight
+
     private static class FeedItem {
         long channelId;
         int messageId;
@@ -118,6 +134,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         boolean preloadStarted;                          // a head-preload was requested
         int preloadPriority = FileLoader.PRIORITY_LOW;   // set by prefetchAround before resolve
         boolean preloadBypassGate;                       // next-in-line skips the data-saving gate
+        boolean fromQueue;                               // restored from the persisted offline queue
+        boolean fullDownloadStarted;                     // a full (cacheType 0) download was requested
     }
 
     public ReelsActivity(Bundle args) {
@@ -196,8 +214,112 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         root.addView(statusView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
 
         fragmentView = root;
-        loadFeed();
+        reelQueue = new SvipeReelQueue(account);
+        watchedSet = new SvipeWatchedSet(account);
+        restoreQueueThenPlay();
         return fragmentView;
+    }
+
+    /**
+     * Instant cold-start: rebuild playable reels from the persisted queue (no auth, no /v1/feed, no
+     * MTProto) and start playing position 0 immediately. Deserialization + file-existence checks run
+     * off the UI thread; the adapter is touched only on the UI thread. The fresh feed is then loaded
+     * in the BACKGROUND and merged below the instant queue.
+     */
+    private void restoreQueueThenPlay() {
+        restoreQueueThenPlay(0);
+    }
+
+    private static final int RESTORE_MAX_ATTEMPTS = 4; // retry the early-cold-start FileLoader race
+
+    private void restoreQueueThenPlay(int attempt) {
+        // Idempotent: if a prior attempt (or the other createView pass) already populated the pager,
+        // don't touch it again.
+        if (coldStartDone && !items.isEmpty()) return;
+        Utilities.globalQueue.postRunnable(() -> {
+            final ArrayList<FeedItem> rebuilt = new ArrayList<>();
+            int total = 0, skipWatched = 0, skipDeser = 0, skipNoFile = 0, downloadedUnwatched = 0;
+            for (SvipeReelQueue.Entry e : reelQueue.list()) {
+                total++;
+                if (watchedSet.isWatched(e.channelId, e.messageId)) { skipWatched++; continue; } // never re-show watched
+                if (e.downloaded) downloadedUnwatched++;
+                MessageObject mo = deserializeMessage(e.messageB64);
+                if (mo == null || mo.getDocument() == null) { skipDeser++; continue; }
+                // validate-on-load: drop entries whose cached file was evicted (keepMedia auto-delete).
+                // Same flags (useFileDatabaseQueue=false) the player uses in VideoUri.of below, so a
+                // "present" item is exactly one the player can actually play from disk offline.
+                File f = FileLoader.getInstance(account).getPathToAttach(mo.getDocument(), null, false, false);
+                if (f == null || !f.exists()) { skipNoFile++; continue; }
+                FeedItem it = new FeedItem();
+                it.channelId = e.channelId;
+                it.messageId = e.messageId;
+                it.username = e.username;
+                it.topicId = e.topicId;
+                it.recId = e.recId;
+                it.mo = mo;
+                it.fromQueue = true;
+                it.liked = isLiked(mo);
+                it.likeCount = totalReactions(mo);
+                rebuilt.add(it);
+            }
+            final int fTotal = total, fSkipWatched = skipWatched, fSkipDeser = skipDeser, fSkipNoFile = skipNoFile;
+            final int fDownloadedUnwatched = downloadedUnwatched;
+            AndroidUtilities.runOnUIThread(() -> {
+                if (coldStartDone && !items.isEmpty()) return; // another pass already won
+                FileLog.d("svipe: cold start attempt=" + attempt + " queue total=" + fTotal + " restored=" + rebuilt.size()
+                        + " skip(watched=" + fSkipWatched + ",deser=" + fSkipDeser + ",noFile=" + fSkipNoFile + ")");
+                if (!rebuilt.isEmpty()) {
+                    coldStartDone = true;
+                    items.clear();
+                    items.addAll(rebuilt);
+                    setStatus(null);
+                    adapter.notifyDataSetChanged();
+                    currentPosition = -1;
+                    AndroidUtilities.runOnUIThread(this::checkCurrentPage, 0); // plays pos 0, no network gate
+                    kickBackgroundFeed(); // refresh/extend the feed in the background
+                } else if (fDownloadedUnwatched > 0 && attempt + 1 < RESTORE_MAX_ATTEMPTS) {
+                    // We HAVE downloaded reels but their files weren't resolvable yet (FileLoader not
+                    // warmed this early in process start). Retry shortly before falling back online.
+                    AndroidUtilities.runOnUIThread(() -> restoreQueueThenPlay(attempt + 1), 200);
+                } else {
+                    coldStartDone = true;
+                    setStatus("Yuklanmoqda…"); // genuinely empty queue -> online fallback shows the spinner
+                    kickBackgroundFeed();
+                }
+            });
+        });
+    }
+
+    /** Background feed load that MERGES into the playing queue instead of replacing it. */
+    private void kickBackgroundFeed() {
+        feedExhausted = false;
+        requestFeed(false, false);
+    }
+
+    private MessageObject deserializeMessage(String b64) {
+        if (b64 == null || b64.isEmpty()) return null;
+        try {
+            byte[] bytes = Base64.decode(b64, Base64.NO_WRAP);
+            SerializedData data = new SerializedData(bytes);
+            int constructor = data.readInt32(false);
+            TLRPC.Message m = TLRPC.Message.TLdeserialize(data, constructor, false);
+            if (m == null) return null;
+            return new MessageObject(account, m, false, false);
+        } catch (Exception e) {
+            FileLog.e(e);
+            return null;
+        }
+    }
+
+    private String serializeMessage(TLRPC.Message m) {
+        try {
+            SerializedData data = new SerializedData();
+            m.serializeToStream(data);
+            return Base64.encodeToString(data.toByteArray(), Base64.NO_WRAP);
+        } catch (Exception e) {
+            FileLog.e(e);
+            return null;
+        }
     }
 
     private void setStatus(String text) {
@@ -225,16 +347,20 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (loadingFeed) return;
         loadingFeed = true;
         feedLoadFailed = false;
-        if (!append) setStatus("Kirilmoqda…");
+        // While the instant queue is already playing, a fresh load merges silently below it: no
+        // status spinner, no clear, no player restart. The status path is only for the cold,
+        // empty-queue online fallback.
+        final boolean playing = coldStartDone && !items.isEmpty();
+        if (!append && !playing) setStatus("Kirilmoqda…");
         SvipeAuth.ensureToken(account, t -> {
             if (t == null) {
                 loadingFeed = false;
                 feedLoadFailed = true;
-                if (!append) setStatus("Svipe'ga kirib bo'lmadi. Internet qaytsa o'zi qayta urinadi.");
+                if (!append && !playing) setStatus("Svipe'ga kirib bo'lmadi. Internet qaytsa o'zi qayta urinadi.");
                 return;
             }
             token = t;
-            if (!append) setStatus("Lenta yuklanmoqda…");
+            if (!append && !playing) setStatus("Lenta yuklanmoqda…");
             SvipeApi.get("/v1/feed", token, (res, code, err) -> {
                 loadingFeed = false;
                 if (code == 401 && !retried) {
@@ -245,7 +371,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 }
                 if (res == null || !res.has("items")) {
                     feedLoadFailed = true;
-                    if (!append) {
+                    if (!append && !playing) {
                         setStatus(code == 0
                                 ? "Internet yo'q. Ulanish qaytishi bilan lenta yuklanadi…"
                                 : "Lenta yuklanmadi (" + code + ")");
@@ -254,7 +380,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 }
                 String recId = res.isNull("recommendation_id") ? null : res.optString("recommendation_id", null);
                 recommendationId = recId;
-                if (!append) {
+                // additive = append page OR a background merge into the already-playing queue.
+                // Re-evaluated HERE (not at request start): a cold-start restore may have populated
+                // items after this request began, so a fresh feed must merge, never clear them.
+                final boolean additive = append || (coldStartDone && !items.isEmpty());
+                if (!additive) {
                     items.clear();
                 }
                 int before = items.size();
@@ -266,24 +396,28 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                         if (o == null) continue;
                         String username = o.isNull("username") ? null : o.optString("username", null);
                         if (username == null || username.isEmpty()) continue;
+                        long channelId = o.optLong("channel_id");
+                        int messageId = o.optInt("message_id");
+                        // Never re-add what's already in the pager or already watched.
+                        if (additive && containsItem(channelId, messageId)) continue;
+                        if (watchedSet != null && watchedSet.isWatched(channelId, messageId)) continue;
                         FeedItem it = new FeedItem();
-                        it.channelId = o.optLong("channel_id");
-                        it.messageId = o.optInt("message_id");
+                        it.channelId = channelId;
+                        it.messageId = messageId;
                         it.username = username;
                         it.topicId = o.isNull("topic_id") ? null : o.optInt("topic_id");
                         it.recId = recId;
-                        // The backend repeats old items when the catalog is exhausted — never
-                        // append a duplicate the pager already holds.
-                        if (append && containsItem(it.channelId, it.messageId)) continue;
                         items.add(it);
                         added++;
                     }
                 }
-                if (append) {
+                if (additive) {
                     if (added == 0) {
                         feedExhausted = true; // stop asking until the next fresh load
                     } else {
                         adapter.notifyItemRangeInserted(before, added);
+                        // A merge can newly satisfy the download-ahead target — top it up.
+                        if (playing && currentPosition >= 0) ensureFullDownloadsAhead(currentPosition);
                     }
                 } else {
                     setStatus(items.isEmpty() ? "Hozircha video yo'q" : null);
@@ -343,14 +477,22 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         watchedAccumMs = 0;
         if (item.mo == null) return; // never resolved -> never actually shown
         long durationMs = (long) (item.mo.getDuration() * 1000);
+        String classification = SvipeWatchEvent.classify(watched, durationMs);
         try {
             JSONObject payload = new JSONObject();
             payload.put("watched_ms", watched);
             if (durationMs > 0) payload.put("video_duration_ms", durationMs);
             payload.put("dwell_ms", dwell);
             payload.put("feed_position", pos);
-            sendEvent(SvipeWatchEvent.classify(watched, durationMs), item, payload);
+            sendEvent(classification, item, payload);
         } catch (Exception ignore) {}
+        // Once watched, the reel must never re-enter the offline queue or replay on a cold start.
+        if (watchedSet != null && SvipeQueuePlan.countsAsWatched(classification, watched, SvipeQueuePlan.MIN_WATCHED_MS)) {
+            watchedSet.markWatched(item.channelId, item.messageId);
+            if (reelQueue != null && reelQueue.removeByMessageId(item.channelId, item.messageId) != null) {
+                reelQueue.persist();
+            }
+        }
     }
 
     private void playPosition(int pos) {
@@ -375,9 +517,14 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             impression.put("feed_position", pos);
             sendEvent("IMPRESSION", item, impression);
         } catch (Exception ignore) {}
-        if (item.mo != null && item.chat != null) {
+        if (item.mo != null) {
+            // Queue-restored items have mo but no chat — play offline NOW, fill chat for the rail later.
             startPlayback(item.mo, item.mo.getDocument(), pos, item);
             updateActions(pos);
+            if (item.chat == null) {
+                final int fpos = pos;
+                resolveItem(item, () -> updateActions(fpos)); // background enrich for the action rail
+            }
         } else {
             final int fpos = pos;
             resolveItem(item, () -> {
@@ -388,6 +535,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             });
         }
         prefetchAround(pos);
+        ensureFullDownloadsAhead(pos);
     }
 
     private ReelsHolder holderAt(int pos) {
@@ -401,8 +549,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
      * prefetch (no play). Idempotent: skips if already resolved or a resolve is in flight.
      */
     private void resolveItem(final FeedItem item, final Runnable onResolved) {
-        if (item.mo != null) { if (onResolved != null) onResolved.run(); return; }
+        if (item.mo != null && item.chat != null) { if (onResolved != null) onResolved.run(); return; }
         if (item.resolving) return;
+        // Queue-restored item: we already hold a playable MessageObject, only the chat is missing
+        // (needed for the action rail). Fill it with one resolveUsername round-trip — skip getMessages.
+        if (item.mo != null && item.chat == null) { resolveChatOnly(item, onResolved); return; }
         item.resolving = true;
         TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
         req.username = item.username.toLowerCase();
@@ -464,13 +615,40 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         });
     }
 
+    /** Fill only the missing {@code chat} on a queue-restored item (one resolveUsername round-trip). */
+    private void resolveChatOnly(final FeedItem item, final Runnable onResolved) {
+        if (item.resolving) return;
+        item.resolving = true;
+        TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
+        req.username = item.username.toLowerCase();
+        ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
+            AndroidUtilities.runOnUIThread(() -> {
+                item.resolving = false;
+                if (error == null && response instanceof TLRPC.TL_contacts_resolvedPeer) {
+                    TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
+                    MessagesController.getInstance(account).putUsers(rp.users, false);
+                    MessagesController.getInstance(account).putChats(rp.chats, false);
+                    if (rp.chats != null) {
+                        for (int i = 0; i < rp.chats.size(); i++) {
+                            if (rp.chats.get(i).id == item.channelId) { item.chat = rp.chats.get(i); break; }
+                        }
+                        if (item.chat == null && !rp.chats.isEmpty()) item.chat = rp.chats.get(0);
+                    }
+                }
+                if (onResolved != null) onResolved.run();
+            });
+        });
+    }
+
     /**
-     * Read-ahead per {@link SvipePreloadPlan}: resolve + head-preload the ahead window (next item
-     * at NORMAL priority bypassing the gate, the rest at LOW), and cancel any started preload
-     * that fell out of the window. Behind reels are never touched — their bytes stay in cache.
+     * Read-ahead per {@link SvipePreloadPlan}: resolve + head-preload the ahead window (the rest at
+     * LOW), and cancel any started preload that fell out of the window. The immediate next reel
+     * (pos+1) is skipped here — {@link #ensureFullDownloadsAhead(int)} owns it with a FULL download.
+     * Behind reels are never touched — their bytes stay in cache.
      */
     private void prefetchAround(int pos) {
         for (int i = pos + 1; i <= pos + PREFETCH_AHEAD && i < items.size(); i++) {
+            if (i == pos + 1) continue; // full download supersedes head-preload for the next reel
             FeedItem it = items.get(i);
             it.preloadPriority = SvipePreloadPlan.priorityFor(i, pos) == SvipePreloadPlan.NORMAL
                     ? FileLoader.PRIORITY_NORMAL : FileLoader.PRIORITY_LOW;
@@ -488,6 +666,95 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 stopLoadingFor(it);
             }
         }
+    }
+
+    /** Is this item's full video file already present on disk (not just head-preloaded)? */
+    private boolean fileFullyPresent(FeedItem it) {
+        if (it == null || it.mo == null) return false;
+        TLRPC.Document doc = it.mo.getDocument();
+        if (doc == null) return false;
+        File f = FileLoader.getInstance(account).getPathToAttach(doc, null, false, false);
+        return f != null && f.exists();
+    }
+
+    /** Count fully-downloaded, unwatched reels currently ahead of {@code pos} in the pager. */
+    private int countDownloadedUnwatchedAhead(int pos) {
+        int n = 0;
+        for (int i = pos + 1; i < items.size(); i++) {
+            FeedItem it = items.get(i);
+            if (it.mo == null) continue;
+            if (watchedSet != null && watchedSet.isWatched(it.channelId, it.messageId)) continue;
+            if (fileFullyPresent(it)) n++;
+        }
+        return n;
+    }
+
+    /**
+     * Keep at least {@link SvipeQueuePlan#TARGET_AHEAD} fully-downloaded, unwatched reels ready ahead,
+     * bounded by the count cap and disk budget. Starts FULL downloads (cacheType 0) on the nearest
+     * not-yet-present items and persists each into the offline queue so it survives an app restart.
+     */
+    private void ensureFullDownloadsAhead(int pos) {
+        if (reelQueue == null) return;
+        int have = countDownloadedUnwatchedAhead(pos);
+        for (int i = pos + 1; i < items.size() && SvipeQueuePlan.needsMoreDownloads(have); i++) {
+            FeedItem it = items.get(i);
+            if (watchedSet != null && watchedSet.isWatched(it.channelId, it.messageId)) continue;
+            if (it.mo == null) {
+                resolveItem(it, () -> ensureFullDownloadsAhead(currentPosition)); // retry once resolved
+                continue;
+            }
+            TLRPC.Document doc = it.mo.getDocument();
+            if (doc == null) continue;
+            if (fileFullyPresent(it)) {
+                enqueueResolved(it, true); // already on disk — make sure it's persisted
+                have++;
+                continue;
+            }
+            // Respect the disk budget; stop starting new downloads once we'd blow past it.
+            if (!SvipeQueuePlan.withinByteBudget(reelQueue.totalBytes(), doc.size, SvipeQueuePlan.MAX_QUEUE_BYTES)
+                    || reelQueue.size() >= SvipeQueuePlan.MAX_ENTRIES) {
+                break;
+            }
+            if (!fullDownloadStarted.contains(doc.id)) {
+                fullDownloadStarted.add(doc.id);
+                it.fullDownloadStarted = true;
+                fileNameToItem.put(FileLoader.getAttachFileName(doc), it);
+                enqueueResolved(it, false); // persist now (downloaded=false) so an in-flight load survives backgrounding
+                try {
+                    // FULL download (cacheType 0), bypassing the data-saving gate per product choice.
+                    FileLoader.getInstance(account).loadFile(doc, it.mo, FileLoader.PRIORITY_LOW, 0);
+                } catch (Exception e) { FileLog.e(e); }
+            }
+        }
+    }
+
+    /** Migrate an in-memory resolved item into the persisted offline queue (no extra MTProto). */
+    private void enqueueResolved(FeedItem it, boolean downloaded) {
+        if (reelQueue == null || it == null || it.mo == null || it.mo.messageOwner == null) return;
+        if (watchedSet != null && watchedSet.isWatched(it.channelId, it.messageId)) return;
+        if (reelQueue.contains(it.channelId, it.messageId)) {
+            if (downloaded) {
+                reelQueue.markDownloaded(it.channelId, it.messageId);
+                reelQueue.persist();
+            }
+            return;
+        }
+        String b64 = serializeMessage(it.mo.messageOwner);
+        if (b64 == null) return;
+        SvipeReelQueue.Entry e = new SvipeReelQueue.Entry();
+        e.channelId = it.channelId;
+        e.messageId = it.messageId;
+        e.username = it.username;
+        e.topicId = it.topicId;
+        e.recId = it.recId;
+        TLRPC.Document doc = it.mo.getDocument();
+        e.documentId = doc != null ? doc.id : 0;
+        e.sizeBytes = doc != null ? doc.size : 0;
+        e.downloaded = downloaded;
+        e.messageB64 = b64;
+        reelQueue.enqueue(e);
+        reelQueue.persist();
     }
 
     /**
@@ -624,6 +891,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 // change during prepare and NPEs on a null delegate.
                 int reference = FileLoader.getInstance(account).getFileReference(mo);
                 VideoPlayer.VideoUri vu = VideoPlayer.VideoUri.of(account, doc, null, reference, false);
+                FileLog.d("svipe: play pos=" + pos + " source=" + (vu.isCached() ? "LOCAL-cache" : "network")
+                        + " fromQueue=" + item.fromQueue);
                 player.preparePlayer(vu.uri, "other");
             }
             player.setPlayWhenReady(true);
@@ -968,19 +1237,28 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     @Override
     public boolean onFragmentCreate() {
         NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.didUpdateConnectionState);
+        NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.fileLoaded);
+        NotificationCenter.getInstance(account).addObserver(this, NotificationCenter.fileLoadFailed);
         return super.onFragmentCreate();
     }
 
     @Override
     public void onFragmentDestroy() {
         NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.didUpdateConnectionState);
+        NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.fileLoaded);
+        NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.fileLoadFailed);
         flushWatchEvent(currentPosition);
+        if (reelQueue != null) reelQueue.persist();
         releaseCurrentPlayer();
         releaseNextPlayer();
-        // Don't leave the current reel's full-file download running after the screen is gone.
+        // Cancel only the CURRENT reel's stream (its high-priority pull is wasteful once the screen
+        // is gone). The LOW-priority background full-downloads for the ahead window are deliberately
+        // left running so they finish and persist; any that complete are picked up on next cold start
+        // by the file-exists validate-on-load check.
         if (currentPosition >= 0 && currentPosition < items.size()) {
             FeedItem cur = items.get(currentPosition);
-            if (cur.mo != null && cur.mo.getDocument() != null) {
+            if (cur.mo != null && cur.mo.getDocument() != null
+                    && !fullDownloadStarted.contains(cur.mo.getDocument().id)) {
                 try { FileLoader.getInstance(account).cancelLoadFile(cur.mo.getDocument()); } catch (Exception ignore) {}
             }
         }
@@ -997,6 +1275,19 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 } else {
                     loadMore(); // an append failed offline — finish it without resetting the pager
                 }
+            }
+        } else if (id == NotificationCenter.fileLoaded) {
+            String fileName = args.length > 0 && args[0] instanceof String ? (String) args[0] : null;
+            FeedItem it = fileName != null ? fileNameToItem.remove(fileName) : null;
+            if (it != null) {
+                enqueueResolved(it, true); // serialize + mark downloaded + persist
+                if (currentPosition >= 0) ensureFullDownloadsAhead(currentPosition); // a slot filled — top up
+            }
+        } else if (id == NotificationCenter.fileLoadFailed) {
+            String fileName = args.length > 0 && args[0] instanceof String ? (String) args[0] : null;
+            FeedItem it = fileName != null ? fileNameToItem.remove(fileName) : null;
+            if (it != null && it.mo != null && it.mo.getDocument() != null) {
+                fullDownloadStarted.remove(it.mo.getDocument().id); // allow a future retry
             }
         }
     }
