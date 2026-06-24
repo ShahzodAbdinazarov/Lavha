@@ -7024,6 +7024,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             showUpdateActivity(UserConfig.selectedAccount, SharedConfig.pendingAppUpdate, true);
         }
         checkAppUpdate(false, null);
+        // Svipe direct-download builds (.beta/.web) self-update over HTTPS from svipe.uz (Telegram's
+        // own MTProto update check above no-ops for our builds; this is the only updater that runs).
+        org.telegram.svipe.SvipeUpdater.maybeCheck(this);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             ApplicationLoader.canDrawOverlays = Settings.canDrawOverlays(this);

@@ -6,6 +6,9 @@ obj/
 local.properties
 apikeys.properties
 
+# Handoff / internal docs (must not reach git or APK)
+/docs/handoff/
+
 # Build / run artifacts
 *.log
 apk_log.txt
@@ -22,3 +25,6 @@ TMessagesProj_App/afat/
 TMessagesProj_AppHockeyApp/afat/
 TMessagesProj_AppStandalone/afat/
 TMessagesProj_AppHuawei/afat/
+
+# Play upload signing key (NEVER commit; back up safely)
+svipe-upload.keystore

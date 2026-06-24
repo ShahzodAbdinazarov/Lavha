@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="AppName">Telegram</string>
-    <string name="AppNameBeta">Telegram Beta</string>
+    <string name="AppName">Svipe</string>
+    <string name="AppNameBeta">Svipe Dev</string>
     <string name="LanguageName">English</string>
     <string name="English">English</string>
     <string name="LanguageNameInEnglish">English</string>
@@ -10444,6 +10444,7 @@
     <string name="MainTabsCalls">Calls</string>
     <string name="MainTabsChats">Chats</string>
     <string name="MainTabsProfile">Profile</string>
+    <string name="MainTabsReels">Reels</string>
     <string name="MainTabsSettings">Settings</string>
     <string name="SwitchThemeToDay">Day Mode</string>
     <string name="SwitchThemeToNight">Night Mode</string>
@@ -10816,4 +10817,8 @@
     <string name="AIEditorStyleSharedToManyChats_other">Sent AI Style link to **%1$d chats**.</string>
 
     <string name="GuestBotFor"> for </string>
+    <!-- Svipe intro page 1 -->
+    <string name="SvipeIntroTitle">Svipe</string>
+    <string name="SvipeIntroMessage">The most engaging short videos from Telegram channels, all in one feed.</string>
+    <string name="SvipeIntroStart">Start Sviping</string>
 </resources>

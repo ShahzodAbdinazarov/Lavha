@@ -28,6 +28,7 @@ import android.graphics.PorterDuffColorFilter;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.SurfaceTexture;
 import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Animatable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.opengl.GLES20;
@@ -44,7 +45,10 @@ import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
+import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -93,6 +97,8 @@ import javax.microedition.khronos.opengles.GL10;
 
 public class IntroActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
     private final static int ICON_WIDTH_DP = 200, ICON_HEIGHT_DP = 150;
+    // measured: splash logo 291px vs intro logo 310px -> start at this scale to match the splash size
+    private final static float SVIPE_SPLASH_SCALE = 0.94f;
 
     private final Object pagerHeaderTag = new Object(),
             pagerMessageTag = new Object();
@@ -106,13 +112,14 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
     private TextView startMessagingButton;
     private FrameLayout frameLayout2;
     private FrameLayout frameContainerView;
+    private TextureView textureView;
+    private ImageView svipeLogoView;
 
     private RLottieDrawable darkThemeDrawable;
 
     private int lastPage = 0;
     private boolean justCreated = false;
     private boolean startPressed = false;
-    private Drawable logoDrawable;
     private CharSequence[] titles;
     private String[] messages;
     private int currentViewPagerPage;
@@ -141,7 +148,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
                 LocaleController.getString(R.string.Page6Title)
         };
         messages = new String[]{
-                LocaleController.getString(R.string.Page1Message),
+                LocaleController.getString(R.string.SvipeIntroMessage),
                 LocaleController.getString(R.string.Page2Message),
                 LocaleController.getString(R.string.Page3Message),
                 LocaleController.getString(R.string.Page5Message),
@@ -153,11 +160,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
 
     @Override
     public View createView(Context context) {
-        logoDrawable = context.getResources().getDrawable(R.drawable.telegram_logo).mutate();
-        logoDrawable.setBounds(0, dp(8.666f), dp(115), dp(35));
-        SpannableStringBuilder ssb = new SpannableStringBuilder(LocaleController.getString(R.string.Page1Title));
-        ssb.setSpan(new ImageSpan(logoDrawable), 0, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        titles[0] = ssb;
+        titles[0] = LocaleController.getString(R.string.SvipeIntroTitle);
 
 
         actionBar.setAddToContainer(false);
@@ -247,8 +250,17 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
         frameLayout2 = new FrameLayout(context);
         frameContainerView.addView(frameLayout2, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP, 0, 78, 0, 0));
 
-        TextureView textureView = new TextureView(context);
-        frameLayout2.addView(textureView, LayoutHelper.createFrame(ICON_WIDTH_DP, ICON_HEIGHT_DP, Gravity.CENTER));
+        textureView = new TextureView(context);
+        frameLayout2.addView(textureView, LayoutHelper.createFrame(ICON_WIDTH_DP, ICON_HEIGHT_DP, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        textureView.setAlpha(0f); // page 0 shows the Svipe logo instead of the GL animation
+
+        // Bigger Svipe logo for page 0; let it extend up into the empty area above without being clipped
+        frameLayout2.setClipChildren(false);
+        frameContainerView.setClipChildren(false);
+        svipeLogoView = new ImageView(context);
+        svipeLogoView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        svipeLogoView.setImageResource(R.drawable.svipe_intro_logo); // animated vector built from Logo.svg
+        frameLayout2.addView(svipeLogoView, LayoutHelper.createFrame(200, 200, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, -40, 0, 0));
         textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override
             public void onSurfaceTextureAvailable(@NonNull SurfaceTexture surface, int width, int height) {
@@ -302,6 +314,15 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
             public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels) {
                 bottomPages.setPageOffset(position, positionOffset);
 
+                // Crossfade between the Svipe logo (page 0) and the GL animation (pages 1+)
+                if (position == 0) {
+                    if (svipeLogoView != null) svipeLogoView.setAlpha(1f - positionOffset);
+                    if (textureView != null) textureView.setAlpha(positionOffset);
+                } else {
+                    if (svipeLogoView != null) svipeLogoView.setAlpha(0f);
+                    if (textureView != null) textureView.setAlpha(1f);
+                }
+
                 float width = viewPager.getMeasuredWidth();
                 if (width == 0) {
                     return;
@@ -313,6 +334,9 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
             @Override
             public void onPageSelected(int i) {
                 currentViewPagerPage = i;
+                if (i == 0) {
+                    playSvipeLogoIntro();
+                }
             }
 
             @Override
@@ -372,7 +396,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
             }
         };
         ScaleStateListAnimator.apply(startMessagingButton, .02f, 1.2f);
-        startMessagingButton.setText(LocaleController.getString(R.string.StartMessaging));
+        startMessagingButton.setText(LocaleController.getString(R.string.SvipeIntroStart));
         startMessagingButton.setGravity(Gravity.CENTER);
         startMessagingButton.setTypeface(AndroidUtilities.bold());
         startMessagingButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
@@ -451,6 +475,7 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
                 lastPage = 0;
             }
             justCreated = false;
+            AndroidUtilities.runOnUIThread(this::playSvipeLogoIntro, 80);
         }
         if (!AndroidUtilities.isTablet()) {
             Activity activity = getParentActivity();
@@ -484,6 +509,30 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.suggestedLangpack);
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.configLoaded);
         MessagesController.getGlobalMainSettings().edit().putLong("intro_crashed_time", 0).apply();
+    }
+
+    // Page 0: Svipe logo swipes up + plays its own assemble animation. Chrome stays visible (reliable).
+    private void playSvipeLogoIntro() {
+        if (svipeLogoView == null) {
+            return;
+        }
+        svipeLogoView.setImageResource(R.drawable.svipe_intro_logo);
+        svipeLogoView.animate().cancel();
+        svipeLogoView.setTranslationY(dp(90));
+        svipeLogoView.setScaleX(0.85f);
+        svipeLogoView.setScaleY(0.85f);
+        svipeLogoView.animate()
+                .translationY(0)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(560)
+                .setInterpolator(new OvershootInterpolator(1.1f))
+                .start();
+        Drawable d = svipeLogoView.getDrawable();
+        if (d instanceof Animatable) {
+            ((Animatable) d).stop();
+            ((Animatable) d).start();
+        }
     }
 
     private void checkContinueText() {
@@ -973,7 +1022,6 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
 
     private void updateColors(boolean fromTheme) {
         startMessagingButtonBackground.setColors(new int[]{getThemedColor(Theme.key_featuredStickers_addButton), getThemedColor(Theme.key_featuredStickers_addButton2)});
-        logoDrawable.setColorFilter(Theme.multAlpha(getThemedColor(Theme.key_actionBarDefaultTitle), 0.9f), PorterDuff.Mode.MULTIPLY);
         fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
         switchLanguageTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
         startMessagingButton.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText));

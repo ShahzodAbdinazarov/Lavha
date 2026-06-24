@@ -2754,7 +2754,11 @@ public class MessagesStorage extends BaseController {
             }
             cursor.dispose();
 */
-            cursor = database.queryFinalized("SELECT did, folder_id, unread_count, unread_count_i FROM dialogs WHERE unread_count > 0 OR flags > 0 UNION ALL " +
+            // flags bit 1 = unread_mark (manually marked unread), bit 64 = view_forum_as_messages
+            // (a display preference, NOT an unread signal). The original "flags > 0" wrongly pulled
+            // in view-as-messages chats with zero unread, inflating the badge by 1. Gate on bit 1
+            // only so a forum viewed as messages never counts as unread.
+            cursor = database.queryFinalized("SELECT did, folder_id, unread_count, unread_count_i FROM dialogs WHERE unread_count > 0 OR (flags & 1) > 0 UNION ALL " +
                     "SELECT did, folder_id, unread_count, unread_count_i FROM dialogs WHERE unread_count_i > 0");
             while (cursor.next()) {
                 int folderId = cursor.intValue(1);
@@ -2776,9 +2780,6 @@ public class MessagesStorage extends BaseController {
                 if (mentions > 0) {
                     dialogsWithMentions.put(did, mentions);
                 }
-                /*if (BuildVars.DEBUG_VERSION) {
-                    FileLog.d("unread chat " + did + " counters = " + unread + " and " + mentions);
-                }*/
                 dialogsByFolders.put(did, folderId);
                 if (DialogObject.isEncryptedDialog(did)) {
                     int encryptedChatId = DialogObject.getEncryptedChatId(did);
@@ -2869,6 +2870,12 @@ public class MessagesStorage extends BaseController {
                     if (chat.migrated_to instanceof TLRPC.TL_inputChannel || ChatObject.isNotInChat(chat)) {
                         dialogsWithUnread.remove(-chat.id);
                         dialogsWithMentions.remove(-chat.id);
+                        continue;
+                    }
+                    if (dialogsByFolders.indexOfKey(-chat.id) < 0) {
+                        // getChatsInternal also returns linked monoforum chats that were never
+                        // selected by the unread cursor; counting them adds a phantom unread
+                        // chat to folder 0 (no dialogsByFolders entry -> idx1 defaults to 0).
                         continue;
                     }
                     boolean muted = getMessagesController().isDialogMuted(-chat.id, 0, chat);
@@ -6153,6 +6160,11 @@ public class MessagesStorage extends BaseController {
             for (int a = 0, N = chats.size(); a < N; a++) {
                 TLRPC.Chat chat = chats.get(a);
                 if (chat.migrated_to instanceof TLRPC.TL_inputChannel || ChatObject.isNotInChat(chat)) {
+                    continue;
+                }
+                if (dialogsByFolders.indexOfKey(-chat.id) < 0) {
+                    // Linked monoforum chats auto-loaded by getChatsInternal — they are not
+                    // part of dialogsToUpdate and must not shift the counters.
                     continue;
                 }
                 boolean muted = getMessagesController().isDialogMuted(-chat.id, 0, chat);

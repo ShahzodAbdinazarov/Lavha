@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="AppName">Telegram</string>
-    <string name="AppNameBeta">Telegram Beta</string>
+    <string name="AppName">Svipe</string>
+    <string name="AppNameBeta">Svipe Dev</string>
     <string name="LanguageName">Русский</string>
     <string name="English">Английский</string>
     <string name="LanguageNameInEnglish">Russian</string>
@@ -263,4 +263,8 @@
     <string name="RemindTodayAt">\'Отправить сегодня в\' HH:mm</string>
     <string name="RemindDayAt">\'Отправить\' d MMM \'в\' HH:mm</string>
     <string name="RemindDayYearAt">\'Напомнить\' d MMM yyyy \'в\' HH:mm</string>
+    <!-- Svipe intro page 1 -->
+    <string name="SvipeIntroTitle">Svipe</string>
+    <string name="SvipeIntroMessage">Самые интересные короткие видео из Telegram-каналов в одной ленте.</string>
+    <string name="SvipeIntroStart">Начать свайпинг</string>
 </resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Svipe intro page 1 -->
+    <string name="SvipeIntroTitle">Svipe</string>
+    <string name="SvipeIntroMessage">Telegram kanallaridagi eng qiziqarli qisqa videolar — bitta tasmada.</string>
+    <string name="SvipeIntroStart">Svayp qilishni boshlash</string>
+</resources>
