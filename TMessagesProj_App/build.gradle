@@ -146,7 +146,10 @@ android {
                 manifest.srcFile '../TMessagesProj/config/release/AndroidManifest_SDK23.xml'
             }
             sourceSets.standalone {
-                manifest.srcFile '../TMessagesProj/config/release/AndroidManifest_standalone.xml'
+                // The .web (direct-download) build reuses the release manifest: upstream's
+                // AndroidManifest_standalone.xml references *_launcher_sa icons that don't exist in
+                // the Svipe rebrand, so the .web build simply ships the same Svipe icon as Play.
+                manifest.srcFile '../TMessagesProj/config/release/AndroidManifest_SDK23.xml'
             }
             ext {
                 abiVersionCode = 9
