@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import org.json.JSONArray;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.Utilities;
 
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -70,12 +71,17 @@ public class SvipeWatchedSet {
     }
 
     private void persist() {
-        try {
-            JSONArray arr = new JSONArray();
-            for (String s : ids) arr.put(s);
-            prefs().edit().putString(SvipeConfig.PREF_REEL_WATCHED, arr.toString()).apply();
-        } catch (Exception ex) {
-            FileLog.e(ex);
-        }
+        // Snapshot under the caller's lock (cheap), then serialize + write off the UI thread:
+        // markWatched runs on every swipe, and a ~2000-entry JSON build on the main thread janks paging.
+        final String[] snapshot = ids.toArray(new String[0]);
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                JSONArray arr = new JSONArray();
+                for (String s : snapshot) arr.put(s);
+                prefs().edit().putString(SvipeConfig.PREF_REEL_WATCHED, arr.toString()).apply();
+            } catch (Exception ex) {
+                FileLog.e(ex);
+            }
+        });
     }
 }

@@ -17,7 +17,6 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.NotificationCenter;
-import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.AlertDialog;
 
 import java.io.File;
@@ -94,14 +93,24 @@ public class SvipeUpdater {
         bannerRef = banner == null ? null : new WeakReference<>(banner);
     }
 
+    /** Availability/ready/downloading transitions: broadcast (drives the tabs banner) + refresh it. */
     private static void notifyState() {
         AndroidUtilities.runOnUIThread(() -> {
             try {
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.appUpdateAvailable);
             } catch (Exception ignore) {}
-            SvipeUpdateLayout b = bannerRef != null ? bannerRef.get() : null;
-            if (b != null) b.refresh();
+            refreshBanner();
         });
+    }
+
+    /** Per-percent progress: refresh ONLY the banner — no global broadcast (avoids ~100 app-wide relayouts). */
+    private static void refreshBannerOnly() {
+        AndroidUtilities.runOnUIThread(SvipeUpdater::refreshBanner);
+    }
+
+    private static void refreshBanner() {
+        SvipeUpdateLayout b = bannerRef != null ? bannerRef.get() : null;
+        if (b != null) b.refresh();
     }
 
     private static boolean hasBanner() {
@@ -147,10 +156,12 @@ public class SvipeUpdater {
             int newVc = res.optInt("version_code", 0);
             if (newVc <= currentVc) return;
             String url = res.optString("url", null);
-            if (TextUtils.isEmpty(url)) return;
+            String sha = res.optString("sha256", "");
+            // Fail closed: a side-loaded APK is only offered when we have both a URL and a checksum to verify it.
+            if (TextUtils.isEmpty(url) || TextUtils.isEmpty(sha)) return;
             pending = new Pending(
                     res.optString("version_name", ""), newVc, res.optLong("size", 0),
-                    res.optString("sha256", ""), url, res.optString("changelog", ""),
+                    sha, url, res.optString("changelog", ""),
                     res.optBoolean("can_not_skip", false));
             notifyState(); // surface the drawer banner
             promptUpdate(activity);
@@ -188,12 +199,18 @@ public class SvipeUpdater {
             modalProgress.show();
         }
 
-        Utilities.globalQueue.postRunnable(() -> {
+        // Don't capture the Activity in the long-running download (would leak it); resolve it weakly
+        // at completion and skip UI if it's gone. The file path uses the app context, not the Activity.
+        final WeakReference<Activity> actRef = new WeakReference<>(activity);
+        new Thread(() -> {
             File out = null;
             String error = null;
             HttpURLConnection conn = null;
             try {
-                File dir = new File(activity.getExternalFilesDir(null), "updates");
+                Context appCtx = ApplicationLoader.applicationContext;
+                File base = appCtx.getExternalFilesDir(null);
+                if (base == null) base = appCtx.getFilesDir(); // external storage unavailable -> internal
+                File dir = new File(base, "updates");
                 if (!dir.exists()) dir.mkdirs();
                 out = new File(dir, "svipe-" + u.versionCode + ".apk");
                 if (out.exists()) out.delete();
@@ -206,7 +223,7 @@ public class SvipeUpdater {
                 if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
 
                 long total = conn.getContentLength(); // int is fine: APKs are < 2 GB (getContentLengthLong is API 24+)
-                MessageDigest md = TextUtils.isEmpty(u.sha256) ? null : MessageDigest.getInstance("SHA-256");
+                MessageDigest md = MessageDigest.getInstance("SHA-256"); // pending always carries a sha (fail-closed)
                 try (InputStream is = conn.getInputStream(); FileOutputStream fos = new FileOutputStream(out)) {
                     byte[] buf = new byte[1 << 16];
                     long done = 0;
@@ -215,27 +232,26 @@ public class SvipeUpdater {
                     while ((n = is.read(buf)) != -1) {
                         if (cancelRequested) throw new InterruptedException("cancelled");
                         fos.write(buf, 0, n);
-                        if (md != null) md.update(buf, 0, n);
+                        md.update(buf, 0, n);
                         done += n;
                         if (total > 0) {
                             int pct = (int) (done * 100 / total);
                             if (pct != lastPct) {
                                 lastPct = pct;
                                 progress = pct / 100f;
-                                final long fdone = done;
                                 AndroidUtilities.runOnUIThread(() -> {
                                     if (modalProgress != null) {
                                         modalProgress.setProgress(pct);
                                         modalProgress.setMessage("Yuklab olinmoqda… " + pct + "%");
                                     }
                                 });
-                                notifyState();
+                                refreshBannerOnly(); // banner only — no global broadcast per percent
                             }
                         }
                     }
                     fos.flush();
                 }
-                if (md != null && !toHex(md.digest()).equalsIgnoreCase(u.sha256)) {
+                if (!toHex(md.digest()).equalsIgnoreCase(u.sha256)) {
                     throw new Exception("checksum mismatch");
                 }
             } catch (InterruptedException cancelled) {
@@ -258,10 +274,19 @@ public class SvipeUpdater {
                 downloading = false;
                 progress = 0f;
                 dismissModal();
+                if (apk != null) {
+                    readyFile = apk;
+                    prefs().edit()
+                            .putString(KEY_PENDING_PATH, apk.getAbsolutePath())
+                            .putInt(KEY_PENDING_VC, u.versionCode)
+                            .apply();
+                }
+                notifyState(); // ready/failed transition -> banner + listeners
+                Activity act = actRef.get();
+                if (act == null || act.isFinishing()) return; // gone: pending-install resumes on next launch
                 if (apk == null) {
-                    notifyState();
                     if (!cancelled) {
-                        new AlertDialog.Builder(activity)
+                        new AlertDialog.Builder(act)
                                 .setTitle("Yuklab olishda xatolik")
                                 .setMessage("Yangilanishni yuklab bo'lmadi" + (ferr != null ? " (" + ferr + ")" : "") + ". Keyinroq qayta urinib ko'ring yoki saytdan qo'lda yuklab oling.")
                                 .setPositiveButton("OK", null)
@@ -269,15 +294,9 @@ public class SvipeUpdater {
                     }
                     return;
                 }
-                readyFile = apk;
-                prefs().edit()
-                        .putString(KEY_PENDING_PATH, apk.getAbsolutePath())
-                        .putInt(KEY_PENDING_VC, u.versionCode)
-                        .apply();
-                notifyState(); // banner now shows "tap to install"
-                installApk(activity, apk);
+                installApk(act, apk);
             });
-        });
+        }, "svipe-apk-download").start();
     }
 
     public static void cancelDownload() {

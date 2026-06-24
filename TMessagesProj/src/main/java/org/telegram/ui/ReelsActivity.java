@@ -1280,6 +1280,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             String fileName = args.length > 0 && args[0] instanceof String ? (String) args[0] : null;
             FeedItem it = fileName != null ? fileNameToItem.remove(fileName) : null;
             if (it != null) {
+                if (it.mo != null && it.mo.getDocument() != null) {
+                    fullDownloadStarted.remove(it.mo.getDocument().id); // completed — allow re-download if later evicted
+                }
                 enqueueResolved(it, true); // serialize + mark downloaded + persist
                 if (currentPosition >= 0) ensureFullDownloadsAhead(currentPosition); // a slot filled — top up
             }

@@ -38,12 +38,40 @@ public class SvipeAuth {
         return null;
     }
 
+    // Single-flight: concurrent callers for the same account share ONE auth flow instead of each
+    // firing its own /refresh (+ bot /start), which would race and clobber the stored tokens.
+    private static final java.util.HashMap<Integer, java.util.ArrayList<TokenCallback>> inFlight = new java.util.HashMap<>();
+
     public static void ensureToken(int account, TokenCallback cb) {
         String stored = getStoredToken(account);
         if (stored != null) {
             cb.run(stored);
             return;
         }
+        synchronized (inFlight) {
+            java.util.ArrayList<TokenCallback> waiters = inFlight.get(account);
+            if (waiters != null) { // an auth flow is already running for this account — just wait for it
+                waiters.add(cb);
+                return;
+            }
+            waiters = new java.util.ArrayList<>();
+            waiters.add(cb);
+            inFlight.put(account, waiters);
+        }
+        authChain(account, token -> {
+            java.util.ArrayList<TokenCallback> waiters;
+            synchronized (inFlight) {
+                waiters = inFlight.remove(account);
+            }
+            if (waiters != null) {
+                for (TokenCallback w : waiters) {
+                    try { w.run(token); } catch (Exception ignore) {}
+                }
+            }
+        });
+    }
+
+    private static void authChain(int account, TokenCallback cb) {
         refreshToken(account, refreshed -> {
             if (refreshed != null) {
                 cb.run(refreshed);
@@ -190,7 +218,12 @@ public class SvipeAuth {
     private static void storeTokens(int account, JSONObject res) {
         SharedPreferences.Editor e = MessagesController.getMainSettings(account).edit();
         e.putString(SvipeConfig.PREF_TOKEN, res.optString("access_token"));
-        e.putString(SvipeConfig.PREF_REFRESH, res.optString("refresh_token"));
+        // Only overwrite the refresh token when the response actually carries a new one — a refresh
+        // response that omits it must NOT wipe the stored token (that would force a re-login).
+        String refresh = res.optString("refresh_token", "");
+        if (!refresh.isEmpty()) {
+            e.putString(SvipeConfig.PREF_REFRESH, refresh);
+        }
         e.putLong(SvipeConfig.PREF_EXPIRES, System.currentTimeMillis() + res.optInt("expires_in", 3600) * 1000L);
         e.apply();
     }

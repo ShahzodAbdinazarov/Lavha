@@ -106,7 +106,9 @@ public class SvipeReelQueue {
     /** Drop entries from the FRONT (oldest) until within both the count cap and the byte budget. */
     public static void trim(List<Entry> list, int maxEntries, long maxBytes) {
         int over = SvipeQueuePlan.overflowCount(list.size(), maxEntries);
-        for (int i = 0; i < over && !list.isEmpty(); i++) list.remove(0);
+        // Keep at least one entry (same invariant the byte-budget loop below enforces) so playback
+        // always has something — never let a small/zero cap empty the whole queue.
+        for (int i = 0; i < over && list.size() > 1; i++) list.remove(0);
         long total = 0;
         for (Entry e : list) total += e.sizeBytes;
         while (list.size() > 1 && total > maxBytes) {
