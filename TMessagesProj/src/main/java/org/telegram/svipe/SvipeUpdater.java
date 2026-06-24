@@ -112,25 +112,11 @@ public class SvipeUpdater {
         long size = res.optLong("size", 0);
         String sha256 = res.optString("sha256", "");
 
-        StringBuilder msg = new StringBuilder();
-        msg.append("Svipe'ning yangi versiyasi tayyor");
-        if (!TextUtils.isEmpty(version)) msg.append(" (v").append(version).append(")");
-        msg.append(".");
-        if (size > 0) msg.append("\nHajmi: ").append(humanSize(size));
-        if (!TextUtils.isEmpty(changelog)) msg.append("\n\n").append(changelog);
-
-        AlertDialog.Builder b = new AlertDialog.Builder(activity);
-        b.setTitle("Yangilanish mavjud");
-        b.setMessage(msg.toString());
-        b.setPositiveButton("Yangilash", (d, w) -> startDownload(activity, url, newVc, sha256));
-        if (!force) {
-            b.setNegativeButton("Keyinroq", null);
-        }
-        AlertDialog dialog = b.create();
-        dialog.setCancelable(!force);
-        dialog.setCanceledOnTouchOutside(!force);
-        dialog.setOnDismissListener(d -> promptOpen = false);
-        dialog.show();
+        // Native-style bottom sheet (mirrors Telegram's UpdateAppAlertDialog), driven by our HTTP data.
+        SvipeUpdateSheet sheet = new SvipeUpdateSheet(activity, version, size, changelog, force,
+                () -> startDownload(activity, url, newVc, sha256));
+        sheet.setOnDismissListener(d -> promptOpen = false);
+        sheet.show();
     }
 
     private static void startDownload(Activity activity, String url, int newVc, String sha256) {
