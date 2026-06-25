@@ -56,6 +56,7 @@ import org.telegram.tgnet.SerializedData;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.ActionBar.BackDrawable;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
@@ -278,6 +279,19 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         watchedSet = new SvipeWatchedSet(account);
         if (!playSeedIfPresent()) {
             restoreQueueThenPlay();
+        }
+        // When opened from the Search Explore grid (seeded), this is a presented fragment — show a
+        // back button at the top-left to return to Search (the reels tab itself has none).
+        if (getArguments() != null && getArguments().getLongArray("seed_channels") != null) {
+            ImageView backButton = new ImageView(context);
+            BackDrawable backDrawable = new BackDrawable(false);
+            backDrawable.setColor(0xFFFFFFFF);
+            backButton.setImageDrawable(backDrawable);
+            backButton.setScaleType(ImageView.ScaleType.CENTER);
+            backButton.setOnClickListener(v -> finishFragment());
+            FrameLayout.LayoutParams backLp = LayoutHelper.createFrame(48, 48, Gravity.TOP | Gravity.LEFT, 6, 0, 0, 0);
+            backLp.topMargin = AndroidUtilities.statusBarHeight + AndroidUtilities.dp(6);
+            root.addView(backButton, backLp);
         }
         return fragmentView;
     }
