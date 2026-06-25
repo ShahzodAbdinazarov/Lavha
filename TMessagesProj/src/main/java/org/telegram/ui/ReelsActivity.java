@@ -1,11 +1,15 @@
 package org.telegram.ui;
 
+import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.SurfaceTexture;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.util.TypedValue;
 import android.util.Base64;
 import android.view.GestureDetector;
 import android.view.Gravity;
@@ -43,6 +47,7 @@ import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.FileStreamLoadOperation;
 import org.telegram.messenger.ImageLocation;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
@@ -61,10 +66,12 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.BulletinFactory;
+import org.telegram.ui.Components.ChatActivityEnterView;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.Reactions.ReactionsLayoutInBubble;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.ShareAlert;
+import org.telegram.ui.Components.SizeNotifierFrameLayout;
 import org.telegram.ui.Components.VideoPlayer;
 
 import java.io.File;
@@ -84,11 +91,26 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private static final int PREFETCH_AHEAD = 5; // resolve + warm bytes for the next N reels
     private static final int LOAD_MORE_AHEAD = 4; // ask for the next page this close to the end
 
-    private FrameLayout root;
+    private SizeNotifierFrameLayout root;
     private RecyclerListView listView;
     private LinearLayoutManager layoutManager;
     private ReelsAdapter adapter;
     private TextView statusView;
+
+    // ---- Search-seeded reels: persistent native discussion-comment input at the bottom ----
+    // Only present when opened from the Search Explore grid (ofDiscoverSeed -> seed_channels),
+    // where the floating Telegram bottom tab bar is absent. Posts comments into the current
+    // reel's channel post discussion thread (the same input as the linked discussion chat).
+    private boolean discoverSeed;
+    private ChatActivityEnterView reelEnterView;      // the real Telegram input bar
+    private FrameLayout reelDisabledBar;              // shown when the current post has comments off
+    // Resolved discussion thread root for the CURRENT reel; rebuilt every time the pager moves.
+    private MessageObject commentThreadRoot;
+    private long commentThreadForChannelId;          // which channel/message commentThreadRoot belongs to
+    private int commentThreadForMessageId;
+    private boolean commentThreadResolving;
+    private CharSequence pendingCommentToSend;        // a send issued before the thread resolved
+    private static final int COMMENT_BAR_HEIGHT_DP = 56;
 
     private final ArrayList<FeedItem> items = new ArrayList<>();
     private String recommendationId;
@@ -207,10 +229,23 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     public View createView(Context context) {
         actionBar.setAddToContainer(false);
 
-        // Keep all overlay UI above the floating native bottom tab bar (height 72dp + nav bar).
-        bottomInset = AndroidUtilities.navigationBarHeight + AndroidUtilities.dp(88);
+        // Search-seeded player (opened from the Explore grid via ofDiscoverSeed): no floating tab bar,
+        // so we host a persistent native discussion-comment input at the bottom instead.
+        discoverSeed = getArguments() != null && getArguments().getLongArray("seed_channels") != null;
 
-        root = new FrameLayout(context);
+        // Keep all overlay UI above the floating native bottom tab bar (height 72dp + nav bar).
+        // In the search-seeded player there is no tab bar; the input bar lives there instead, so the
+        // reel overlays only need to clear the input bar height + nav bar.
+        if (discoverSeed) {
+            bottomInset = AndroidUtilities.navigationBarHeight + AndroidUtilities.dp(COMMENT_BAR_HEIGHT_DP + 4);
+        } else {
+            bottomInset = AndroidUtilities.navigationBarHeight + AndroidUtilities.dp(88);
+        }
+
+        // SizeNotifierFrameLayout (drop-in for FrameLayout) so it can host ChatActivityEnterView and
+        // report keyboard height to it. occupyStatusBar=false keeps the existing full-screen layout.
+        root = new SizeNotifierFrameLayout(context);
+        root.setOccupyStatusBar(false);
         root.setBackgroundColor(0xFF000000);
 
         listView = new RecyclerListView(context);
@@ -281,8 +316,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             restoreQueueThenPlay();
         }
         // When opened from the Search Explore grid (seeded), this is a presented fragment — show a
-        // back button at the top-left to return to Search (the reels tab itself has none).
-        if (getArguments() != null && getArguments().getLongArray("seed_channels") != null) {
+        // back button at the top-left to return to Search (the reels tab itself has none), and host
+        // the persistent native discussion-comment input at the bottom.
+        if (discoverSeed) {
             ImageView backButton = new ImageView(context);
             BackDrawable backDrawable = new BackDrawable(false);
             backDrawable.setColor(0xFFFFFFFF);
@@ -292,8 +328,255 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             FrameLayout.LayoutParams backLp = LayoutHelper.createFrame(48, 48, Gravity.TOP | Gravity.LEFT, 6, 0, 0, 0);
             backLp.topMargin = AndroidUtilities.statusBarHeight + AndroidUtilities.dp(6);
             root.addView(backButton, backLp);
+
+            createReelEnterView(context);
         }
         return fragmentView;
+    }
+
+    /**
+     * Build the persistent native message-input bar shown at the bottom of the search-seeded player.
+     * Modeled on PeerStoriesView.createEnterView(): a {@link ChatActivityEnterView} with a null
+     * ChatActivity fragment and the activity root (a SizeNotifierFrameLayout) as its parent. Sends are
+     * routed by us into the current reel's channel-post discussion thread (see sendCommentToThread).
+     */
+    private void createReelEnterView(Context context) {
+        final Activity activity = AndroidUtilities.findActivity(context);
+        if (activity == null) return;
+        final Theme.ResourcesProvider rp = getResourceProvider();
+
+        // Disabled bar (comments off): a non-interactive 56dp dark bar with a block icon + label.
+        // Sits in the same slot as the enter view; only one of the two is visible at a time.
+        reelDisabledBar = new FrameLayout(context);
+        reelDisabledBar.setBackgroundColor(0xFF1C1C1E);
+        reelDisabledBar.setClickable(true);
+        reelDisabledBar.setVisibility(View.GONE);
+        LinearLayout disRow = new LinearLayout(context);
+        disRow.setOrientation(LinearLayout.HORIZONTAL);
+        disRow.setGravity(Gravity.CENTER);
+        ImageView disIcon = new ImageView(context);
+        disIcon.setImageResource(R.drawable.msg_block);
+        disIcon.setColorFilter(new PorterDuffColorFilter(0xFF9E9E9E, PorterDuff.Mode.SRC_IN));
+        disRow.addView(disIcon, LayoutHelper.createLinear(18, 18, Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
+        TextView disText = new TextView(context);
+        disText.setTextColor(0xFFFFFFFF);
+        disText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        disText.setText(LocaleController.getString(R.string.SvipeCommentsDisabled));
+        disRow.addView(disText, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
+        reelDisabledBar.addView(disRow, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
+        FrameLayout.LayoutParams disLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, COMMENT_BAR_HEIGHT_DP, Gravity.BOTTOM);
+        disLp.bottomMargin = AndroidUtilities.navigationBarHeight;
+        root.addView(reelDisabledBar, disLp);
+
+        // The real Telegram input. null ChatActivity fragment, root as the SizeNotifierFrameLayout
+        // parent. We do the actual send ourselves (into the discussion thread) by overriding
+        // sendMessage(); the native processSendingText path (which would send to dialog_id=0) is never
+        // reached.
+        reelEnterView = new ChatActivityEnterView(activity, root, null, true, rp) {
+            @Override
+            public boolean sendMessage() {
+                CharSequence text = getFieldText();
+                if (text == null || text.toString().trim().length() == 0) {
+                    openKeyboard();
+                    return false;
+                }
+                sendCommentToThread(text.toString().trim());
+                setFieldText("");
+                return true;
+            }
+        };
+        reelEnterView.setDelegate(new ChatActivityEnterView.ChatActivityEnterViewDelegate() {
+            @Override
+            public void onMessageSend(CharSequence message, boolean notify, int scheduleDate, int scheduleRepeatPeriod, long payStars) {
+                // The send itself is handled in the overridden sendMessage() above; nothing to do here.
+            }
+
+            @Override
+            public void needSendTyping() {}
+
+            @Override
+            public void onTextChanged(CharSequence text, boolean bigChange, boolean fromDraft) {}
+
+            @Override
+            public void onTextSelectionChanged(int start, int end) {}
+
+            @Override
+            public void onTextSpansChanged(CharSequence text) {}
+
+            @Override
+            public void onAttachButtonHidden() {}
+
+            @Override
+            public void onAttachButtonShow() {}
+
+            @Override
+            public void onWindowSizeChanged(int size) {}
+
+            @Override
+            public void onStickersTab(boolean opened) {}
+
+            @Override
+            public void onMessageEditEnd(boolean loading) {}
+
+            @Override
+            public void didPressAttachButton() {}
+
+            @Override
+            public void needStartRecordVideo(int state, boolean notify, int scheduleDate, int scheduleRepeatPeriod, int ttl, long effectId, long stars) {}
+
+            @Override
+            public void toggleVideoRecordingPause() {}
+
+            @Override
+            public boolean isVideoRecordingPaused() {
+                return false;
+            }
+
+            @Override
+            public void needChangeVideoPreviewState(int state, float seekProgress) {}
+
+            @Override
+            public void onSwitchRecordMode(boolean video) {}
+
+            @Override
+            public void onPreAudioVideoRecord() {}
+
+            @Override
+            public void needStartRecordAudio(int state) {}
+
+            @Override
+            public void needShowMediaBanHint() {}
+
+            @Override
+            public void onStickersExpandedChange() {}
+
+            @Override
+            public void onUpdateSlowModeButton(View button, boolean show, CharSequence time) {}
+
+            @Override
+            public void onSendLongClick() {}
+
+            @Override
+            public void onAudioVideoInterfaceUpdated() {}
+
+            @Override
+            public int getContentViewHeight() {
+                return root.getHeight();
+            }
+        });
+        reelEnterView.setAllowStickersAndGifs(true, true, true);
+        reelEnterView.updateColors();
+        reelEnterView.recordingGuid = classGuid;
+        FrameLayout.LayoutParams enterLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.BOTTOM);
+        enterLp.bottomMargin = AndroidUtilities.navigationBarHeight;
+        root.addView(reelEnterView, enterLp);
+        reelEnterView.onResume();
+    }
+
+    /**
+     * Resolve the CURRENT reel's channel-post discussion thread (TL_messages_getDiscussionMessage)
+     * and cache its root MessageObject for sending. Called when the input is created and whenever the
+     * pager moves to a new reel. Also (re)applies the enabled/disabled state of the bottom bar.
+     */
+    private void refreshCommentTargetForCurrent() {
+        if (!discoverSeed || reelEnterView == null) return;
+        FeedItem item = (currentPosition >= 0 && currentPosition < items.size()) ? items.get(currentPosition) : null;
+        boolean enabled = item != null && item.mo != null && item.mo.isComments();
+        if (reelDisabledBar != null) {
+            reelDisabledBar.setVisibility(enabled ? View.GONE : View.VISIBLE);
+        }
+        reelEnterView.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        if (!enabled) {
+            // closing the keyboard avoids a dangling IME over a hidden input when paging onto a
+            // comments-off reel mid-typing.
+            try { reelEnterView.closeKeyboard(); } catch (Exception ignore) {}
+            commentThreadRoot = null;
+            pendingCommentToSend = null;
+            return;
+        }
+        // Same post already resolved? keep it. Otherwise drop the old root and resolve afresh.
+        if (commentThreadRoot != null
+                && commentThreadForChannelId == item.channelId
+                && commentThreadForMessageId == item.messageId) {
+            return;
+        }
+        commentThreadRoot = null;
+        commentThreadForChannelId = item.channelId;
+        commentThreadForMessageId = item.messageId;
+        resolveCommentThread(item, null);
+    }
+
+    /**
+     * TL_messages_getDiscussionMessage(channelPeer, postMessageId) -> the discussion-group thread root
+     * (last message). On success caches it in commentThreadRoot; if a send is pending, sends it.
+     */
+    private void resolveCommentThread(final FeedItem item, final Runnable onResolved) {
+        if (item == null || item.chat == null) return;
+        if (commentThreadResolving) return;
+        commentThreadResolving = true;
+        final long channelId = item.channelId;
+        final int messageId = item.messageId;
+        final TLRPC.TL_messages_getDiscussionMessage req = new TLRPC.TL_messages_getDiscussionMessage();
+        req.peer = MessagesController.getInstance(account).getInputPeer(-item.chat.id);
+        req.msg_id = messageId;
+        ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+            commentThreadResolving = false;
+            // The pager may have moved on while resolving — discard this result and resolve the new
+            // current target instead (its earlier resolveCommentThread call was dropped because one
+            // was already in flight).
+            if (channelId != commentThreadForChannelId || messageId != commentThreadForMessageId) {
+                refreshCommentTargetForCurrent();
+                return;
+            }
+            if (error != null || !(response instanceof TLRPC.TL_messages_discussionMessage)) {
+                pendingCommentToSend = null;
+                return;
+            }
+            TLRPC.TL_messages_discussionMessage res = (TLRPC.TL_messages_discussionMessage) response;
+            MessagesController.getInstance(account).putUsers(res.users, false);
+            MessagesController.getInstance(account).putChats(res.chats, false);
+            MessageObject root = null;
+            for (int a = res.messages.size() - 1; a >= 0; a--) {
+                TLRPC.Message m = res.messages.get(a);
+                if (m instanceof TLRPC.TL_messageEmpty) continue;
+                m.isThreadMessage = true;
+                root = new MessageObject(account, m, true, true);
+                break;
+            }
+            if (root == null) {
+                pendingCommentToSend = null;
+                return;
+            }
+            commentThreadRoot = root;
+            if (onResolved != null) onResolved.run();
+            if (pendingCommentToSend != null) {
+                CharSequence pend = pendingCommentToSend;
+                pendingCommentToSend = null;
+                sendCommentToThread(pend.toString());
+            }
+        }));
+    }
+
+    /**
+     * Post a comment into the current reel's discussion thread. If the thread root isn't resolved yet,
+     * stash the text and kick the resolve; it sends as soon as the root arrives.
+     */
+    private void sendCommentToThread(String text) {
+        if (text == null || text.trim().length() == 0) return;
+        if (commentThreadRoot == null) {
+            pendingCommentToSend = text;
+            FeedItem item = (currentPosition >= 0 && currentPosition < items.size()) ? items.get(currentPosition) : null;
+            if (item != null) resolveCommentThread(item, null);
+            return;
+        }
+        final MessageObject root = commentThreadRoot;
+        SendMessagesHelper.SendMessageParams params = SendMessagesHelper.SendMessageParams.of(
+                text, root.getDialogId(), root, root, null, false, null, null, null, true, 0, 0, null, false);
+        try {
+            SendMessagesHelper.getInstance(account).sendMessage(params);
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
     }
 
     /**
@@ -533,6 +816,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             stopLoadingFor(prev);
         }
         playPosition(pos);
+        // Search-seeded player: point the persistent input at the new reel's discussion thread and
+        // apply its comments-enabled/disabled state. (Re-applied when the chat resolves, see updateActions.)
+        refreshCommentTargetForCurrent();
         if (pos >= items.size() - LOAD_MORE_AHEAD) {
             loadMore();
         }
@@ -1262,6 +1548,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 h.setCover(item.mo);
             }
         }
+        // The chat/mo just enriched for the current reel — (re)resolve the comment thread and apply
+        // the enabled/disabled state of the bottom input bar now that we know it.
+        if (pos == currentPosition) {
+            refreshCommentTargetForCurrent();
+        }
     }
 
     private void sendEvent(String type, FeedItem item) {
@@ -1309,6 +1600,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             currentPlayer.play();
             watchStartMs = System.currentTimeMillis();
         }
+        if (reelEnterView != null) reelEnterView.onResume();
+        if (root != null) root.onResume();
     }
 
     @Override
@@ -1316,6 +1609,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         super.onPause();
         if (currentPlayer != null) currentPlayer.pause();
         pauseWatchClock();
+        if (reelEnterView != null) {
+            reelEnterView.onPause();
+            reelEnterView.closeKeyboard();
+        }
+        if (root != null) root.onPause();
     }
 
     /**
@@ -1326,6 +1624,22 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     @Override
     public boolean canParentTabsSlide(MotionEvent ev, boolean forward) {
         return true;
+    }
+
+    @Override
+    public boolean onBackPressed(boolean invoked) {
+        // Close the emoji/sticker popup first, then the keyboard, before leaving the player.
+        if (reelEnterView != null) {
+            if (reelEnterView.isPopupShowing()) {
+                if (invoked) reelEnterView.hidePopup(true, false);
+                return false;
+            }
+            if (reelEnterView.isKeyboardVisible()) {
+                if (invoked) reelEnterView.closeKeyboard();
+                return false;
+            }
+        }
+        return super.onBackPressed(invoked);
     }
 
     @Override
@@ -1343,6 +1657,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         NotificationCenter.getInstance(account).removeObserver(this, NotificationCenter.fileLoadFailed);
         flushWatchEvent(currentPosition);
         if (reelQueue != null) reelQueue.persist();
+        if (reelEnterView != null) {
+            try { reelEnterView.onDestroy(); } catch (Exception ignore) {}
+            reelEnterView = null;
+        }
         releaseCurrentPlayer();
         releaseNextPlayer();
         // Cancel only the CURRENT reel's stream (its high-priority pull is wasteful once the screen
@@ -1640,7 +1958,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             View.OnClickListener like = v -> toggleLike(itemFor(holder), holder);
             likeIcon.setOnClickListener(like);
             likeCount.setOnClickListener(like);
-            View.OnClickListener comment = v -> openCommentsSheet(itemFor(holder));
+            View.OnClickListener comment = v -> {
+                FeedItem it = itemFor(holder);
+                // Comments disabled for this post -> the rail comment button does nothing.
+                if (it == null || it.mo == null || !it.mo.isComments()) return;
+                openCommentsSheet(it);
+            };
             commentIcon.setOnClickListener(comment);
             commentCount.setOnClickListener(comment);
             View.OnClickListener shareClick = v -> share(itemFor(holder));
