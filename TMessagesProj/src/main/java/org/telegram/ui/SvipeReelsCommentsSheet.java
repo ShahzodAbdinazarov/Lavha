@@ -3,7 +3,10 @@ package org.telegram.ui;
 import android.content.Context;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
@@ -91,6 +94,7 @@ public class SvipeReelsCommentsSheet extends BottomSheet {
     private LinearLayout inputBar;
     private EditTextBoldCursor editText;
     private ImageView sendButton;
+    private FrameLayout disabledBar; // covers the input panel with blur + "comments off" text
 
     private final ArrayList<MessageObject> comments = new ArrayList<>();
     private MessageObject threadRoot; // the discussion-group thread root used for sending
@@ -263,6 +267,28 @@ public class SvipeReelsCommentsSheet extends BottomSheet {
         inputBar.addView(sendButton, LayoutHelper.createLinear(40, 40, Gravity.CENTER_VERTICAL, 4, 0, 0, 0));
         content.addView(inputBar, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 56, Gravity.BOTTOM));
 
+        // Disabled bar: when comments are off, the input panel stays in place but is covered with a
+        // frosted/blurred layer (the input itself is blurred on API 31+) and a "comments off" label
+        // sits on top — Instagram-style. Sits exactly over the input bar; eats touches.
+        disabledBar = new FrameLayout(context);
+        disabledBar.setVisibility(View.GONE);
+        disabledBar.setClickable(true);
+        disabledBar.setBackgroundColor(0x66000000); // scrim over the blurred input for legibility
+        LinearLayout disRow = new LinearLayout(context);
+        disRow.setOrientation(LinearLayout.HORIZONTAL);
+        disRow.setGravity(Gravity.CENTER);
+        ImageView disLock = new ImageView(context);
+        disLock.setImageResource(R.drawable.msg_block);
+        disLock.setColorFilter(new PorterDuffColorFilter(COLOR_SUBTEXT, PorterDuff.Mode.SRC_IN));
+        disRow.addView(disLock, LayoutHelper.createLinear(18, 18, Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
+        TextView disText = new TextView(context);
+        disText.setTextColor(COLOR_TEXT);
+        disText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        disText.setText(LocaleController.getString(R.string.SvipeCommentsDisabled));
+        disRow.addView(disText, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
+        disabledBar.addView(disRow, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
+        content.addView(disabledBar, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 56, Gravity.BOTTOM));
+
         editText.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
@@ -280,14 +306,19 @@ public class SvipeReelsCommentsSheet extends BottomSheet {
         if (disabledState) {
             progressView.setVisibility(View.GONE);
             listView.setVisibility(View.GONE);
-            inputBar.setVisibility(View.GONE);
-            stateIcon.setImageResource(R.drawable.msg_block);
-            stateTitle.setText(LocaleController.getString(R.string.SvipeCommentsDisabled));
-            stateSub.setText(LocaleController.getString(R.string.SvipeCommentsDisabledSub));
-            stateView.setVisibility(View.VISIBLE);
+            stateView.setVisibility(View.GONE);
+            // The comment-writing panel stays in place, but is blurred and covered by the
+            // "comments off" bar — like Instagram when comments are turned off.
+            inputBar.setVisibility(View.VISIBLE);
+            setInputEnabled(false);
+            applyInputBlur(true);
+            disabledBar.setVisibility(View.VISIBLE);
             headerCount.setVisibility(View.GONE);
             return;
         }
+        disabledBar.setVisibility(View.GONE);
+        applyInputBlur(false);
+        setInputEnabled(true);
         inputBar.setVisibility(View.VISIBLE);
         headerCount.setVisibility(View.VISIBLE);
         headerCount.setText(commentCount > 0 ? String.valueOf(commentCount) : "");
@@ -307,6 +338,25 @@ public class SvipeReelsCommentsSheet extends BottomSheet {
             stateView.setVisibility(View.GONE);
             listView.setVisibility(View.VISIBLE);
             adapter.notifyDataSetChanged();
+        }
+    }
+
+    private void setInputEnabled(boolean en) {
+        editText.setEnabled(en);
+        editText.setFocusable(en);
+        editText.setFocusableInTouchMode(en);
+        if (!en) {
+            sendButton.setEnabled(false);
+            sendButton.setAlpha(0.4f);
+        }
+    }
+
+    /** Blur the comment-writing panel itself (API 31+) so the disabled bar reads as frosted glass. */
+    private void applyInputBlur(boolean blur) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            inputBar.setRenderEffect(blur
+                ? RenderEffect.createBlurEffect(AndroidUtilities.dp(6), AndroidUtilities.dp(6), Shader.TileMode.CLAMP)
+                : null);
         }
     }
 
