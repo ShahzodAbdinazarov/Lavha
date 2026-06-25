@@ -1158,6 +1158,24 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         try { presentFragment(new ChatActivity(args)); } catch (Exception e) { FileLog.e(e); }
     }
 
+    // Instagram-style comment panel over the reel (the reel keeps playing behind it).
+    private void openCommentsSheet(final FeedItem item) {
+        if (item == null || item.mo == null || getContext() == null) return;
+        try {
+            SvipeReelsCommentsSheet sheet = new SvipeReelsCommentsSheet(getContext(), currentAccount, item.chat, item.messageId, item.mo);
+            sheet.setListener(newCount -> {
+                if (item.mo != null && item.mo.messageOwner != null && item.mo.messageOwner.replies != null) {
+                    item.mo.messageOwner.replies.replies = newCount;
+                }
+                ReelsHolder h = holderAt(currentPosition);
+                if (h != null && itemFor(h) == item) {
+                    h.setCommentCount(item.mo != null ? item.mo.getRepliesCount() : newCount);
+                }
+            });
+            sheet.show();
+        } catch (Exception e) { FileLog.e(e); }
+    }
+
     private void share(FeedItem item) {
         if (item == null || item.mo == null || getParentActivity() == null) return;
         ArrayList<MessageObject> list = new ArrayList<>();
@@ -1513,31 +1531,37 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             rail.setOrientation(LinearLayout.VERTICAL);
             rail.setGravity(Gravity.CENTER_HORIZONTAL);
 
+            // Rail icons use a 48dp touch target (icon kept visually ~28-34dp via padding) so they
+            // are reliably tappable over the play/pause video surface.
             ImageView likeIcon = new ImageView(ctx);
             likeIcon.setImageResource(R.drawable.media_like);
             likeIcon.setColorFilter(0xFFFFFFFF);
-            rail.addView(likeIcon, LayoutHelper.createLinear(34, 34, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 2));
+            likeIcon.setPadding(AndroidUtilities.dp(7), AndroidUtilities.dp(7), AndroidUtilities.dp(7), AndroidUtilities.dp(7));
+            rail.addView(likeIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
             TextView likeCount = railLabel(ctx, "Like");
-            rail.addView(likeCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 18));
+            rail.addView(likeCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
 
             ImageView commentIcon = new ImageView(ctx);
             commentIcon.setImageResource(R.drawable.menu_comments);
             commentIcon.setColorFilter(0xFFFFFFFF);
-            rail.addView(commentIcon, LayoutHelper.createLinear(32, 32, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 2));
+            commentIcon.setPadding(AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8));
+            rail.addView(commentIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
             TextView commentCount = railLabel(ctx, "Izoh");
-            rail.addView(commentCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 18));
+            rail.addView(commentCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
 
             ImageView shareIcon = new ImageView(ctx);
             shareIcon.setImageResource(R.drawable.media_share);
             shareIcon.setColorFilter(0xFFFFFFFF);
-            rail.addView(shareIcon, LayoutHelper.createLinear(32, 32, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 2));
+            shareIcon.setPadding(AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8));
+            rail.addView(shareIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
             TextView shareCount = railLabel(ctx, "Ulashish");
-            rail.addView(shareCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 18));
+            rail.addView(shareCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
 
             ImageView moreIcon = new ImageView(ctx);
             moreIcon.setImageResource(R.drawable.msg_actions);
             moreIcon.setColorFilter(0xFFFFFFFF);
-            rail.addView(moreIcon, LayoutHelper.createLinear(28, 28, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
+            moreIcon.setPadding(AndroidUtilities.dp(10), AndroidUtilities.dp(10), AndroidUtilities.dp(10), AndroidUtilities.dp(10));
+            rail.addView(moreIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
 
             FrameLayout.LayoutParams railLp = LayoutHelper.createFrame(56, LayoutHelper.WRAP_CONTENT, Gravity.RIGHT | Gravity.BOTTOM, 0, 0, 6, 0);
             railLp.bottomMargin = bottomInset + AndroidUtilities.dp(8);
@@ -1616,7 +1640,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             View.OnClickListener like = v -> toggleLike(itemFor(holder), holder);
             likeIcon.setOnClickListener(like);
             likeCount.setOnClickListener(like);
-            View.OnClickListener comment = v -> { FeedItem it = itemFor(holder); if (it != null && it.mo != null && it.mo.getRepliesCount() > 0) openComments(it); };
+            View.OnClickListener comment = v -> openCommentsSheet(itemFor(holder));
             commentIcon.setOnClickListener(comment);
             commentCount.setOnClickListener(comment);
             View.OnClickListener shareClick = v -> share(itemFor(holder));

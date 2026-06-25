@@ -10906,6 +10906,12 @@
     <string name="SvipeIntroMessage">The most engaging short videos from Telegram channels, all in one feed.</string>
     <string name="SvipeIntroStart">Start Sviping</string>
 
+    <!-- Svipe reels comments sheet -->
+    <string name="SvipeComments">Izohlar</string>
+    <string name="SvipeCommentHint">Izoh qo\'shing…</string>
+    <string name="SvipeNoComments">Hozircha izohlar yo\'q. Birinchi bo\'lib yozing!</string>
+    <string name="SvipeCommentsDisabled">Bu post uchun izohlar o\'chirilgan</string>
+
     <string name="WearAuthTitle">Use Telegram with WearOS</string>
     <string name="WearAuthText">Connect your account to WatchOS device\nto use it separately from your watch.</string>
     <string name="WearAuthEmojis">Compare emojis on your watch</string>
