@@ -3303,6 +3303,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
             @Override
             public boolean canCollapseSearch() {
+                if (isSvipeSearchSection()) {
+                    // The Search section stays permanently in search mode (never collapses to a list).
+                    return false;
+                }
                 if (switchItem != null) {
                     switchItem.setVisibility(View.VISIBLE);
                 }
@@ -5255,7 +5259,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             animatedStatusView = new AnimatedStatusView(context, 20, 60);
             contentView.addView(animatedStatusView, LayoutHelper.createFrame(20, 20, Gravity.LEFT | Gravity.TOP));
         }
-        if (fragmentSearchField != null) {
+        // Svipe: the chats tab no longer hosts a search field — search lives in the dedicated Search
+        // section (SvipeSearchActivity). Standalone/picker screens and the Search section keep it.
+        if (fragmentSearchField != null && (!hasMainTabs || isSvipeSearchSection())) {
             contentView.addView(fragmentSearchField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.TOP, 7, -2, 7, 0));
         }
 
@@ -5322,7 +5328,13 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
         searchIsShowed = false;
 
-        if (searchString != null) {
+        if (isSvipeSearchSection()) {
+            // Svipe Search section: open the full search experience immediately and keep it open.
+            // The dialogs list + chats chrome are hidden by search mode; the FAB hides via `searching`.
+            searching = true;
+            showSearch(true, false, false, true);
+            updateFloatingButtonVisibility(false);
+        } else if (searchString != null) {
             showSearch(true, false, false);
             fragmentSearchField.editText.setText(searchString);
             fragmentSearchField.editText.setSelection(searchString.length());
@@ -7321,6 +7333,12 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             fragmentSearchField.editText.setText(query);
             fragmentSearchField.editText.setSelection(query.length());
         }
+    }
+
+    // Svipe: SvipeSearchActivity overrides this to repurpose DialogsActivity as the standalone
+    // Search section (permanent search mode; the chats tab itself no longer carries a search field).
+    protected boolean isSvipeSearchSection() {
+        return false;
     }
 
     private void showSearch(boolean show, boolean startFromDownloads, boolean animated) {
