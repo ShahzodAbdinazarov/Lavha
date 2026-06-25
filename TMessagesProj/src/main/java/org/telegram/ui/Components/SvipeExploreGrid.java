@@ -267,7 +267,7 @@ public class SvipeExploreGrid extends RecyclerListView {
 
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            SquareImageView iv = new SquareImageView(parent.getContext());
+            PortraitImageView iv = new PortraitImageView(parent.getContext());
             iv.setLayoutParams(new RecyclerView.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             return new Holder(iv);
@@ -275,7 +275,7 @@ public class SvipeExploreGrid extends RecyclerListView {
 
         @Override
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
-            SquareImageView iv = (SquareImageView) holder.itemView;
+            PortraitImageView iv = (PortraitImageView) holder.itemView;
             iv.setBackgroundColor(0xFF111111);
             GridItem gi = items.get(position);
             if (gi.mo != null && gi.mo.getDocument() != null) {
@@ -297,16 +297,17 @@ public class SvipeExploreGrid extends RecyclerListView {
         }
     }
 
-    /** Square cell: height tracks the grid-computed width. */
-    private static class SquareImageView extends BackupImageView {
-        SquareImageView(Context context) {
+    /** Portrait cell (Instagram/TikTok reels grid is 9:16): height = width * 16/9. */
+    private static class PortraitImageView extends BackupImageView {
+        PortraitImageView(Context context) {
             super(context);
         }
 
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-            final int size = MeasureSpec.getSize(widthMeasureSpec);
-            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(size, MeasureSpec.EXACTLY));
+            final int width = MeasureSpec.getSize(widthMeasureSpec);
+            final int height = Math.round(width * 16f / 9f);
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
         }
     }
 }
