@@ -159,6 +159,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         boolean preloadBypassGate;                       // next-in-line skips the data-saving gate
         boolean fromQueue;                               // restored from the persisted offline queue
         boolean fullDownloadStarted;                     // a full (cacheType 0) download was requested
+        // Real comment availability, resolved via getDiscussionMessage (the message's isComments()
+        // flag can be stale — true but with no actual discussion -> MSG_ID_INVALID). null=unknown.
+        Boolean commentsAvailable;
     }
 
     public ReelsActivity(Bundle args) {
@@ -481,7 +484,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private void refreshCommentTargetForCurrent() {
         if (!discoverSeed || reelEnterView == null) return;
         FeedItem item = (currentPosition >= 0 && currentPosition < items.size()) ? items.get(currentPosition) : null;
-        boolean enabled = item != null && item.mo != null && item.mo.isComments();
+        // Optimistically show the input when the post claims comments (isComments), but once the
+        // discussion resolve proves there is none (commentsAvailable==FALSE) switch to the disabled bar.
+        boolean enabled = item != null && item.mo != null && item.mo.isComments()
+                && !Boolean.FALSE.equals(item.commentsAvailable);
         if (reelDisabledBar != null) {
             reelDisabledBar.setVisibility(enabled ? View.GONE : View.VISIBLE);
         }
@@ -529,7 +535,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 return;
             }
             if (error != null || !(response instanceof TLRPC.TL_messages_discussionMessage)) {
+                // No real discussion (e.g. MSG_ID_INVALID) -> comments effectively off for this post.
                 pendingCommentToSend = null;
+                if (item != null) item.commentsAvailable = false;
+                refreshCommentTargetForCurrent();
                 return;
             }
             TLRPC.TL_messages_discussionMessage res = (TLRPC.TL_messages_discussionMessage) response;
@@ -545,9 +554,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             }
             if (root == null) {
                 pendingCommentToSend = null;
+                if (item != null) item.commentsAvailable = false;
+                refreshCommentTargetForCurrent();
                 return;
             }
             commentThreadRoot = root;
+            if (item != null) item.commentsAvailable = true;
             if (onResolved != null) onResolved.run();
             if (pendingCommentToSend != null) {
                 CharSequence pend = pendingCommentToSend;
@@ -1960,8 +1972,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             likeCount.setOnClickListener(like);
             View.OnClickListener comment = v -> {
                 FeedItem it = itemFor(holder);
-                // Comments disabled for this post -> the rail comment button does nothing.
-                if (it == null || it.mo == null || !it.mo.isComments()) return;
+                if (it == null || it.mo == null) return;
+                // Comments off (or isComments stale -> no real discussion) => the button does nothing.
+                // In the search-seeded player trust the resolved availability; elsewhere use isComments().
+                boolean canOpen = discoverSeed ? (it.commentsAvailable == Boolean.TRUE) : it.mo.isComments();
+                if (!canOpen) return;
                 openCommentsSheet(it);
             };
             commentIcon.setOnClickListener(comment);
