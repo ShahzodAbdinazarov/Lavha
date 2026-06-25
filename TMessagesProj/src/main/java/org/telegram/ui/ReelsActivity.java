@@ -142,6 +142,66 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         super(args);
     }
 
+    /**
+     * Build a reels player seeded with a discover/explore list, opened at the tapped reel.
+     * The tapped item plays first; the rest of the grid follows (rotated), then the personalized
+     * feed appends below it. Used by the Search section's Explore grid.
+     */
+    public static ReelsActivity ofDiscoverSeed(java.util.List<org.telegram.svipe.SvipeDiscover.Item> all, int start) {
+        Bundle args = new Bundle();
+        final int n = all == null ? 0 : all.size();
+        if (n > 0) {
+            if (start < 0 || start >= n) start = 0;
+            long[] chans = new long[n];
+            int[] msgs = new int[n];
+            String[] users = new String[n];
+            int[] topics = new int[n];
+            for (int i = 0; i < n; i++) {
+                org.telegram.svipe.SvipeDiscover.Item it = all.get((start + i) % n);
+                chans[i] = it.channelId;
+                msgs[i] = it.messageId;
+                users[i] = it.username;
+                topics[i] = it.topicId != null ? it.topicId : -1;
+            }
+            args.putLongArray("seed_channels", chans);
+            args.putIntArray("seed_messages", msgs);
+            args.putStringArray("seed_usernames", users);
+            args.putIntArray("seed_topics", topics);
+        }
+        return new ReelsActivity(args);
+    }
+
+    /** Cold-start variant for the discover seed: populate the pager from args, then merge the feed. */
+    private boolean playSeedIfPresent() {
+        Bundle args = getArguments();
+        if (args == null) return false;
+        long[] chans = args.getLongArray("seed_channels");
+        int[] msgs = args.getIntArray("seed_messages");
+        String[] users = args.getStringArray("seed_usernames");
+        if (chans == null || msgs == null || users == null || chans.length == 0) return false;
+        int[] topics = args.getIntArray("seed_topics");
+        boolean any = false;
+        for (int i = 0; i < chans.length; i++) {
+            if (users[i] == null || users[i].isEmpty()) continue;
+            FeedItem it = new FeedItem();
+            it.channelId = chans[i];
+            it.messageId = msgs[i];
+            it.username = users[i];
+            it.topicId = (topics != null && i < topics.length && topics[i] >= 0) ? topics[i] : null;
+            items.add(it);
+            any = true;
+        }
+        if (!any) return false;
+        // The tapped reels are now the pager head; further feed loads MERGE (never clear) below them.
+        coldStartDone = true;
+        setStatus(null);
+        if (adapter != null) adapter.notifyDataSetChanged();
+        currentPosition = -1;
+        AndroidUtilities.runOnUIThread(this::checkCurrentPage, 0);
+        kickBackgroundFeed();
+        return true;
+    }
+
     @Override
     public View createView(Context context) {
         actionBar.setAddToContainer(false);
@@ -216,7 +276,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         fragmentView = root;
         reelQueue = new SvipeReelQueue(account);
         watchedSet = new SvipeWatchedSet(account);
-        restoreQueueThenPlay();
+        if (!playSeedIfPresent()) {
+            restoreQueueThenPlay();
+        }
         return fragmentView;
     }
 

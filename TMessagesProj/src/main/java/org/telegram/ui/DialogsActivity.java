@@ -3349,6 +3349,14 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 if (searchViewPager != null) {
                     searchViewPager.onTextChanged(text);
                 }
+                if (isSvipeSearchSection() && svipeExploreGrid != null) {
+                    // Empty query -> show the Explore grid; typing -> reveal the search results.
+                    final boolean empty = text.isEmpty();
+                    svipeExploreGrid.setVisibility(empty ? View.VISIBLE : View.GONE);
+                    if (empty) {
+                        svipeOnExploreGridVisible();
+                    }
+                }
             }
 
             @Override
@@ -5334,6 +5342,17 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             searching = true;
             showSearch(true, false, false, true);
             updateFloatingButtonVisibility(false);
+            // Explore grid covers the (recent-search) pager while the query is empty; the search
+            // field stays on top so tapping it to type still works.
+            svipeExploreGrid = svipeCreateExploreGrid(context);
+            if (svipeExploreGrid != null) {
+                contentView.addView(svipeExploreGrid, LayoutHelper.createFrame(
+                        LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+                if (fragmentSearchField != null) {
+                    fragmentSearchField.bringToFront();
+                }
+                svipeOnExploreGridVisible();
+            }
         } else if (searchString != null) {
             showSearch(true, false, false);
             fragmentSearchField.editText.setText(searchString);
@@ -7339,6 +7358,19 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     // Search section (permanent search mode; the chats tab itself no longer carries a search field).
     protected boolean isSvipeSearchSection() {
         return false;
+    }
+
+    // Svipe: the Instagram-style Explore grid shown in the Search section's empty (no-query) state.
+    // It sits on top of the (recent-search) searchViewPager and is toggled by the query text.
+    protected View svipeExploreGrid;
+
+    /** SvipeSearchActivity returns its Explore grid here; DialogsActivity hosts + toggles it. */
+    protected View svipeCreateExploreGrid(Context context) {
+        return null;
+    }
+
+    /** Called when the Explore grid becomes visible (query empty) so the host can lazy-load it. */
+    protected void svipeOnExploreGridVisible() {
     }
 
     private void showSearch(boolean show, boolean startFromDownloads, boolean animated) {
