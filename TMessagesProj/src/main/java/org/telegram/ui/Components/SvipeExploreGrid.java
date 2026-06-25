@@ -297,7 +297,7 @@ public class SvipeExploreGrid extends RecyclerListView {
         }
     }
 
-    /** Portrait cell (Instagram/TikTok reels grid is 9:16): height = width * 16/9. */
+    /** Portrait cell with a 3:2 (height:width) aspect ratio. */
     private static class PortraitImageView extends BackupImageView {
         PortraitImageView(Context context) {
             super(context);
@@ -306,7 +306,7 @@ public class SvipeExploreGrid extends RecyclerListView {
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             final int width = MeasureSpec.getSize(widthMeasureSpec);
-            final int height = Math.round(width * 16f / 9f);
+            final int height = Math.round(width * 3f / 2f);
             super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
         }
     }
