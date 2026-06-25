@@ -84,7 +84,10 @@ public class SvipeReelsCommentsSheet extends BottomSheet {
     private RecyclerListView listView;
     private CommentsAdapter adapter;
     private RadialProgressView progressView;
-    private TextView emptyView;
+    private LinearLayout stateView;
+    private ImageView stateIcon;
+    private TextView stateTitle;
+    private TextView stateSub;
     private LinearLayout inputBar;
     private EditTextBoldCursor editText;
     private ImageView sendButton;
@@ -193,13 +196,31 @@ public class SvipeReelsCommentsSheet extends BottomSheet {
         progressView.setVisibility(View.GONE);
         content.addView(progressView, LayoutHelper.createFrame(48, 48, Gravity.CENTER));
 
-        // empty / disabled state
-        emptyView = new TextView(context);
-        emptyView.setTextColor(COLOR_SUBTEXT);
-        emptyView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        emptyView.setGravity(Gravity.CENTER);
-        emptyView.setVisibility(View.GONE);
-        content.addView(emptyView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER, 36, topPad / AndroidUtilities.density, 36, inputBarHeight / AndroidUtilities.density));
+        // empty / disabled state — Instagram-style: icon + bold title + subtitle, centered.
+        stateView = new LinearLayout(context);
+        stateView.setOrientation(LinearLayout.VERTICAL);
+        stateView.setGravity(Gravity.CENTER);
+        stateView.setVisibility(View.GONE);
+
+        stateIcon = new ImageView(context);
+        stateIcon.setImageResource(R.drawable.menu_comments);
+        stateIcon.setColorFilter(new PorterDuffColorFilter(COLOR_SUBTEXT, PorterDuff.Mode.SRC_IN));
+        stateView.addView(stateIcon, LayoutHelper.createLinear(56, 56, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 14));
+
+        stateTitle = new TextView(context);
+        stateTitle.setTextColor(COLOR_TEXT);
+        stateTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17);
+        stateTitle.setTypeface(AndroidUtilities.bold());
+        stateTitle.setGravity(Gravity.CENTER);
+        stateView.addView(stateTitle, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 6));
+
+        stateSub = new TextView(context);
+        stateSub.setTextColor(COLOR_SUBTEXT);
+        stateSub.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        stateSub.setGravity(Gravity.CENTER);
+        stateView.addView(stateSub, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+
+        content.addView(stateView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER, 36, 63, 36, 56));
 
         // input bar
         inputBar = new LinearLayout(context);
@@ -260,8 +281,10 @@ public class SvipeReelsCommentsSheet extends BottomSheet {
             progressView.setVisibility(View.GONE);
             listView.setVisibility(View.GONE);
             inputBar.setVisibility(View.GONE);
-            emptyView.setText(LocaleController.getString(R.string.SvipeCommentsDisabled));
-            emptyView.setVisibility(View.VISIBLE);
+            stateIcon.setImageResource(R.drawable.msg_block);
+            stateTitle.setText(LocaleController.getString(R.string.SvipeCommentsDisabled));
+            stateSub.setText(LocaleController.getString(R.string.SvipeCommentsDisabledSub));
+            stateView.setVisibility(View.VISIBLE);
             headerCount.setVisibility(View.GONE);
             return;
         }
@@ -271,15 +294,17 @@ public class SvipeReelsCommentsSheet extends BottomSheet {
         if (loading) {
             progressView.setVisibility(View.VISIBLE);
             listView.setVisibility(View.GONE);
-            emptyView.setVisibility(View.GONE);
+            stateView.setVisibility(View.GONE);
         } else if (comments.isEmpty()) {
             progressView.setVisibility(View.GONE);
             listView.setVisibility(View.GONE);
-            emptyView.setText(LocaleController.getString(R.string.SvipeNoComments));
-            emptyView.setVisibility(View.VISIBLE);
+            stateIcon.setImageResource(R.drawable.menu_comments);
+            stateTitle.setText(LocaleController.getString(R.string.SvipeNoComments));
+            stateSub.setText(LocaleController.getString(R.string.SvipeNoCommentsSub));
+            stateView.setVisibility(View.VISIBLE);
         } else {
             progressView.setVisibility(View.GONE);
-            emptyView.setVisibility(View.GONE);
+            stateView.setVisibility(View.GONE);
             listView.setVisibility(View.VISIBLE);
             adapter.notifyDataSetChanged();
         }

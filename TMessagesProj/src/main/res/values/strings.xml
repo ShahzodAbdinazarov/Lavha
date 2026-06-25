@@ -10909,8 +10909,10 @@
     <!-- Svipe reels comments sheet -->
     <string name="SvipeComments">Izohlar</string>
     <string name="SvipeCommentHint">Izoh qo\'shing…</string>
-    <string name="SvipeNoComments">Hozircha izohlar yo\'q. Birinchi bo\'lib yozing!</string>
-    <string name="SvipeCommentsDisabled">Bu post uchun izohlar o\'chirilgan</string>
+    <string name="SvipeNoComments">Hozircha izohlar yo\'q</string>
+    <string name="SvipeNoCommentsSub">Birinchi bo\'lib fikr bildiring</string>
+    <string name="SvipeCommentsDisabled">Izohlar o\'chirilgan</string>
+    <string name="SvipeCommentsDisabledSub">Bu post uchun izohlar yoqilmagan</string>
 
     <string name="WearAuthTitle">Use Telegram with WearOS</string>
     <string name="WearAuthText">Connect your account to WatchOS device\nto use it separately from your watch.</string>
