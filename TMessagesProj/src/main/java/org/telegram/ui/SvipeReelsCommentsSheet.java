@@ -109,7 +109,9 @@ public class SvipeReelsCommentsSheet extends BottomSheet {
         this.channelChat = channelChat;
         this.postMessageId = postMessageId;
         this.postMessage = postMessage;
-        this.enabled = postMessage != null && postMessage.isComments();
+        // isComments() can be false in feed data even when the post has comments; trust a reply
+        // count too. The actual load (getDiscussionMessage) is the final arbiter of disabled.
+        this.enabled = postMessage != null && (postMessage.isComments() || postMessage.getRepliesCount() > 0);
         this.disabledState = !enabled;
         this.commentCount = postMessage != null ? postMessage.getRepliesCount() : 0;
 
@@ -371,63 +373,25 @@ public class SvipeReelsCommentsSheet extends BottomSheet {
         loading = true;
         updateState();
 
-        final TLRPC.TL_messages_getDiscussionMessage req = new TLRPC.TL_messages_getDiscussionMessage();
-        req.peer = MessagesController.getInstance(currentAccount).getInputPeer(-channelChat.id);
+        // Read the post's comment thread DIRECTLY off the channel post. getDiscussionMessage often
+        // returns an empty `messages` (no thread root) for these channels even though the thread
+        // exists (unread_count>0), which made the sheet wrongly show "disabled". getReplies on the
+        // channel post returns the comments without needing the (missing) discussion root.
+        final TLRPC.TL_messages_getReplies req = new TLRPC.TL_messages_getReplies();
+        req.peer = MessagesController.getInputPeer(channelChat);
         req.msg_id = postMessageId;
+        req.offset_id = 0;
+        req.offset_date = 0;
+        req.add_offset = 0;
+        req.limit = 40;
+        req.max_id = 0;
+        req.min_id = 0;
+        req.hash = 0;
 
         ConnectionsManager.getInstance(currentAccount).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
-            if (error != null || !(response instanceof TLRPC.TL_messages_discussionMessage)) {
-                loading = false;
-                disabledState = true; // CHANNEL_PRIVATE / no discussion / deleted post
-                updateState();
-                return;
-            }
-            TLRPC.TL_messages_discussionMessage res = (TLRPC.TL_messages_discussionMessage) response;
-            MessagesController.getInstance(currentAccount).putUsers(res.users, false);
-            MessagesController.getInstance(currentAccount).putChats(res.chats, false);
-
-            MessageObject root = null;
-            for (int a = res.messages.size() - 1; a >= 0; a--) {
-                TLRPC.Message m = res.messages.get(a);
-                if (m instanceof TLRPC.TL_messageEmpty) continue;
-                m.isThreadMessage = true;
-                root = new MessageObject(currentAccount, m, true, true);
-                break;
-            }
-            if (root == null) {
-                loading = false;
-                disabledState = true;
-                updateState();
-                return;
-            }
-            threadRoot = root;
-            rootMessageId = root.getId();
-            loadComments();
-        }));
-    }
-
-    private void loadComments() {
-        if (threadRoot == null) {
-            loading = false;
-            disabledState = true;
-            updateState();
-            return;
-        }
-        final TLRPC.TL_messages_getReplies getReplies = new TLRPC.TL_messages_getReplies();
-        getReplies.peer = MessagesController.getInstance(currentAccount).getInputPeer(threadRoot.getDialogId());
-        getReplies.msg_id = rootMessageId;
-        getReplies.offset_id = 0;
-        getReplies.offset_date = 0;
-        getReplies.add_offset = 0;
-        getReplies.limit = 40;
-        getReplies.max_id = 0;
-        getReplies.min_id = 0;
-        getReplies.hash = 0;
-
-        ConnectionsManager.getInstance(currentAccount).sendRequest(getReplies, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
             loading = false;
             if (error != null || !(response instanceof TLRPC.messages_Messages)) {
-                disabledState = true;
+                disabledState = true; // CHANNEL_PRIVATE / no discussion
                 updateState();
                 return;
             }
@@ -440,8 +404,15 @@ public class SvipeReelsCommentsSheet extends BottomSheet {
             for (int a = res.messages.size() - 1; a >= 0; a--) {
                 TLRPC.Message m = res.messages.get(a);
                 if (m == null || m instanceof TLRPC.TL_messageEmpty) continue;
-                if (m.id == rootMessageId) continue; // skip the thread root itself
-                comments.add(new MessageObject(currentAccount, m, true, true));
+                if (m.id == postMessageId) continue;
+                MessageObject mo = new MessageObject(currentAccount, m, true, true);
+                comments.add(mo);
+                // Capture the discussion-thread root for sending: comments carry reply_to_top_id and
+                // live in the discussion group.
+                if (threadRoot == null && m.reply_to != null) {
+                    rootMessageId = m.reply_to.reply_to_top_id != 0 ? m.reply_to.reply_to_top_id : m.reply_to.reply_to_msg_id;
+                    threadRoot = mo;
+                }
             }
             if (commentCount < comments.size()) {
                 commentCount = comments.size();

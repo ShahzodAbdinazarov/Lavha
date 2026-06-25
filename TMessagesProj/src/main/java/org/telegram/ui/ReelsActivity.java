@@ -484,10 +484,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private void refreshCommentTargetForCurrent() {
         if (!discoverSeed || reelEnterView == null) return;
         FeedItem item = (currentPosition >= 0 && currentPosition < items.size()) ? items.get(currentPosition) : null;
-        // Optimistically show the input when the post claims comments (isComments), but once the
-        // discussion resolve proves there is none (commentsAvailable==FALSE) switch to the disabled bar.
-        boolean enabled = item != null && item.mo != null && item.mo.isComments()
-                && !Boolean.FALSE.equals(item.commentsAvailable);
+        // Gate on the reply COUNT — the same number shown on the rail and the only reliable signal
+        // here (the isComments flag is often missing in feed data, and the getDiscussionMessage
+        // resolve is async/flaky). A reel with comments => show the native input; "Izoh" (0) => the
+        // disabled bar. The thread is still resolved below so a typed comment can be posted.
+        boolean enabled = item != null && item.mo != null && item.mo.getRepliesCount() > 0;
         if (reelDisabledBar != null) {
             reelDisabledBar.setVisibility(enabled ? View.GONE : View.VISIBLE);
         }
@@ -523,7 +524,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         final long channelId = item.channelId;
         final int messageId = item.messageId;
         final TLRPC.TL_messages_getDiscussionMessage req = new TLRPC.TL_messages_getDiscussionMessage();
-        req.peer = MessagesController.getInstance(account).getInputPeer(-item.chat.id);
+        // Build the channel peer straight from the chat object (it carries access_hash). Using
+        // getInputPeer(-chat.id) relies on the controller cache and yields a wrong inputPeerChat
+        // (-> MSG_ID_INVALID) when the channel isn't cached. Mirrors ChatActivity.openDiscussionMessageChat.
+        req.peer = MessagesController.getInputPeer(item.chat);
         req.msg_id = messageId;
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
             commentThreadResolving = false;
@@ -560,6 +564,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             }
             commentThreadRoot = root;
             if (item != null) item.commentsAvailable = true;
+            // The bottom may currently show the disabled bar (e.g. it was applied before mo/count
+            // enriched, or during an optimistic pass) — now that the thread is confirmed, re-apply
+            // so the native input is shown.
+            refreshCommentTargetForCurrent();
             if (onResolved != null) onResolved.run();
             if (pendingCommentToSend != null) {
                 CharSequence pend = pendingCommentToSend;
@@ -1973,10 +1981,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             View.OnClickListener comment = v -> {
                 FeedItem it = itemFor(holder);
                 if (it == null || it.mo == null) return;
-                // Comments off (or isComments stale -> no real discussion) => the button does nothing.
-                // In the search-seeded player trust the resolved availability; elsewhere use isComments().
-                boolean canOpen = discoverSeed ? (it.commentsAvailable == Boolean.TRUE) : it.mo.isComments();
-                if (!canOpen) return;
+                // Only open the comments list when the post actually has comments (reply count > 0);
+                // "Izoh" (0) posts do nothing. The sheet then loads the thread.
+                if (it.mo.getRepliesCount() <= 0) return;
                 openCommentsSheet(it);
             };
             commentIcon.setOnClickListener(comment);
