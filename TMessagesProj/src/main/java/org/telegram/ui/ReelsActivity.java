@@ -98,7 +98,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private TextView statusView;
 
     // ---- Search-seeded reels: persistent native discussion-comment input at the bottom ----
-    // Only present when opened from the Search Explore grid (ofDiscoverSeed -> seed_channels),
+    // Only present when opened from the Search Explore grid (ofDiscoverSeed -> seed_channel),
     // where the floating Telegram bottom tab bar is absent. Posts comments into the current
     // reel's channel post discussion thread (the same input as the linked discussion chat).
     private boolean discoverSeed;
@@ -140,6 +140,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private SvipeReelQueue reelQueue;
     private SvipeWatchedSet watchedSet;
     private boolean coldStartDone; // the instant (queue) path has run; feed loads now MERGE, not clear
+    // Seed-conditioned continuation (opened from a discover tap): the tapped video conditions the
+    // feed. feedCursor carries the page index + seed across loadMore calls (set from next_cursor).
+    private boolean seeded;
+    private long seedChannel;
+    private int seedMessage;
+    private Integer seedTopic;
+    private String feedCursor;
     private final HashMap<String, FeedItem> fileNameToItem = new HashMap<>(); // full-download completion lookup
     private final HashSet<Long> fullDownloadStarted = new HashSet<>();        // docIds with a cacheType-0 load in flight
 
@@ -169,56 +176,49 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     }
 
     /**
-     * Build a reels player seeded with a discover/explore list, opened at the tapped reel.
-     * The tapped item plays first; the rest of the grid follows (rotated), then the personalized
-     * feed appends below it. Used by the Search section's Explore grid.
+     * Build a reels player opened at the tapped discover/explore reel. The tapped video plays first
+     * (instant), and the swipe feed then CONTINUES seed-conditioned on it — "similar to the tapped
+     * video" blended with the user's personalized feed (see backend build_seeded_feed). Used by the
+     * Search section's Explore grid.
      */
     public static ReelsActivity ofDiscoverSeed(java.util.List<org.telegram.svipe.SvipeDiscover.Item> all, int start) {
         Bundle args = new Bundle();
         final int n = all == null ? 0 : all.size();
         if (n > 0) {
             if (start < 0 || start >= n) start = 0;
-            long[] chans = new long[n];
-            int[] msgs = new int[n];
-            String[] users = new String[n];
-            int[] topics = new int[n];
-            for (int i = 0; i < n; i++) {
-                org.telegram.svipe.SvipeDiscover.Item it = all.get((start + i) % n);
-                chans[i] = it.channelId;
-                msgs[i] = it.messageId;
-                users[i] = it.username;
-                topics[i] = it.topicId != null ? it.topicId : -1;
-            }
-            args.putLongArray("seed_channels", chans);
-            args.putIntArray("seed_messages", msgs);
-            args.putStringArray("seed_usernames", users);
-            args.putIntArray("seed_topics", topics);
+            org.telegram.svipe.SvipeDiscover.Item it = all.get(start);
+            args.putLong("seed_channel", it.channelId);
+            args.putInt("seed_message", it.messageId);
+            args.putString("seed_username", it.username);
+            args.putInt("seed_topic", it.topicId != null ? it.topicId : -1);
         }
         return new ReelsActivity(args);
     }
 
-    /** Cold-start variant for the discover seed: populate the pager from args, then merge the feed. */
+    /** Cold-start for the discover seed: play the tapped video, then continue with a seed-conditioned feed. */
     private boolean playSeedIfPresent() {
         Bundle args = getArguments();
         if (args == null) return false;
-        long[] chans = args.getLongArray("seed_channels");
-        int[] msgs = args.getIntArray("seed_messages");
-        String[] users = args.getStringArray("seed_usernames");
-        if (chans == null || msgs == null || users == null || chans.length == 0) return false;
-        int[] topics = args.getIntArray("seed_topics");
-        boolean any = false;
-        for (int i = 0; i < chans.length; i++) {
-            if (users[i] == null || users[i].isEmpty()) continue;
-            FeedItem it = new FeedItem();
-            it.channelId = chans[i];
-            it.messageId = msgs[i];
-            it.username = users[i];
-            it.topicId = (topics != null && i < topics.length && topics[i] >= 0) ? topics[i] : null;
-            items.add(it);
-            any = true;
-        }
-        if (!any) return false;
-        // The tapped reels are now the pager head; further feed loads MERGE (never clear) below them.
+        long ch = args.getLong("seed_channel", 0);
+        int msg = args.getInt("seed_message", 0);
+        String user = args.getString("seed_username");
+        if (ch == 0 || msg == 0 || user == null || user.isEmpty()) return false;
+        int topic = args.getInt("seed_topic", -1);
+
+        FeedItem it = new FeedItem();
+        it.channelId = ch;
+        it.messageId = msg;
+        it.username = user;
+        it.topicId = topic >= 0 ? topic : null;
+        items.add(it);
+
+        // Continuation feed is conditioned on this tapped video; loadMore sends it to /v1/feed.
+        seeded = true;
+        seedChannel = ch;
+        seedMessage = msg;
+        seedTopic = topic >= 0 ? topic : null;
+
+        // The tapped reel is the pager head; the seeded feed MERGES (never clears) below it.
         coldStartDone = true;
         setStatus(null);
         if (adapter != null) adapter.notifyDataSetChanged();
@@ -234,7 +234,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
 
         // Search-seeded player (opened from the Explore grid via ofDiscoverSeed): no floating tab bar,
         // so we host a persistent native discussion-comment input at the bottom instead.
-        discoverSeed = getArguments() != null && getArguments().getLongArray("seed_channels") != null;
+        discoverSeed = getArguments() != null && getArguments().getLong("seed_channel", 0) != 0;
 
         // Keep all overlay UI above the floating native bottom tab bar (height 72dp + nav bar).
         // In the search-seeded player there is no tab bar; the input bar lives there instead, so the
@@ -740,7 +740,19 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             }
             token = t;
             if (!append && !playing) setStatus("Lenta yuklanmoqda…");
-            SvipeApi.get("/v1/feed", token, (res, code, err) -> {
+            // First request carries the seed (discover tap); afterwards the cursor carries page+seed.
+            String path = "/v1/feed";
+            try {
+                if (feedCursor != null) {
+                    path += "?cursor=" + java.net.URLEncoder.encode(feedCursor, "UTF-8");
+                } else if (seeded) {
+                    path += "?seed_channel_id=" + seedChannel + "&seed_message_id=" + seedMessage;
+                    if (seedTopic != null) path += "&seed_topic_id=" + seedTopic;
+                }
+            } catch (java.io.UnsupportedEncodingException ignore) {
+                path = "/v1/feed";
+            }
+            SvipeApi.get(path, token, (res, code, err) -> {
                 loadingFeed = false;
                 if (code == 401 && !retried) {
                     // Access token died mid-session: silent re-auth, one retry.
@@ -759,6 +771,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 }
                 String recId = res.isNull("recommendation_id") ? null : res.optString("recommendation_id", null);
                 recommendationId = recId;
+                // Advance pagination: the cursor carries the next page index (+ seed). Null => no more.
+                feedCursor = res.isNull("next_cursor") ? null : res.optString("next_cursor", null);
                 // additive = append page OR a background merge into the already-playing queue.
                 // Re-evaluated HERE (not at request start): a cold-start restore may have populated
                 // items after this request began, so a fresh feed must merge, never clear them.
@@ -791,13 +805,14 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     }
                 }
                 if (additive) {
-                    if (added == 0) {
-                        feedExhausted = true; // stop asking until the next fresh load
-                    } else {
+                    if (added > 0) {
                         adapter.notifyItemRangeInserted(before, added);
                         // A merge can newly satisfy the download-ahead target — top it up.
                         if (playing && currentPosition >= 0) ensureFullDownloadsAhead(currentPosition);
                     }
+                    // Stop asking when nothing new arrived or the backend gave no further cursor
+                    // (else a null cursor in seeded mode would re-request seed page 0).
+                    if (added == 0 || feedCursor == null) feedExhausted = true;
                 } else {
                     setStatus(items.isEmpty() ? "Hozircha video yo'q" : null);
                     adapter.notifyDataSetChanged();
