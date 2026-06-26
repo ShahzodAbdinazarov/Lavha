@@ -41,7 +41,11 @@ import java.util.Locale;
  */
 public class SvipeUpdater {
 
-    private static final long CHECK_INTERVAL_MS = 6L * 60 * 60 * 1000; // throttle background checks to 6h
+    // We check once per cold start (checkedThisProcess), then throttle further foreground resumes to
+    // this interval so we don't hit the server on every app switch. Short enough that a new release
+    // reaches users promptly.
+    private static final long CHECK_INTERVAL_MS = 30L * 60 * 1000; // 30 min between resume re-checks
+    private static volatile boolean checkedThisProcess = false;
     private static final String PREFS = "svipe_updater";
     private static final String KEY_LAST_CHECK = "last_check";
     private static final String KEY_PENDING_PATH = "pending_path";
@@ -121,6 +125,13 @@ public class SvipeUpdater {
     public static void maybeCheck(Activity activity) {
         if (activity == null || !isSelfUpdateBuild()) return;
         if (resumePendingInstall(activity)) return;
+        // Always check once per cold start so a fresh release is picked up on the next app open;
+        // only subsequent foreground resumes within the same process are time-throttled.
+        if (!checkedThisProcess) {
+            checkedThisProcess = true;
+            check(activity, false);
+            return;
+        }
         SharedPreferences p = prefs();
         if (System.currentTimeMillis() - p.getLong(KEY_LAST_CHECK, 0) < CHECK_INTERVAL_MS) return;
         check(activity, false);
