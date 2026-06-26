@@ -2,6 +2,7 @@ package org.telegram.ui;
 
 import android.content.Context;
 import android.os.Bundle;
+import android.view.MotionEvent;
 import android.view.View;
 
 import org.telegram.ui.Components.SvipeExploreGrid;
@@ -45,5 +46,20 @@ public class SvipeSearchActivity extends DialogsActivity {
         if (exploreGrid != null) {
             exploreGrid.ensureLoaded();
         }
+    }
+
+    /**
+     * The parent {@link DialogsActivity#canParentTabsSlide} blocks horizontal bottom-tab swipes
+     * whenever search mode is showing — and this section is permanently in search mode. While the
+     * Explore grid (empty query) is up, re-enable the swipe so the Search tab slides to the
+     * neighbouring tabs like every other tab. Once a query is typed, the search results' own
+     * category pager keeps owning horizontal swipes.
+     */
+    @Override
+    public boolean canParentTabsSlide(MotionEvent ev, boolean forward) {
+        if (exploreGrid != null && exploreGrid.getVisibility() == View.VISIBLE) {
+            return true;
+        }
+        return super.canParentTabsSlide(ev, forward);
     }
 }

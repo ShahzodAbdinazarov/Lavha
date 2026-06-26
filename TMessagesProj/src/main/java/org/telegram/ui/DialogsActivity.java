@@ -848,7 +848,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 h += storiesHeight * (1f - searchAnimationProgress) * (1f - rightSlidingProgress) * (1f - progressToActionMode);
             }
             h += storiesOverscroll;
-            h += dp(SEARCH_FIELD_HEIGHT) * (1f - progressToActionMode) * (1f - searchAnimationProgress) * (1f - rightSlidingProgress);
+            h += searchFieldReservedHeight() * (1f - progressToActionMode) * (1f - searchAnimationProgress) * (1f - rightSlidingProgress);
 
             return (int) h;
         }
@@ -1026,8 +1026,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             tabsYOffset = 0;
             storiesYOffset = 0;
             tabsYOffset -= Math.min(
-                dp(hasStories ? DialogStoriesCell.HEIGHT_IN_DP : 0) + dp(SEARCH_FIELD_HEIGHT) + scrollYOffset,
-                progressToActionMode * (dp(hasStories ? DialogStoriesCell.HEIGHT_IN_DP : 0) + dp(SEARCH_FIELD_HEIGHT))
+                dp(hasStories ? DialogStoriesCell.HEIGHT_IN_DP : 0) + searchFieldReservedHeight() + scrollYOffset,
+                progressToActionMode * (dp(hasStories ? DialogStoriesCell.HEIGHT_IN_DP : 0) + searchFieldReservedHeight())
             );
             storiesYOffset = tabsYOffset;
             if ((rightSlidingDialogContainer != null && rightSlidingDialogContainer.hasFragment())) {
@@ -1053,7 +1053,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 if (hasStories) {
                     addH += dp(DialogStoriesCell.HEIGHT_IN_DP);
                 }
-                addH += dp(SEARCH_FIELD_HEIGHT);
+                addH += searchFieldReservedHeight();
                 addH *= rightSlidingDialogContainer.openedProgress;
 
                 viewPages[0].setTranslationY(rightFragmentOffset - addH);
@@ -1152,7 +1152,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                         if (hasStories) {
                             h += dp(DialogStoriesCell.HEIGHT_IN_DP);
                         }
-                        h += dp(SEARCH_FIELD_HEIGHT);
+                        h += searchFieldReservedHeight();
                     }
                     h += actionModeAdditionalHeight;
                     if (actionBarColorAnimator == null) {
@@ -1288,7 +1288,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                     childTop = 0;
                 } else if (child == topPanelLayout || child == topBubblesFadeView || child == filterTabsView) {
                     childTop += actionBar.getMeasuredHeight();
-                    childTop += dp(SEARCH_FIELD_HEIGHT);
+                    childTop += searchFieldReservedHeight();
                 } else if (dialogStoriesCell != null && dialogStoriesCell.getPremiumHint() == child) {
                     continue;
                 }
@@ -2027,7 +2027,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 t += dp(DialogStoriesCell.HEIGHT_IN_DP);
             }
             if (!actionModeFullyShowed) {
-                t += dp(SEARCH_FIELD_HEIGHT);
+                t += searchFieldReservedHeight();
             }
             additionalPadding = 0;
 
@@ -2333,7 +2333,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                         offset += dp(DialogStoriesCell.HEIGHT_IN_DP);
                     }
                     if (backward) {
-                        offset += dp(SEARCH_FIELD_HEIGHT);
+                        offset += searchFieldReservedHeight();
                         // offset += canShowFilterTabsView ? dp(50) : 0;
                     }
                     if (p >= 0) {
@@ -4152,13 +4152,13 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                                 }
                                 int canScrollDy = -(view.getTop() - pTop) + viewsH;
                                 if (!rightSlidingDialogContainer.hasFragment() && !(actionBar != null && actionBar.isActionModeShowed())) {
-                                    canScrollDy -= dp(SEARCH_FIELD_HEIGHT);
+                                    canScrollDy -= searchFieldReservedHeight();
                                 }
                                 if (hasStories && (viewPage.scroller.isRunning() || dialogStoriesCell.isExpanded()) && !rightSlidingDialogContainer.hasFragment() && !fixScrollYAfterArchiveOpened) {
                                     canScrollDy += dp(DialogStoriesCell.HEIGHT_IN_DP);
                                 }
                                 if ((viewPage.scroller.isRunning() || dialogStoriesCell.isExpanded()) && !rightSlidingDialogContainer.hasFragment() && !fixScrollYAfterArchiveOpened && !(actionBar != null && actionBar.isActionModeShowed())) {
-                                    canScrollDy += dp(SEARCH_FIELD_HEIGHT);
+                                    canScrollDy += searchFieldReservedHeight();
                                 }
                                 int positiveDy = Math.abs(dy);
                                 if (canScrollDy < positiveDy) {
@@ -5351,6 +5351,31 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 if (fragmentSearchField != null) {
                     fragmentSearchField.bringToFront();
                 }
+                if (svipeExploreGrid instanceof RecyclerListView && fragmentSearchField != null) {
+                    final RecyclerListView grid = (RecyclerListView) svipeExploreGrid;
+                    // Capture the search field's resting translationY once layout has settled.
+                    fragmentSearchField.post(() -> {
+                        svipeSearchFieldRestTy = fragmentSearchField.getTranslationY();
+                        svipeSearchFieldRestTyCaptured = true;
+                    });
+                    grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
+                        @Override
+                        public void onScrolled(RecyclerView rv, int dx, int dy) {
+                            if (fragmentSearchField == null || !svipeSearchFieldRestTyCaptured) {
+                                return;
+                            }
+                            final int collapse = AndroidUtilities.statusBarHeight + dp(106);
+                            final int scrollY = rv.computeVerticalScrollOffset();
+                            svipeHeaderOffset += dy;
+                            if (svipeHeaderOffset < 0) svipeHeaderOffset = 0;
+                            if (svipeHeaderOffset > collapse) svipeHeaderOffset = collapse;
+                            // Never hide more of the field than the grid has actually scrolled, so it
+                            // stays fully visible at the top and reveals as you scroll back up.
+                            if (svipeHeaderOffset > scrollY) svipeHeaderOffset = scrollY;
+                            fragmentSearchField.setTranslationY(svipeSearchFieldRestTy - svipeHeaderOffset);
+                        }
+                    });
+                }
                 svipeOnExploreGridVisible();
             }
         } else if (searchString != null) {
@@ -5662,6 +5687,18 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         return false;
     }
 
+    // Svipe: the chats main tab dropped its inline search field (search lives in the dedicated
+    // Search section). It therefore reserves no header space, has no pull-to-reveal range, and
+    // never shows the action-bar search button. Standalone/picker screens + the Search section keep
+    // the field, so they keep the full SEARCH_FIELD_HEIGHT.
+    private boolean svipeChatsTabNoSearch() {
+        return hasMainTabs && !isSvipeSearchSection();
+    }
+
+    private int searchFieldReservedHeight() {
+        return svipeChatsTabNoSearch() ? 0 : dp(SEARCH_FIELD_HEIGHT);
+    }
+
     private int getMaxScrollYOffsetWithoutSearch() {
         if (hasStories) {
             return dp(DialogStoriesCell.HEIGHT_IN_DP);
@@ -5672,9 +5709,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
     private int getMaxScrollYOffset() {
         if (hasStories) {
-            return dp(DialogStoriesCell.HEIGHT_IN_DP) + dp(SEARCH_FIELD_HEIGHT);
+            return dp(DialogStoriesCell.HEIGHT_IN_DP) + searchFieldReservedHeight();
         } else {
-            return dp(SEARCH_FIELD_HEIGHT);
+            return searchFieldReservedHeight();
         }
     }
 
@@ -7082,7 +7119,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                     (filterTabsView != null && filterTabsView.getVisibility() == View.VISIBLE ? filterTabsView.getMeasuredHeight() : 0) +
                     (topPanelLayout != null ? topPanelLayout.getHeight() : 0) +
                     (dialogStoriesCell != null && dialogStoriesCellVisible ? (int) ((1f - dialogStoriesCell.getCollapsedProgress()) * dp(DialogStoriesCell.HEIGHT_IN_DP)) : 0) +
-                    (dp(SEARCH_FIELD_HEIGHT))
+                    (searchFieldReservedHeight())
                 );
             }
 
@@ -7363,6 +7400,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     // Svipe: the Instagram-style Explore grid shown in the Search section's empty (no-query) state.
     // It sits on top of the (recent-search) searchViewPager and is toggled by the query text.
     protected View svipeExploreGrid;
+    // Svipe: collapsing search-field header — the field slides up off the top as the grid scrolls.
+    private float svipeSearchFieldRestTy;
+    private boolean svipeSearchFieldRestTyCaptured;
+    private int svipeHeaderOffset;
 
     /** SvipeSearchActivity returns its Explore grid here; DialogsActivity hosts + toggles it. */
     protected View svipeCreateExploreGrid(Context context) {
@@ -13832,7 +13873,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     }
 
     private void checkUi_itemSearchVisibility() {
-        final float factor0 = isSupportSearch() ? 1 : 0;
+        final float factor0 = (isSupportSearch() && !svipeChatsTabNoSearch()) ? 1 : 0;
         final float factor1 = animatorSearchButtonVisible.getFloatValue();
         final float factor2 = 1f - getRightSlidingProgress();
         final float factor3 = 1f - animatorDoneButtonVisible.getFloatValue();
@@ -13882,7 +13923,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         final int mainTabTop = mainTabBottom - dp(DialogsActivity.MAIN_TABS_HEIGHT);
 
         final int actionBarHeight = actionBar.getMeasuredHeight()
-            + dp(DialogsActivity.SEARCH_FIELD_HEIGHT)
+            + searchFieldReservedHeight()
             + dp(hasStories ? DialogStoriesCell.HEIGHT_IN_DP : 0)
             + (filterTabsView != null && filterTabsView.getVisibility() == View.VISIBLE ? filterTabsView.getMeasuredHeight() : 0)
             + (topPanelLayout != null && topPanelLayout.getVisibility() == View.VISIBLE ? topPanelLayout.getSumHeightOfAllVisibleChild() : 0)
