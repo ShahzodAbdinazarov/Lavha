@@ -154,6 +154,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         long channelId;
         int messageId;
         String username;
+        String shareUrl;     // owned svipe.uz/<code> preview link, supplied by the backend with the feed
         Integer topicId;
         String recId;         // recommendation_id of the page this item arrived with
         MessageObject mo;     // filled after MTProto resolution
@@ -633,6 +634,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 it.channelId = e.channelId;
                 it.messageId = e.messageId;
                 it.username = e.username;
+                it.shareUrl = e.shareUrl;
                 it.topicId = e.topicId;
                 it.recId = e.recId;
                 it.mo = mo;
@@ -798,6 +800,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                         it.channelId = channelId;
                         it.messageId = messageId;
                         it.username = username;
+                        it.shareUrl = o.isNull("share_url") ? null : o.optString("share_url", null);
                         it.topicId = o.isNull("topic_id") ? null : o.optInt("topic_id");
                         it.recId = recId;
                         items.add(it);
@@ -1143,6 +1146,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         e.channelId = it.channelId;
         e.messageId = it.messageId;
         e.username = it.username;
+        e.shareUrl = it.shareUrl;
         e.topicId = it.topicId;
         e.recId = it.recId;
         TLRPC.Document doc = it.mo.getDocument();
@@ -1539,7 +1543,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
 
     private void copyLink(FeedItem item) {
         if (item == null || getParentActivity() == null) return;
-        String link = "https://t.me/" + item.username + "/" + item.messageId;
+        // Prefer the owned, attributable svipe.uz preview link that arrived with the feed; fall back to
+        // the raw t.me post only if the backend didn't supply one.
+        String link = (item.shareUrl != null && !item.shareUrl.isEmpty())
+                ? item.shareUrl
+                : "https://t.me/" + item.username + "/" + item.messageId;
         try {
             ClipboardManager cm = (ClipboardManager) getParentActivity().getSystemService(Context.CLIPBOARD_SERVICE);
             cm.setPrimaryClip(ClipData.newPlainText("link", link));

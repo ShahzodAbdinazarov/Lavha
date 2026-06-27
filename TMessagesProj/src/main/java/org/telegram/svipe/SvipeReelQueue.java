@@ -27,6 +27,7 @@ public class SvipeReelQueue {
         public long channelId;
         public int messageId;
         public String username;
+        public String shareUrl;   // owned svipe.uz/<code> preview link, carried so cold-start reels share it too
         public Integer topicId;   // nullable
         public String recId;      // recommendation_id of the page it arrived with
         public String messageB64; // Base64 of SerializedData(message) — the playable payload
@@ -137,6 +138,7 @@ public class SvipeReelQueue {
                 e.channelId = o.optLong("ch");
                 e.messageId = o.optInt("msg");
                 e.username = o.isNull("u") ? null : o.optString("u", null);
+                e.shareUrl = o.isNull("su") ? null : o.optString("su", null);
                 e.topicId = o.isNull("t") ? null : o.optInt("t");
                 e.recId = o.isNull("rec") ? null : o.optString("rec", null);
                 e.messageB64 = o.optString("b64", null);
@@ -158,6 +160,7 @@ public class SvipeReelQueue {
                 o.put("ch", e.channelId);
                 o.put("msg", e.messageId);
                 if (e.username != null) o.put("u", e.username);
+                if (e.shareUrl != null) o.put("su", e.shareUrl);
                 if (e.topicId != null) o.put("t", (int) e.topicId);
                 if (e.recId != null) o.put("rec", e.recId);
                 o.put("b64", e.messageB64);
