@@ -267,7 +267,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             public boolean onDown(MotionEvent e) { return false; }
             @Override
             public boolean onSingleTapConfirmed(MotionEvent e) {
-                togglePlayPause();
+                // Only the bare video toggles play/pause. The detector observes EVERY tap (it is fed in
+                // onInterceptTouchEvent), so taps meant for the action rail or the caption/channel box
+                // must be excluded — otherwise like/share/comment/caption taps also pause the video.
+                if (!tapOnControls(e)) togglePlayPause();
                 return false;
             }
             @Override
@@ -1375,6 +1378,26 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (h != null) h.setPaused(userPaused);
     }
 
+    /** True when a single tap landed on the current reel's action rail or info box (channel + caption),
+     *  i.e. on a control that handles its own click — so the tap must not toggle play/pause. */
+    private boolean tapOnControls(MotionEvent e) {
+        int pos = currentPosition;
+        if (pos < 0 || pos >= items.size()) pos = layoutManager.findFirstVisibleItemPosition();
+        ReelsHolder h = holderAt(pos);
+        if (h == null) return false;
+        return pointInView(h.actionRail, e) || pointInView(h.infoBox, e);
+    }
+
+    private static boolean pointInView(View v, MotionEvent e) {
+        if (v == null || v.getVisibility() != View.VISIBLE || v.getWidth() == 0 || v.getHeight() == 0) {
+            return false;
+        }
+        int[] loc = new int[2];
+        v.getLocationOnScreen(loc);
+        float x = e.getRawX(), y = e.getRawY();
+        return x >= loc[0] && x < loc[0] + v.getWidth() && y >= loc[1] && y < loc[1] + v.getHeight();
+    }
+
     private void pauseWatchClock() {
         if (watchStartMs > 0) {
             watchedAccumMs += System.currentTimeMillis() - watchStartMs;
@@ -1782,6 +1805,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         final TextView followBtn;
         final TextView title;
         boolean titleExpanded;
+        View actionRail;   // right column (like/comment/share/more) — taps here must NOT toggle pause
+        View infoBox;      // channel row + caption — taps here must NOT toggle pause
 
         ReelsHolder(FrameLayout root, AspectRatioFrameLayout aspect, TextureView tv, BackupImageView cover, ProgressBar pb,
                     TextView paused, ImageView likeIcon, TextView likeCount, ImageView commentIcon,
@@ -2001,6 +2026,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
 
             ReelsHolder holder = new ReelsHolder(page, aspect, tv, cover, pb, paused, likeIcon, likeCount,
                     commentIcon, commentCount, shareCount, avatar, channelName, verifiedBadge, followBtn, title);
+            holder.actionRail = rail;
+            holder.infoBox = bottomBox;
             title.setOnClickListener(v -> {
                 holder.titleExpanded = !holder.titleExpanded;
                 holder.title.setMaxLines(holder.titleExpanded ? 100 : 2);
