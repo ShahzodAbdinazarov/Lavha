@@ -266,6 +266,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             @Override
             public boolean onDown(MotionEvent e) { return false; }
             @Override
+            public boolean onSingleTapUp(MotionEvent e) {
+                // Fire control actions immediately (rail buttons / follow / channel / caption). The
+                // child views carry no click listener; this list-level path drives them reliably so a
+                // RecyclerView scroll-claim can't swallow the tap.
+                return dispatchControlTap(e);
+            }
+            @Override
             public boolean onSingleTapConfirmed(MotionEvent e) {
                 // Only the bare video toggles play/pause. The detector observes EVERY tap (it is fed in
                 // onInterceptTouchEvent), so taps meant for the action rail or the caption/channel box
@@ -1398,6 +1405,34 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         return x >= loc[0] && x < loc[0] + v.getWidth() && y >= loc[1] && y < loc[1] + v.getHeight();
     }
 
+    /** Invoke the action for whichever control the tap landed on (rail buttons, follow, channel,
+     *  caption); returns true if one handled it. Driven by the list-level gesture detector so a
+     *  RecyclerView scroll-claim can't swallow the tap the way a child onClick would. */
+    private boolean dispatchControlTap(MotionEvent e) {
+        int pos = currentPosition;
+        if (pos < 0 || pos >= items.size()) pos = layoutManager.findFirstVisibleItemPosition();
+        ReelsHolder h = holderAt(pos);
+        if (h == null) return false;
+        FeedItem it = itemFor(h);
+        if (it == null) return false;
+        if (pointInView(h.likeIcon, e) || pointInView(h.likeCount, e)) { toggleLike(it, h); return true; }
+        if (pointInView(h.commentIcon, e) || pointInView(h.commentCount, e)) {
+            // "Izoh" (0) posts consume the tap but do nothing (no comments thread to open).
+            if (it.mo != null && it.mo.getRepliesCount() > 0) openCommentsSheet(it);
+            return true;
+        }
+        if (pointInView(h.shareIcon, e) || pointInView(h.shareCount, e)) { share(it); return true; }
+        if (pointInView(h.moreIcon, e)) { showMore(it); return true; }
+        if (pointInView(h.followBtn, e)) { toggleFollow(it, h); return true; }
+        if (pointInView(h.avatar, e) || pointInView(h.channelName, e)) { openComments(it); return true; }
+        if (pointInView(h.title, e)) {
+            h.titleExpanded = !h.titleExpanded;
+            h.title.setMaxLines(h.titleExpanded ? 100 : 2);
+            return true;
+        }
+        return false;
+    }
+
     private void pauseWatchClock() {
         if (watchStartMs > 0) {
             watchedAccumMs += System.currentTimeMillis() - watchStartMs;
@@ -1807,6 +1842,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         boolean titleExpanded;
         View actionRail;   // right column (like/comment/share/more) — taps here must NOT toggle pause
         View infoBox;      // channel row + caption — taps here must NOT toggle pause
+        ImageView shareIcon, moreIcon;  // not in the ctor — needed for list-level tap dispatch
 
         ReelsHolder(FrameLayout root, AspectRatioFrameLayout aspect, TextureView tv, BackupImageView cover, ProgressBar pb,
                     TextView paused, ImageView likeIcon, TextView likeCount, ImageView commentIcon,
@@ -2028,31 +2064,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     commentIcon, commentCount, shareCount, avatar, channelName, verifiedBadge, followBtn, title);
             holder.actionRail = rail;
             holder.infoBox = bottomBox;
-            title.setOnClickListener(v -> {
-                holder.titleExpanded = !holder.titleExpanded;
-                holder.title.setMaxLines(holder.titleExpanded ? 100 : 2);
-            });
-
-            View.OnClickListener like = v -> toggleLike(itemFor(holder), holder);
-            likeIcon.setOnClickListener(like);
-            likeCount.setOnClickListener(like);
-            View.OnClickListener comment = v -> {
-                FeedItem it = itemFor(holder);
-                if (it == null || it.mo == null) return;
-                // Only open the comments list when the post actually has comments (reply count > 0);
-                // "Izoh" (0) posts do nothing. The sheet then loads the thread.
-                if (it.mo.getRepliesCount() <= 0) return;
-                openCommentsSheet(it);
-            };
-            commentIcon.setOnClickListener(comment);
-            commentCount.setOnClickListener(comment);
-            View.OnClickListener shareClick = v -> share(itemFor(holder));
-            shareIcon.setOnClickListener(shareClick);
-            shareCount.setOnClickListener(shareClick);
-            moreIcon.setOnClickListener(v -> showMore(itemFor(holder)));
-            followBtn.setOnClickListener(v -> toggleFollow(itemFor(holder), holder));
-            channelName.setOnClickListener(v -> openComments(itemFor(holder)));
-            avatar.setOnClickListener(v -> openComments(itemFor(holder)));
+            holder.shareIcon = shareIcon;
+            holder.moreIcon = moreIcon;
+            // NOTE: control taps (rail buttons, follow, channel, caption) are dispatched at the LIST
+            // level in dispatchControlTap — NOT via per-child click listeners. RecyclerView sends a
+            // child an ACTION_CANCEL the instant it claims the touch for vertical paging, so a child's
+            // onClick is unreliable (the share button "didn't press well"). The list-level gesture
+            // detector observes every tap reliably — the same path that drives play/pause + double-tap.
 
             return holder;
         }
