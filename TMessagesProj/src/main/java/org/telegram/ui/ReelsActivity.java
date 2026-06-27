@@ -1502,11 +1502,19 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void share(FeedItem item) {
-        if (item == null || item.mo == null || getParentActivity() == null) return;
-        ArrayList<MessageObject> list = new ArrayList<>();
-        list.add(item.mo);
+        if (item == null || getParentActivity() == null) return;
+        // Same Telegram share sheet (ShareAlert) — but instead of FORWARDING the source channel post
+        // (which pulls the recipient into that channel, growing it not us), send OUR owned svipe.uz
+        // preview link. The recipient gets a card that opens the reel + drives a Svipe install.
+        // messages=null makes ShareAlert send `link` as a text message, which Telegram auto-unfurls
+        // (searchLinks=true) into our Open Graph card.
+        String link = (item.shareUrl != null && !item.shareUrl.isEmpty())
+                ? item.shareUrl
+                : (item.username != null && !item.username.isEmpty()
+                        ? "https://t.me/" + item.username + "/" + item.messageId : null);
+        if (link == null) return;
         try {
-            ShareAlert alert = new ShareAlert(getParentActivity(), list, null, true, null, false);
+            ShareAlert alert = new ShareAlert(getParentActivity(), null, link, false, link, false);
             showDialog(alert);
             sendEvent("SHARE", item); // share intent, not confirmed delivery — good enough a signal
         } catch (Exception e) { FileLog.e(e); }
