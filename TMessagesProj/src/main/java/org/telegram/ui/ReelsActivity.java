@@ -1561,19 +1561,44 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
 
     private void share(FeedItem item) {
         if (item == null || getParentActivity() == null) return;
-        // Same Telegram share sheet (ShareAlert) — but instead of FORWARDING the source channel post
-        // (which pulls the recipient into that channel, growing it not us), send OUR owned svipe.uz
-        // preview link. The recipient gets a card that opens the reel + drives a Svipe install.
-        // messages=null makes ShareAlert send `link` as a text message, which Telegram auto-unfurls
-        // (searchLinks=true) into our Open Graph card.
         String link = (item.shareUrl != null && !item.shareUrl.isEmpty())
                 ? item.shareUrl
                 : (item.username != null && !item.username.isEmpty()
                         ? "https://t.me/" + item.username + "/" + item.messageId : null);
         if (link == null) return;
+        // Caption that rides UNDER the shared video: promo line, one blank line, then the bare URL
+        // (no scheme — Telegram still auto-links svipe.uz/<code>).
+        final String caption = "watch reels on telegram with svipe\n\n" + link.replaceFirst("^https?://", "");
         try {
-            ShareAlert alert = new ShareAlert(getParentActivity(), null, link, false, link, false);
-            showDialog(alert);
+            TLRPC.Document d = item.mo != null ? item.mo.getDocument() : null;
+            if (d instanceof TLRPC.TL_document) {
+                // Send the ACTUAL video as a clean media message (no "forwarded from" header, no
+                // original caption) carrying OUR caption — the recipient watches it in Telegram and
+                // gets the install link. We keep ShareAlert's familiar picker but override the send to
+                // a document send (parentObject = the post, so the file_reference can be re-fetched).
+                final TLRPC.TL_document document = (TLRPC.TL_document) d;
+                final MessageObject parent = item.mo;
+                ArrayList<MessageObject> messages = new ArrayList<>();
+                messages.add(item.mo);
+                ShareAlert alert = new ShareAlert(getParentActivity(), messages, null, false, null, false) {
+                    @Override
+                    protected void sendInternal(boolean withSound) {
+                        for (int a = 0; a < selectedDialogs.size(); a++) {
+                            long key = selectedDialogs.keyAt(a);
+                            SendMessagesHelper.SendMessageParams params = SendMessagesHelper.SendMessageParams.of(
+                                    document, null, null, key, null, null, caption, null, null, null,
+                                    withSound, 0, 0, 0, parent, null, false);
+                            SendMessagesHelper.getInstance(currentAccount).sendMessage(params);
+                        }
+                        dismiss();
+                    }
+                };
+                showDialog(alert);
+            } else {
+                // No resolved video yet — fall back to sharing the caption (promo text + link) only.
+                ShareAlert alert = new ShareAlert(getParentActivity(), null, caption, false, link, false);
+                showDialog(alert);
+            }
             sendEvent("SHARE", item); // share intent, not confirmed delivery — good enough a signal
         } catch (Exception e) { FileLog.e(e); }
     }
