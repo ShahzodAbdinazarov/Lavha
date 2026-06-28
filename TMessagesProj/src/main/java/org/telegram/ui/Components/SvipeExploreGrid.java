@@ -1,9 +1,25 @@
 package org.telegram.ui.Components;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.Shader;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.view.ViewParent;
+import android.view.animation.DecelerateInterpolator;
+import android.view.animation.LinearInterpolator;
 
+import androidx.core.graphics.ColorUtils;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -36,6 +52,9 @@ public class SvipeExploreGrid extends RecyclerListView {
 
     private static final int SPAN_COUNT = 3;
     private static final int PAGE_SIZE = 60;
+    private static final int SKELETON_COUNT = 15;   // ~5 rows of shimmer placeholders
+    private static final int TYPE_PHOTO = 0;
+    private static final int TYPE_SKELETON = 1;
 
     private final int account;
     private final GridLayoutManager layoutManager;
@@ -48,6 +67,23 @@ public class SvipeExploreGrid extends RecyclerListView {
     private boolean startedFirstLoad;
     private Integer nextOffset = 0;
     private OnReelTapListener tapListener;
+
+    // --- pull-to-refresh: native, drawn in dispatchDraw. The grid must stay a RecyclerListView
+    // (DialogsActivity casts svipeExploreGrid to one), so we can't wrap it in a SwipeRefreshLayout
+    // nor addView() an overlay (RecyclerView would reclaim that child on the next layout pass). ---
+    private static final int PULL_THRESHOLD = AndroidUtilities.dp(72);
+    private static final int MAX_PULL = AndroidUtilities.dp(150);
+    private final Paint spinnerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint chipPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF spinnerRect = new RectF();
+    private int touchSlop;
+    private float pullStartY = -1f;   // -1 = no pull candidate captured
+    private boolean pulling;
+    private boolean refreshing;
+    private float pullDistance;       // damped, px
+    private float spinRotation;       // degrees, indeterminate spin while refreshing
+    private ValueAnimator pullAnimator;
+    private ValueAnimator spinAnimator;
 
     private static class GridItem {
         final SvipeDiscover.Item ref;
@@ -74,6 +110,15 @@ public class SvipeExploreGrid extends RecyclerListView {
         final int bottom = AndroidUtilities.dp(96) + AndroidUtilities.navigationBarHeight;
         setPadding(AndroidUtilities.dp(1), top, AndroidUtilities.dp(1), bottom);
         setClipToPadding(false);
+
+        touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+        spinnerPaint.setStyle(Paint.Style.STROKE);
+        spinnerPaint.setStrokeCap(Paint.Cap.ROUND);
+        spinnerPaint.setStrokeWidth(AndroidUtilities.dp(2.5f));
+        spinnerPaint.setColor(Theme.getColor(Theme.key_featuredStickers_addButton));
+        chipPaint.setStyle(Paint.Style.FILL);
+        chipPaint.setColor(Theme.getColor(Theme.key_dialogBackground));
+        chipPaint.setShadowLayer(AndroidUtilities.dp(4), 0, AndroidUtilities.dp(1), 0x40000000);
 
         setOnItemClickListener((view, position) -> {
             if (tapListener == null || position < 0 || position >= items.size()) {
@@ -113,15 +158,216 @@ public class SvipeExploreGrid extends RecyclerListView {
         loadPage();
     }
 
+    // ---- pull-to-refresh ----
+
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent e) {
+        final int action = e.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            // Only a candidate when resting at the very top and not already refreshing.
+            pullStartY = (!refreshing && !canScrollVertically(-1)) ? e.getY() : -1f;
+        } else if (action == MotionEvent.ACTION_MOVE && pullStartY >= 0 && !pulling) {
+            // If a child consumed the DOWN, the MOVE stream routes through here — claim a clear
+            // downward drag past slop (horizontal tab swipes / upward scrolls are left untouched).
+            final float dy = e.getY() - pullStartY;
+            if (dy > touchSlop && !canScrollVertically(-1)) {
+                pulling = true;
+                disallowParentIntercept(true);
+                return true;
+            }
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            pullStartY = -1f;
+        }
+        return super.onInterceptTouchEvent(e);
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent e) {
+        final int action = e.getActionMasked();
+        // The grid's item views don't consume ACTION_DOWN, so the MOVE stream is delivered straight
+        // to onTouchEvent (not onInterceptTouchEvent). Detect and run the top-pull from here.
+        if (action == MotionEvent.ACTION_DOWN) {
+            pullStartY = (!refreshing && !canScrollVertically(-1)) ? e.getY() : -1f;
+        } else if (action == MotionEvent.ACTION_MOVE) {
+            if (!pulling && pullStartY >= 0 && (e.getY() - pullStartY) > touchSlop && !canScrollVertically(-1)) {
+                pulling = true;
+                disallowParentIntercept(true);
+            }
+            if (pulling) {
+                final float raw = Math.max(0f, e.getY() - pullStartY);
+                pullDistance = Math.min(raw * 0.5f, MAX_PULL);   // rubber-band damping
+                invalidate();
+                return true;
+            }
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            if (pulling) {
+                pulling = false;
+                disallowParentIntercept(false);
+                final boolean trigger = action == MotionEvent.ACTION_UP
+                        && pullDistance >= PULL_THRESHOLD && !loading && !refreshing;
+                pullStartY = -1f;
+                if (trigger) {
+                    triggerRefresh();
+                } else {
+                    animatePullTo(0f);
+                }
+                return true;
+            }
+            pullStartY = -1f;
+        }
+        return super.onTouchEvent(e);
+    }
+
+    private void disallowParentIntercept(boolean disallow) {
+        final ViewParent p = getParent();
+        if (p != null) {
+            p.requestDisallowInterceptTouchEvent(disallow);
+        }
+    }
+
+    /** Reset to a fresh feed (page 0) and spin until the load completes. */
+    private void triggerRefresh() {
+        refreshing = true;
+        items.clear();
+        resolvedChats.clear();
+        nextOffset = 0;
+        adapter.notifyDataSetChanged();
+        startSpin();
+        animatePullTo(PULL_THRESHOLD);   // settle at the resting position while loading
+        loadPage();
+    }
+
+    private void finishRefresh() {
+        refreshing = false;
+        stopSpin();
+        animatePullTo(0f);
+    }
+
+    private void startSpin() {
+        if (spinAnimator != null) {
+            return;
+        }
+        spinAnimator = ValueAnimator.ofFloat(0f, 360f);
+        spinAnimator.setDuration(900);
+        spinAnimator.setRepeatCount(ValueAnimator.INFINITE);
+        spinAnimator.setInterpolator(new LinearInterpolator());
+        spinAnimator.addUpdateListener(a -> {
+            spinRotation = (float) a.getAnimatedValue();
+            invalidate();
+        });
+        spinAnimator.start();
+    }
+
+    private void stopSpin() {
+        if (spinAnimator != null) {
+            spinAnimator.cancel();
+            spinAnimator = null;
+        }
+    }
+
+    private void animatePullTo(float target) {
+        if (pullAnimator != null) {
+            pullAnimator.cancel();
+        }
+        pullAnimator = ValueAnimator.ofFloat(pullDistance, target);
+        pullAnimator.setDuration(220);
+        pullAnimator.setInterpolator(new DecelerateInterpolator());
+        pullAnimator.addUpdateListener(a -> {
+            pullDistance = (float) a.getAnimatedValue();
+            invalidate();
+        });
+        pullAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                pullDistance = target;
+                if (target == 0f) {
+                    spinRotation = 0f;
+                }
+                invalidate();
+            }
+        });
+        pullAnimator.start();
+    }
+
+    @Override
+    protected void dispatchDraw(Canvas canvas) {
+        super.dispatchDraw(canvas);
+        if (pullDistance <= 0f && !refreshing) {
+            return;
+        }
+        final float progress = Math.min(1f, pullDistance / PULL_THRESHOLD);
+        final float alpha = refreshing ? 1f : progress;
+        final float cx = getWidth() / 2f;
+        final float cy = AndroidUtilities.statusBarHeight + AndroidUtilities.dp(30) + pullDistance;
+        final int chipR = AndroidUtilities.dp(18);
+        final int arcR = AndroidUtilities.dp(10);
+        // The familiar white "puck" with a soft shadow, brand-coloured progress arc inside.
+        chipPaint.setAlpha((int) (255 * alpha));
+        canvas.drawCircle(cx, cy, chipR, chipPaint);
+        spinnerPaint.setAlpha((int) (255 * alpha));
+        spinnerRect.set(cx - arcR, cy - arcR, cx + arcR, cy + arcR);
+        if (refreshing) {
+            canvas.drawArc(spinnerRect, spinRotation, 270f, false, spinnerPaint);
+        } else {
+            canvas.drawArc(spinnerRect, -90f, Math.max(12f, 360f * progress), false, spinnerPaint);
+        }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        resetPull();
+    }
+
+    @Override
+    protected void onVisibilityChanged(View changedView, int visibility) {
+        super.onVisibilityChanged(changedView, visibility);
+        // The grid is toggled GONE the moment a query is typed; a pull/refresh in flight at that
+        // instant may never get its ACTION_UP/CANCEL, so reset here too (no-op when idle).
+        if (visibility != VISIBLE) {
+            resetPull();
+        }
+    }
+
+    /** Clear all pull/refresh state and always release the parent intercept lock (pairs the true). */
+    private void resetPull() {
+        stopSpin();
+        if (pullAnimator != null) {
+            pullAnimator.cancel();
+            pullAnimator = null;
+        }
+        disallowParentIntercept(false);
+        pulling = false;
+        refreshing = false;
+        pullStartY = -1f;
+        pullDistance = 0f;
+        spinRotation = 0f;
+    }
+
+    /** The 3-column shimmer placeholder grid is shown while the first page (initial or refresh) loads. */
+    private boolean showingSkeleton() {
+        return items.isEmpty() && (loading || refreshing);
+    }
+
     private void loadPage() {
         if (loading || nextOffset == null) {
             return;
         }
         loading = true;
+        if (items.isEmpty()) {
+            adapter.notifyDataSetChanged();   // reveal the skeleton grid while the first page loads
+        }
         final int offset = nextOffset;
         SvipeDiscover.load(account, null, offset, PAGE_SIZE, (result, next, error) -> {
+            final boolean wasSkeleton = showingSkeleton();
             loading = false;
+            if (refreshing) {
+                finishRefresh();
+            }
             if (result == null) {
+                if (wasSkeleton) {
+                    adapter.notifyDataSetChanged();   // failed load: drop the skeleton placeholders
+                }
                 return;
             }
             nextOffset = next;
@@ -132,8 +378,13 @@ public class SvipeExploreGrid extends RecyclerListView {
                 items.add(gi);
                 fresh.add(gi);
             }
-            if (!fresh.isEmpty()) {
+            if (wasSkeleton) {
+                // The item count changes wholesale (SKELETON_COUNT -> real size), so a full rebind.
+                adapter.notifyDataSetChanged();
+            } else if (!fresh.isEmpty()) {
                 adapter.notifyItemRangeInserted(before, fresh.size());
+            }
+            if (!fresh.isEmpty()) {
                 resolveThumbnails(fresh);
             }
         });
@@ -262,21 +513,30 @@ public class SvipeExploreGrid extends RecyclerListView {
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return true;
+            return holder.getItemViewType() == TYPE_PHOTO;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            return showingSkeleton() ? TYPE_SKELETON : TYPE_PHOTO;
         }
 
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            PortraitImageView iv = new PortraitImageView(parent.getContext());
-            iv.setLayoutParams(new RecyclerView.LayoutParams(
+            final View view = viewType == TYPE_SKELETON
+                    ? new SkeletonCell(parent.getContext())
+                    : new PortraitImageView(parent.getContext());
+            view.setLayoutParams(new RecyclerView.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            return new Holder(iv);
+            return new Holder(view);
         }
 
         @Override
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
+            if (holder.getItemViewType() != TYPE_PHOTO) {
+                return;   // skeleton placeholders self-animate, nothing to bind
+            }
             PortraitImageView iv = (PortraitImageView) holder.itemView;
-            iv.setBackgroundColor(0xFF111111);
             GridItem gi = items.get(position);
             if (gi.mo != null && gi.mo.getDocument() != null) {
                 TLRPC.Document doc = gi.mo.getDocument();
@@ -293,12 +553,18 @@ public class SvipeExploreGrid extends RecyclerListView {
 
         @Override
         public int getItemCount() {
-            return items.size();
+            return showingSkeleton() ? SKELETON_COUNT : items.size();
         }
     }
 
-    /** Portrait cell with a 3:2 (height:width) aspect ratio. */
+    /**
+     * Portrait cell (3:2). Shows the shimmer placeholder until the Telegram thumbnail bitmap is
+     * available — so a cell never flashes black while /v1/discover items are resolving their thumbs.
+     */
     private static class PortraitImageView extends BackupImageView {
+        private final GridShimmer shimmer = new GridShimmer();
+        private final RectF rect = new RectF();
+
         PortraitImageView(Context context) {
             super(context);
         }
@@ -308,6 +574,84 @@ public class SvipeExploreGrid extends RecyclerListView {
             final int width = MeasureSpec.getSize(widthMeasureSpec);
             final int height = Math.round(width * 3f / 2f);
             super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            if (!getImageReceiver().hasBitmapImage()) {
+                final float inset = AndroidUtilities.dp(1);
+                rect.set(inset, inset, getWidth() - inset, getHeight() - inset);
+                shimmer.draw(canvas, rect, AndroidUtilities.dp(3), this);
+            }
+            super.onDraw(canvas);
+        }
+    }
+
+    /** No-data placeholder cell (3:2): pure shimmer, shown while {@code items} is still empty. */
+    private static class SkeletonCell extends View {
+        private final GridShimmer shimmer = new GridShimmer();
+        private final RectF rect = new RectF();
+
+        SkeletonCell(Context context) {
+            super(context);
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            final int width = MeasureSpec.getSize(widthMeasureSpec);
+            setMeasuredDimension(width, Math.round(width * 3f / 2f));
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            final float inset = AndroidUtilities.dp(1);
+            rect.set(inset, inset, getWidth() - inset, getHeight() - inset);
+            shimmer.draw(canvas, rect, AndroidUtilities.dp(3), this);
+        }
+    }
+
+    /**
+     * Theme-aware grid shimmer: an opaque gray placeholder with a soft highlight band sweeping across.
+     * The highlight is derived from the theme (only ~9% lighter in dark mode, so it isn't garish; a
+     * stronger lift in light mode where contrast is naturally lower). Self-animates via invalidate().
+     */
+    private static class GridShimmer {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Matrix matrix = new Matrix();
+        private LinearGradient gradient;
+        private int gradientWidth, base, highlight;
+        private float progress;
+        private long lastUpdate;
+
+        void draw(Canvas canvas, RectF rect, float rad, View view) {
+            final int b = Theme.getColor(Theme.key_windowBackgroundGray);
+            final boolean dark = (Color.red(b) * 0.299f + Color.green(b) * 0.587f + Color.blue(b) * 0.114f) < 128f;
+            final int h = ColorUtils.blendARGB(b, Color.WHITE, dark ? 0.09f : 0.45f);
+            final int w = AndroidUtilities.dp(200);
+            if (gradient == null || base != b || highlight != h || gradientWidth != w) {
+                base = b;
+                highlight = h;
+                gradientWidth = w;
+                gradient = new LinearGradient(0, 0, w, 0,
+                        new int[]{b, h, b}, new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP);
+                paint.setShader(gradient);
+            }
+            final long now = System.currentTimeMillis();
+            if (lastUpdate != 0) {
+                progress += (now - lastUpdate) / 1100f;
+                while (progress > 1f) {
+                    progress -= 1f;
+                }
+            }
+            lastUpdate = now;
+            final float x = (rect.width() + gradientWidth * 2f) * progress - gradientWidth;
+            matrix.reset();
+            matrix.setTranslate(rect.left + x, 0);
+            gradient.setLocalMatrix(matrix);
+            canvas.drawRoundRect(rect, rad, rad, paint);
+            if (view != null) {
+                view.invalidate();
+            }
         }
     }
 }
