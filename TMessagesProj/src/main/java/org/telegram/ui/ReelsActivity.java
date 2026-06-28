@@ -4,6 +4,10 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.os.Handler;
+import android.os.Looper;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.SurfaceTexture;
@@ -129,6 +133,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private int currentPosition = -1;
     private boolean userPaused;
     private int bottomInset;
+
+    // Video progress / scrub bar (overlay on root, reflects currentPlayer; see SeekBarView).
+    private SeekBarView seekBar;
+    private Handler positionUpdateHandler;
+    private Runnable updateProgressRunnable;
 
     // Stories trick: the next reel's player is created in advance and buffers PAUSED at LOW
     // priority; the swipe just attaches it to the texture — no setup, no buffer ramp-up.
@@ -315,6 +324,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             }
         });
         root.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+        // Draggable video progress bar — a thin always-on line above the caption + tab bar; it sits on
+        // root (not inside the RecyclerListView) so it gets normal touch dispatch for scrubbing.
+        seekBar = new SeekBarView(context);
+        FrameLayout.LayoutParams seekLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 20, Gravity.BOTTOM | Gravity.LEFT);
+        seekLp.bottomMargin = bottomInset + AndroidUtilities.dp(6);   // between the caption cluster (above) and the tab bar (below)
+        root.addView(seekBar, seekLp);
 
         statusView = new TextView(context);
         statusView.setTextColor(0xFFFFFFFF);
@@ -1445,6 +1461,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             try { currentPlayer.releasePlayer(true); } catch (Exception ignore) {}
             currentPlayer = null;
         }
+        // Reset the scrub bar so the incoming reel never briefly shows the previous reel's position.
+        if (seekBar != null) seekBar.setProgress(0f);
     }
 
     // ---------------- action handlers ----------------
@@ -1736,6 +1754,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         }
         if (reelEnterView != null) reelEnterView.onResume();
         if (root != null) root.onResume();
+        startPositionUpdates();
     }
 
     @Override
@@ -1748,6 +1767,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             reelEnterView.closeKeyboard();
         }
         if (root != null) root.onPause();
+        stopPositionUpdates();
     }
 
     /**
@@ -1795,6 +1815,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             try { reelEnterView.onDestroy(); } catch (Exception ignore) {}
             reelEnterView = null;
         }
+        stopPositionUpdates();
+        positionUpdateHandler = null;
+        updateProgressRunnable = null;
         releaseCurrentPlayer();
         releaseNextPlayer();
         // Cancel only the CURRENT reel's stream (its high-priority pull is wasteful once the screen
@@ -1809,6 +1832,129 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             }
         }
         super.onFragmentDestroy();
+    }
+
+    // ==== video progress / scrub bar ====
+
+    /** Continuous (~30fps) poll that drives the seek bar from the current player; skips while scrubbing. */
+    private void startPositionUpdates() {
+        if (positionUpdateHandler == null) {
+            positionUpdateHandler = new Handler(Looper.getMainLooper());
+        }
+        if (updateProgressRunnable == null) {
+            updateProgressRunnable = () -> {
+                if (seekBar != null && currentPlayer != null && !seekBar.dragging) {
+                    final long dur = currentPlayer.getDuration();
+                    if (dur > 0) {
+                        seekBar.setProgress((float) currentPlayer.getCurrentPosition() / dur);
+                    }
+                }
+                if (positionUpdateHandler != null) {
+                    positionUpdateHandler.postDelayed(updateProgressRunnable, 32);
+                }
+            };
+        }
+        positionUpdateHandler.removeCallbacks(updateProgressRunnable);
+        positionUpdateHandler.post(updateProgressRunnable);
+    }
+
+    private void stopPositionUpdates() {
+        if (positionUpdateHandler != null && updateProgressRunnable != null) {
+            positionUpdateHandler.removeCallbacks(updateProgressRunnable);
+        }
+    }
+
+    /**
+     * Thin always-on progress line over the video, draggable to seek the current reel. No time text.
+     * Drawn on a tall-enough hit strip; the right action-rail column is left untouched so its buttons
+     * keep working, and a horizontal scrub asks the parent tab pager not to steal the gesture.
+     */
+    private class SeekBarView extends View {
+        float progress;          // 0..1 playback fraction (read by the poller)
+        boolean dragging;        // poller skips updates while true
+        private float dragFraction;
+        private final Paint trackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint playedPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint thumbPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        SeekBarView(Context c) {
+            super(c);
+            trackPaint.setColor(0x40FFFFFF);
+            playedPaint.setColor(Theme.getColor(Theme.key_featuredStickers_addButton));
+            thumbPaint.setColor(0xFFFFFFFF);
+        }
+
+        void setProgress(float p) {
+            if (!dragging) {
+                progress = Math.max(0f, Math.min(1f, p));
+                invalidate();
+            }
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            final int w = getWidth();
+            final float cy = getHeight() / 2f;
+            final float half = AndroidUtilities.dp(dragging ? 2.5f : 1.25f);
+            final float frac = dragging ? dragFraction : progress;
+            final float playedW = w * frac;
+            canvas.drawRoundRect(0, cy - half, w, cy + half, half, half, trackPaint);
+            if (playedW > 0) {
+                canvas.drawRoundRect(0, cy - half, playedW, cy + half, half, half, playedPaint);
+            }
+            if (dragging) {
+                canvas.drawCircle(playedW, cy, AndroidUtilities.dp(7), thumbPaint);
+            }
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent e) {
+            final int w = getWidth();
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    // Leave the right rail column (and a zero-width pre-layout view) to the list below.
+                    if (w <= 0 || e.getX() > w - AndroidUtilities.dp(62)) {
+                        return false;
+                    }
+                    dragging = true;
+                    dragFraction = clamp01(e.getX() / w);
+                    if (getParent() != null) {
+                        getParent().requestDisallowInterceptTouchEvent(true);
+                    }
+                    invalidate();
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (dragging) {
+                        dragFraction = clamp01(e.getX() / (float) w);
+                        invalidate();
+                        return true;
+                    }
+                    return false;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    if (dragging) {
+                        dragging = false;
+                        if (getParent() != null) {
+                            getParent().requestDisallowInterceptTouchEvent(false);
+                        }
+                        if (e.getActionMasked() == MotionEvent.ACTION_UP && currentPlayer != null) {
+                            final long dur = currentPlayer.getDuration();
+                            if (dur > 0) {
+                                progress = dragFraction;
+                                currentPlayer.seekTo((long) (dragFraction * dur));
+                            }
+                        }
+                        invalidate();
+                        return true;
+                    }
+                    return false;
+            }
+            return false;
+        }
+
+        private float clamp01(float v) {
+            return Math.max(0f, Math.min(1f, v));
+        }
     }
 
     @Override
@@ -2019,7 +2165,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             rail.addView(moreIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
 
             FrameLayout.LayoutParams railLp = LayoutHelper.createFrame(56, LayoutHelper.WRAP_CONTENT, Gravity.RIGHT | Gravity.BOTTOM, 0, 0, 6, 0);
-            railLp.bottomMargin = bottomInset + AndroidUtilities.dp(8);
+            // Lifted to leave a row for the scrub bar between this cluster and the tab bar.
+            railLp.bottomMargin = bottomInset + AndroidUtilities.dp(30);
             page.addView(rail, railLp);
 
             // Bottom channel bar.
@@ -2082,7 +2229,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             bottomBox.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT, 0, 8, 0, 0));
 
             FrameLayout.LayoutParams bottomLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM | Gravity.LEFT, 14, 0, 64, 0);
-            bottomLp.bottomMargin = bottomInset + AndroidUtilities.dp(8);
+            // Lifted to leave a row for the scrub bar between the caption and the tab bar.
+            bottomLp.bottomMargin = bottomInset + AndroidUtilities.dp(30);
             page.addView(bottomBox, bottomLp);
 
             ReelsHolder holder = new ReelsHolder(page, aspect, tv, cover, pb, paused, likeIcon, likeCount,
