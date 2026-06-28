@@ -70,6 +70,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.BulletinFactory;
+import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.ChatActivityEnterView;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.Reactions.ReactionsLayoutInBubble;
@@ -1438,7 +1439,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             return true;
         }
         if (pointInView(h.shareIcon, e) || pointInView(h.shareCount, e)) { share(it); return true; }
-        if (pointInView(h.moreIcon, e)) { showMore(it); return true; }
+        if (pointInView(h.moreIcon, e)) { showMore(it, h); return true; }
         if (pointInView(h.followBtn, e)) { toggleFollow(it, h); return true; }
         if (pointInView(h.avatar, e) || pointInView(h.channelName, e)) { openComments(it); return true; }
         if (pointInView(h.title, e)) {
@@ -1621,23 +1622,21 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         } catch (Exception e) { FileLog.e(e); }
     }
 
-    private void showMore(FeedItem item) {
-        if (item == null || getParentActivity() == null) return;
-        AlertDialog.Builder b = new AlertDialog.Builder(getParentActivity());
-        CharSequence[] options = {"Shikoyat (Report)", "Kanalga o'tish", "Havolani nusxalash", "Qiziq emas"};
-        b.setItems(options, (dialog, which) -> {
-            if (which == 0) {
-                reportMessage(item);
-            } else if (which == 1) {
-                openComments(item);
-            } else if (which == 2) {
-                copyLink(item);
-            } else if (which == 3) {
-                sendEvent("NOT_INTERESTED", item);
-                BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "Bunday videolar kamroq ko'rsatiladi").show();
-            }
-        });
-        showDialog(b.create());
+    private void showMore(FeedItem item, ReelsHolder h) {
+        if (item == null || getParentActivity() == null || h == null || h.moreIcon == null) return;
+        // Telegram-style popup menu (an icon + label per row) anchored to the "more" (⋮) rail button —
+        // same look as the chat/audio-player overflow menus, via ItemOptions.
+        ItemOptions.makeOptions(this, h.moreIcon)
+                .setGravity(Gravity.RIGHT)
+                .add(R.drawable.msg_share, "Ulashish", () -> share(item))
+                .add(R.drawable.msg_copy, "Havolani nusxalash", () -> copyLink(item))
+                .add(R.drawable.msg_channel, "Kanalga o'tish", () -> openComments(item))
+                .add(R.drawable.msg_disable, "Qiziq emas", () -> {
+                    sendEvent("NOT_INTERESTED", item);
+                    BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "Bunday videolar kamroq ko'rsatiladi").show();
+                })
+                .add(R.drawable.msg_report, "Shikoyat", true, () -> reportMessage(item))
+                .show();
     }
 
     private void reportMessage(FeedItem item) {
