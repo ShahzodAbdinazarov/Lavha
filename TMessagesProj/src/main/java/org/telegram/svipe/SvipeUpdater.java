@@ -50,6 +50,7 @@ public class SvipeUpdater {
     private static final String KEY_LAST_CHECK = "last_check";
     private static final String KEY_PENDING_PATH = "pending_path";
     private static final String KEY_PENDING_VC = "pending_vc";
+    private static final String KEY_PROMPTED_VC = "prompted_vc";
 
     /** A newer version offered by the backend. */
     public static class Pending {
@@ -175,7 +176,13 @@ public class SvipeUpdater {
                     sha, url, res.optString("changelog", ""),
                     res.optBoolean("can_not_skip", false));
             notifyState(); // surface the drawer banner
-            promptUpdate(activity);
+            // Like native Telegram (LaunchActivity:6018), the bottom-sheet prompt is shown only the first
+            // time a given version is detected; every later check for the same version just refreshes the
+            // banner. A manual "check for updates" (force) still re-opens the sheet.
+            if (force || newVc != prefs().getInt(KEY_PROMPTED_VC, 0)) {
+                prefs().edit().putInt(KEY_PROMPTED_VC, newVc).apply();
+                promptUpdate(activity);
+            }
         });
     }
 

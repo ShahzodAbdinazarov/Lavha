@@ -16,6 +16,8 @@ import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AnimatedTextView;
@@ -127,16 +129,16 @@ public class SvipeUpdateLayout extends IUpdateLayout {
             boolean showSize;
             if (SvipeUpdater.isReady()) {
                 updateLayoutIcon.setIcon(MediaActionDrawable.ICON_UPDATE, true, animated);
-                updateTextView.setText("Yangilash uchun bosing", animated);
+                updateTextView.setText(LocaleController.getString(R.string.AppUpdateNow), animated);
                 showSize = false;
             } else if (SvipeUpdater.isDownloading()) {
                 updateLayoutIcon.setIcon(MediaActionDrawable.ICON_CANCEL, true, animated);
                 updateLayoutIcon.setProgress(SvipeUpdater.getProgress(), true);
-                updateTextView.setText("Yuklanmoqda… " + (int) (SvipeUpdater.getProgress() * 100) + "%", animated);
+                updateTextView.setText(LocaleController.formatString(R.string.AppUpdateDownloading, (int) (SvipeUpdater.getProgress() * 100)), animated);
                 showSize = false;
             } else {
                 updateLayoutIcon.setIcon(MediaActionDrawable.ICON_DOWNLOAD, true, animated);
-                updateTextView.setText("Yangilanish mavjud", animated);
+                updateTextView.setText(LocaleController.getString(R.string.SvipeUpdateTitle), animated);
                 showSize = true;
             }
             updateSizeTextView.setText(showSize ? AndroidUtilities.formatFileSize(SvipeUpdater.getPendingSize()) : null, animated);

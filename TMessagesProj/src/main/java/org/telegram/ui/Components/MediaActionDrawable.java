@@ -753,9 +753,11 @@ public class MediaActionDrawable extends Drawable {
             if (currentIcon != ICON_PLAY && currentIcon != ICON_PAUSE || currentIcon == ICON_NONE) {
                 canvas.scale(drawableScale, drawableScale);
             }
-            Theme.playPauseAnimator.draw(canvas, paint2, ms);
-            canvas.scale(1.0f, -1.0f);
-            Theme.playPauseAnimator.draw(canvas, paint2, ms);
+            if (Theme.playPauseAnimator != null) {
+                Theme.playPauseAnimator.draw(canvas, paint2, ms);
+                canvas.scale(1.0f, -1.0f);
+                Theme.playPauseAnimator.draw(canvas, paint2, ms);
+            }
 
             canvas.restore();
         }

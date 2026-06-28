@@ -4,4 +4,9 @@
     <string name="SvipeIntroTitle">Svipe</string>
     <string name="SvipeIntroMessage">Telegram kanallaridagi eng qiziqarli qisqa videolar — bitta tasmada.</string>
     <string name="SvipeIntroStart">Svayp qilishni boshlash</string>
+
+    <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"
+         via Telegram's cloud langpack, so the title uses this custom key the langpack cannot override).
+         The other update strings keep their native keys and are localized by the cloud langpack. -->
+    <string name="SvipeUpdateTitle">Svipe’ni yangilash</string>
 </resources>
