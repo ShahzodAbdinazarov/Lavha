@@ -72,6 +72,7 @@ public class SvipeUpdater {
     private static volatile boolean downloading;   // an HTTP download is in flight
     private static volatile float progress;        // 0..1 download progress
     private static volatile File readyFile;        // downloaded + verified APK, ready to install
+    private static boolean awaitingInstallPermission; // true only between the unknown-sources settings trip and the return
     private static volatile boolean cancelRequested;
 
     private static boolean checking;
@@ -312,7 +313,17 @@ public class SvipeUpdater {
                     }
                     return;
                 }
-                installApk(act, apk);
+                // Downloaded + verified. Do NOT auto-launch the installer — let the user tap (like
+                // Telegram). The banner already shows the "tap to install" state via notifyState() above;
+                // when there is no banner to tap, ask with a dialog instead of installing silently.
+                if (!hasBanner()) {
+                    new AlertDialog.Builder(act)
+                            .setTitle("Yangilanish tayyor")
+                            .setMessage("Yangi versiya yuklab olindi. Hozir o'rnatasizmi?")
+                            .setPositiveButton("O'rnatish", (d, w) -> installApk(act, apk))
+                            .setNegativeButton("Keyinroq", null)
+                            .show();
+                }
             });
         }, "svipe-apk-download").start();
     }
@@ -349,7 +360,12 @@ public class SvipeUpdater {
         File apk = new File(path);
         if (!apk.exists()) { clearPending(); return false; }
         readyFile = apk;
-        installApk(activity, apk);
+        notifyState(); // restore the "ready — tap to install" banner; do NOT auto-launch the installer
+        if (awaitingInstallPermission) {
+            // Returned from the unknown-sources settings round-trip — resume the user's own install.
+            awaitingInstallPermission = false;
+            installApk(activity, apk);
+        }
         return true;
     }
 
@@ -365,6 +381,7 @@ public class SvipeUpdater {
                     .setTitle("Ruxsat kerak")
                     .setMessage("Yangilanishni o'rnatish uchun Svipe'ga \"Noma'lum ilovalarni o'rnatish\" ruxsatini bering, so'ng yana bosing.")
                     .setPositiveButton("Sozlamalar", (d, w) -> {
+                        awaitingInstallPermission = true; // resume this install when we return from settings
                         try {
                             activity.startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                                     Uri.parse("package:" + activity.getPackageName())));
