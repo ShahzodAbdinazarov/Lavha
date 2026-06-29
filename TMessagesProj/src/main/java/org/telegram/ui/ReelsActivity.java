@@ -69,6 +69,7 @@ import org.telegram.ui.ActionBar.BackDrawable;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
+import org.telegram.ui.Components.Bulletin;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.ChatActivityEnterView;
@@ -139,6 +140,24 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private SeekBarView seekBar;
     private Handler positionUpdateHandler;
     private Runnable updateProgressRunnable;
+
+    // Channels the user blocked this session — filtered from the feed immediately for instant feedback;
+    // the BLOCK_CHANNEL event makes it durable + cross-device (the backend then excludes them server-side).
+    // Thread-safe: written on the UI thread (block/undo), read on background feed-load threads.
+    private final java.util.Set<Long> blockedChannels = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    // Float bulletins (undo / "less of this" / copy-link) above the floating native bottom tab bar —
+    // the exact anchor MainTabsActivity uses for its theme-change & account hints. Without a registered
+    // delegate, Bulletin falls back to getBottomInset() and the snackbar hides under the tab bar.
+    // In the search-seeded player there is no tab bar (the comment input bar sits there), so clear that.
+    private final Bulletin.Delegate bulletinDelegate = new Bulletin.Delegate() {
+        @Override
+        public int getBottomOffset(int tag) {
+            return discoverSeed
+                    ? bottomInset
+                    : AndroidUtilities.navigationBarHeight + AndroidUtilities.dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN);
+        }
+    };
 
     // Stories trick: the next reel's player is created in advance and buffers PAUSED at LOW
     // priority; the swipe just attaches it to the texture — no setup, no buffer ramp-up.
@@ -648,7 +667,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             int total = 0, skipWatched = 0, skipDeser = 0, skipNoFile = 0, downloadedUnwatched = 0;
             for (SvipeReelQueue.Entry e : reelQueue.list()) {
                 total++;
-                if (watchedSet.isWatched(e.channelId, e.messageId)) { skipWatched++; continue; } // never re-show watched
+                if (watchedSet.isWatched(e.channelId, e.messageId) || blockedChannels.contains(e.channelId)) { skipWatched++; continue; } // never re-show watched/blocked
                 if (e.downloaded) downloadedUnwatched++;
                 MessageObject mo = deserializeMessage(e.messageB64);
                 if (mo == null || mo.getDocument() == null) { skipDeser++; continue; }
@@ -822,7 +841,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                         int messageId = o.optInt("message_id");
                         // Never re-add what's already in the pager or already watched.
                         if (additive && containsItem(channelId, messageId)) continue;
-                        if (watchedSet != null && watchedSet.isWatched(channelId, messageId)) continue;
+                        if ((watchedSet != null && watchedSet.isWatched(channelId, messageId)) || blockedChannels.contains(channelId)) continue;
                         FeedItem it = new FeedItem();
                         it.channelId = channelId;
                         it.messageId = messageId;
@@ -1635,6 +1654,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     sendEvent("NOT_INTERESTED", item);
                     BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "Bunday videolar kamroq ko'rsatiladi").show();
                 })
+                .add(R.drawable.msg_channel_block, "Kanalni bloklash", () -> blockChannel(item, h))
                 .add(R.drawable.msg_report, "Shikoyat", true, () -> reportMessage(item))
                 .show();
     }
@@ -1661,6 +1681,48 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             cm.setPrimaryClip(ClipData.newPlainText("link", link));
             BulletinFactory.of(this).createCopyLinkBulletin().show();
         } catch (Exception e) { FileLog.e(e); }
+    }
+
+    /**
+     * Block a channel: drop all its reels from the feed right now + filter it from this session's
+     * loads (the backend BLOCK_CHANNEL event makes it durable). A Telegram-native undo snackbar
+     * restores everything if tapped; the event is only sent on commit (when the snackbar times out).
+     */
+    private void blockChannel(FeedItem item, ReelsHolder h) {
+        if (item == null || item.channelId == 0 || getParentActivity() == null) return;
+        final long channelId = item.channelId;
+        final ArrayList<FeedItem> snapshot = new ArrayList<>(items);
+        final int snapshotPos = currentPosition;
+
+        blockedChannels.add(channelId);
+        for (int i = items.size() - 1; i >= 0; i--) {
+            if (items.get(i).channelId == channelId) items.remove(i);
+        }
+        adapter.notifyDataSetChanged();
+        if (items.isEmpty()) {
+            releaseCurrentPlayer();
+            setStatus("Hozircha video yo'q");
+            loadMore();
+        } else {
+            final int newPos = Math.min(Math.max(currentPosition, 0), items.size() - 1);
+            currentPosition = -1; // force checkCurrentPage to (re)start whatever reel now sits at this slot
+            layoutManager.scrollToPosition(newPos);
+            AndroidUtilities.runOnUIThread(this::checkCurrentPage, 120);
+        }
+
+        BulletinFactory.of(this).createUndoBulletin(
+                "Kanal bloklandi",
+                () -> { // undo — restore the feed exactly as it was
+                    blockedChannels.remove(channelId);
+                    items.clear();
+                    items.addAll(snapshot);
+                    adapter.notifyDataSetChanged();
+                    currentPosition = -1;
+                    layoutManager.scrollToPosition(Math.min(Math.max(snapshotPos, 0), Math.max(items.size() - 1, 0)));
+                    AndroidUtilities.runOnUIThread(this::checkCurrentPage, 120);
+                },
+                () -> sendEvent("BLOCK_CHANNEL", item) // commit — tell the backend to stop recommending it
+        ).show();
     }
 
     private void toggleFollow(FeedItem item, ReelsHolder holder) {
@@ -1754,6 +1816,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (reelEnterView != null) reelEnterView.onResume();
         if (root != null) root.onResume();
         startPositionUpdates();
+        Bulletin.addDelegate(this, bulletinDelegate);
     }
 
     @Override
@@ -1767,6 +1830,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         }
         if (root != null) root.onPause();
         stopPositionUpdates();
+        Bulletin.removeDelegate(this);
     }
 
     /**

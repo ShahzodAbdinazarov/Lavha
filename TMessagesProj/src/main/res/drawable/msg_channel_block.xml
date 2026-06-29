@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  "Block channel" menu icon = the EXACT channel icon (msg_channel, same glyph as the "Kanalga o'tish"
+  item) with a smaller prohibition badge layered on top of its bottom-right corner. Both layers are
+  white-on-transparent; ItemOptions applies one PorterDuff.MULTIPLY color filter over the whole
+  drawable, so the composite tints uniformly like every other menu glyph.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/msg_channel" />
+    <item android:drawable="@drawable/msg_channel_block_badge" />
+</layer-list>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Block badge only (prohibition sign: ring + diagonal slash), drawn in the bottom-right corner of a
+  24dp / 72-viewport canvas so it can be layered directly over the full-size channel icon without any
+  inset/gravity (API-safe). Single fillColor — tinted with the channel layer by ItemOptions.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="72"
+    android:viewportHeight="72">
+
+    <!-- Ring (donut: outer minus inner, even-odd) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M38,54 a16,16 0 1,0 32,0 a16,16 0 1,0 -32,0 Z M42,54 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0 Z" />
+
+    <!-- Diagonal slash (top-left to bottom-right) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44.1,46.92 L61.08,63.9 L63.9,61.08 L46.92,44.1 Z" />
+</vector>
