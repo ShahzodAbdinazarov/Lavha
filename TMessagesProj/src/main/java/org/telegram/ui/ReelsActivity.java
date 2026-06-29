@@ -74,6 +74,7 @@ import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.Bulletin;
 import org.telegram.ui.Components.BulletinFactory;
+import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.ChatActivityEnterView;
@@ -2328,7 +2329,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         final TextureView textureView;
         final BackupImageView cover; // video thumbnail shown until the first frame renders
         final ProgressBar loading;
-        final TextView pausedIcon;
+        final ImageView pausedIcon;
         final ImageView likeIcon;
         final TextView likeCount;
         final ImageView commentIcon;
@@ -2345,7 +2346,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         ImageView shareIcon, moreIcon;  // not in the ctor — needed for list-level tap dispatch
 
         ReelsHolder(FrameLayout root, AspectRatioFrameLayout aspect, TextureView tv, BackupImageView cover, ProgressBar pb,
-                    TextView paused, ImageView likeIcon, TextView likeCount, ImageView commentIcon,
+                    ImageView paused, ImageView likeIcon, TextView likeCount, ImageView commentIcon,
                     TextView commentCount, TextView shareCount, BackupImageView avatar, TextView channelName,
                     ImageView verifiedBadge, TextView followBtn, TextView title) {
             super(root);
@@ -2449,10 +2450,17 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             ProgressBar pb = new ProgressBar(ctx);
             page.addView(pb, LayoutHelper.createFrame(46, 46, Gravity.CENTER));
 
-            TextView paused = new TextView(ctx);
-            paused.setText("▍▍");
-            paused.setTextColor(0xCCFFFFFF);
-            paused.setTextSize(40);
+            // Center pause indicator = Telegram's own player look: a white play triangle inside a
+            // translucent circle (circle_big + ic_action_play via CombinedDrawable). Kept self-contained
+            // (no PlayPauseDrawable) because that needs Theme.playPauseAnimator, which isn't initialised
+            // in the reels (only when a chat is opened) — so its glyph would render empty here.
+            ImageView paused = new ImageView(ctx);
+            android.graphics.drawable.Drawable pauseCircle = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.circle_big);
+            android.graphics.drawable.Drawable pausePlay = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.ic_action_play);
+            CombinedDrawable pausedDrawable = new CombinedDrawable(pauseCircle != null ? pauseCircle.mutate() : null, pausePlay);
+            pausedDrawable.setCustomSize(AndroidUtilities.dp(64), AndroidUtilities.dp(64));
+            pausedDrawable.setIconSize(AndroidUtilities.dp(30), AndroidUtilities.dp(30));
+            paused.setImageDrawable(pausedDrawable);
             paused.setVisibility(View.GONE);
             page.addView(paused, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
 
