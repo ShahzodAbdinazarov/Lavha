@@ -1,5 +1,8 @@
 package org.telegram.ui;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -71,6 +74,7 @@ import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.Bulletin;
 import org.telegram.ui.Components.BulletinFactory;
+import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.ChatActivityEnterView;
 import org.telegram.ui.Components.LayoutHelper;
@@ -142,6 +146,24 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private static final long MIN_SEEKBAR_DURATION_MS = 15_000;
     private Handler positionUpdateHandler;
     private Runnable updateProgressRunnable;
+
+    // ---- Two-finger pinch-to-zoom on the playing video (Telegram-player style) ----
+    // The reels player drives a VideoPlayer onto a TextureView (NOT MediaController), so Telegram's
+    // PinchToZoomHelper video path doesn't apply. Instead we scale+pan the live video view (aspect +
+    // cover) in place and fade EVERY overlay (rail/caption/gradient/scrub bar) to zero while pinching,
+    // so nothing covers the video — then spring it all back over 220ms when the fingers lift.
+    private boolean pinchClaimed;     // a 2-finger gesture is owned by the zoom (until the last finger lifts)
+    private boolean pinchActive;      // currently transforming (two fingers down)
+    private ReelsHolder pinchHolder;  // the reel being zoomed
+    private float pinchStartDistance;
+    private float pinchCenterX, pinchCenterY;
+    private float pinchScale = 1f;
+    private float pinchTransX, pinchTransY;
+    private ValueAnimator pinchFinishAnimator;
+    private static final float PINCH_MAX_SCALE = 3f;
+    // Host controller — set only when shown as the MainTabsActivity "Reels" tab. Lets the pinch hide the
+    // floating bottom tab bar so the zoomed video rises above it too (null in the search-seeded player).
+    private MainTabsActivityController mainTabsController;
 
     // Channels the user blocked this session — filtered from the feed immediately for instant feedback;
     // the BLOCK_CHANNEL event makes it durable + cross-device (the backend then excludes them server-side).
@@ -328,11 +350,22 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         listView.addOnItemTouchListener(new RecyclerView.OnItemTouchListener() {
             @Override
             public boolean onInterceptTouchEvent(RecyclerView rv, MotionEvent e) {
+                boolean wasClaimed = pinchClaimed;
+                if (handlePinch(e)) {
+                    if (!wasClaimed) {
+                        // A pinch just took over — cancel the pending tap so the lift can't pause/like.
+                        MotionEvent cancel = MotionEvent.obtain(e);
+                        cancel.setAction(MotionEvent.ACTION_CANCEL);
+                        tapDetector.onTouchEvent(cancel);
+                        cancel.recycle();
+                    }
+                    return true; // two-finger zoom owns the gesture — stop vertical paging
+                }
                 tapDetector.onTouchEvent(e);
                 return false; // observe only — never intercept paging
             }
             @Override
-            public void onTouchEvent(RecyclerView rv, MotionEvent e) {}
+            public void onTouchEvent(RecyclerView rv, MotionEvent e) { handlePinch(e); }
             @Override
             public void onRequestDisallowInterceptTouchEvent(boolean disallow) {}
         });
@@ -1471,6 +1504,159 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         return false;
     }
 
+    // ===================== Pinch-to-zoom on the playing video =====================
+    // Telegram's own player lets you pinch a playing video so it floats above all UI and snaps back on
+    // release. We reproduce that for reels: transform the live video view in place and fade every
+    // overlay during the gesture, which reads identically — the video alone, on top of everything.
+
+    /** Route a possible two-finger pinch. Returns true while the zoom owns the gesture (so the list
+     *  stops paging and single-tap/play-pause are bypassed). Fed from the list-level touch listener. */
+    private boolean handlePinch(MotionEvent e) {
+        final int action = e.getActionMasked();
+        if (!pinchClaimed) {
+            if (action == MotionEvent.ACTION_POINTER_DOWN && e.getPointerCount() == 2) {
+                ReelsHolder h = holderAt(currentPosition);
+                if (h == null) return false; // nothing to zoom — let paging/taps proceed
+                startPinch(e, h);
+                return true;
+            }
+            return false;
+        }
+        switch (action) {
+            case MotionEvent.ACTION_MOVE:
+                if (pinchActive && e.getPointerCount() >= 2) updatePinch(e);
+                break;
+            case MotionEvent.ACTION_POINTER_UP:
+                if (pinchActive && e.getPointerCount() == 2) finishPinch(); // 2 -> 1 finger: release
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                if (pinchActive) finishPinch();
+                pinchClaimed = false;
+                break;
+        }
+        return true; // keep swallowing the rest of this gesture (e.g. the lone remaining finger)
+    }
+
+    private void startPinch(MotionEvent e, ReelsHolder h) {
+        if (pinchFinishAnimator != null) { pinchFinishAnimator.cancel(); pinchFinishAnimator = null; }
+        pinchHolder = h;
+        pinchClaimed = true;
+        pinchActive = true;
+        pinchStartDistance = Math.max(1f, (float) Math.hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0)));
+        pinchCenterX = (e.getX(0) + e.getX(1)) / 2f;
+        pinchCenterY = (e.getY(0) + e.getY(1)) / 2f;
+        pinchScale = 1f;
+        pinchTransX = pinchTransY = 0f;
+        // Anchor the zoom at the initial pinch point; dragging the two fingers pans it (Telegram-style).
+        // The page/aspect fill the screen, so the list-local event coords are the aspect's pivot coords.
+        if (h.aspect != null) { h.aspect.setPivotX(pinchCenterX); h.aspect.setPivotY(pinchCenterY); }
+        if (h.cover != null) { h.cover.setPivotX(pinchCenterX); h.cover.setPivotY(pinchCenterY); }
+        // Lift the floating bottom tab bar out of the way so the zoomed video rises above it too.
+        if (mainTabsController != null) mainTabsController.setTabsVisible(false);
+    }
+
+    private void updatePinch(MotionEvent e) {
+        if (pinchHolder == null) return;
+        float dist = (float) Math.hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0));
+        float cx = (e.getX(0) + e.getX(1)) / 2f;
+        float cy = (e.getY(0) + e.getY(1)) / 2f;
+        pinchScale = Math.max(1f, Math.min(PINCH_MAX_SCALE, dist / pinchStartDistance));
+        pinchTransX = cx - pinchCenterX;
+        pinchTransY = cy - pinchCenterY;
+        applyPinch(pinchHolder, pinchScale, pinchTransX, pinchTransY);
+    }
+
+    private void applyPinch(ReelsHolder h, float scale, float tx, float ty) {
+        if (h == null) return;
+        if (h.aspect != null) {
+            h.aspect.setScaleX(scale); h.aspect.setScaleY(scale);
+            h.aspect.setTranslationX(tx); h.aspect.setTranslationY(ty);
+        }
+        if (h.cover != null) {
+            h.cover.setScaleX(scale); h.cover.setScaleY(scale);
+            h.cover.setTranslationX(tx); h.cover.setTranslationY(ty);
+        }
+        // Fade all chrome out as the zoom grows — fully gone by 1.5x — so nothing covers the video.
+        float chrome = Math.max(0f, Math.min(1f, 1f - (scale - 1f) / 0.5f));
+        setChromeAlpha(h, chrome);
+    }
+
+    /** Fade everything over the video: the page's overlays (rail/caption/gradient) except the video
+     *  itself, plus the root overlays (scrub bar, status, back, input) except the reel list. */
+    private void setChromeAlpha(ReelsHolder h, float alpha) {
+        if (h != null && h.itemView instanceof ViewGroup) {
+            ViewGroup page = (ViewGroup) h.itemView;
+            for (int i = 0; i < page.getChildCount(); i++) {
+                View c = page.getChildAt(i);
+                if (c == h.aspect || c == h.cover) continue;
+                c.setAlpha(alpha);
+            }
+        }
+        for (int i = 0; i < root.getChildCount(); i++) {
+            View c = root.getChildAt(i);
+            if (c != listView) c.setAlpha(alpha);
+        }
+    }
+
+    private void finishPinch() {
+        pinchActive = false;
+        // Bring the bottom tab bar back as the video springs home.
+        if (mainTabsController != null) mainTabsController.setTabsVisible(true);
+        final ReelsHolder h = pinchHolder;
+        if (h == null) return;
+        final float fromScale = pinchScale, fromTx = pinchTransX, fromTy = pinchTransY;
+        if (pinchFinishAnimator != null) pinchFinishAnimator.cancel();
+        pinchFinishAnimator = ValueAnimator.ofFloat(1f, 0f);
+        pinchFinishAnimator.setDuration(220);
+        pinchFinishAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
+        pinchFinishAnimator.addUpdateListener(a -> {
+            float t = (float) a.getAnimatedValue();
+            applyPinch(h, 1f + (fromScale - 1f) * t, fromTx * t, fromTy * t);
+        });
+        pinchFinishAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(Animator animation) {
+                resetPinchTransform(h);
+                if (pinchHolder == h) pinchHolder = null;
+                pinchFinishAnimator = null;
+            }
+        });
+        pinchFinishAnimator.start();
+    }
+
+    /** Hard-reset a holder's zoom transform + restore every overlay alpha to 1 (page + root). */
+    private void resetPinchTransform(ReelsHolder h) {
+        resetHolderZoom(h);
+        for (int i = 0; i < root.getChildCount(); i++) {
+            View c = root.getChildAt(i);
+            if (c != listView) c.setAlpha(1f);
+        }
+    }
+
+    /** Reset just the holder's own views (video transform + its page-overlay alphas) — also used
+     *  defensively when a holder is (re)bound so a recycled one never starts mid-zoom. */
+    private void resetHolderZoom(ReelsHolder h) {
+        if (h == null) return;
+        if (h.aspect != null) {
+            h.aspect.setScaleX(1f); h.aspect.setScaleY(1f);
+            h.aspect.setTranslationX(0f); h.aspect.setTranslationY(0f);
+        }
+        if (h.cover != null) {
+            h.cover.setScaleX(1f); h.cover.setScaleY(1f);
+            h.cover.setTranslationX(0f); h.cover.setTranslationY(0f);
+        }
+        if (h.itemView instanceof ViewGroup) {
+            ViewGroup page = (ViewGroup) h.itemView;
+            for (int i = 0; i < page.getChildCount(); i++) page.getChildAt(i).setAlpha(1f);
+        }
+    }
+
+    /** Wired by MainTabsActivity when this is the "Reels" tab — used so the pinch-zoom can hide the
+     *  floating bottom tab bar (it lives in MainTabsActivity, above this fragment). */
+    public void setMainTabsActivityController(MainTabsActivityController controller) {
+        this.mainTabsController = controller;
+    }
+
     private void pauseWatchClock() {
         if (watchStartMs > 0) {
             watchedAccumMs += System.currentTimeMillis() - watchStartMs;
@@ -2322,6 +2508,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         @Override
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
             ReelsHolder h = (ReelsHolder) holder;
+            resetHolderZoom(h); // a recycled holder must never start mid-pinch-zoom
             FeedItem item = items.get(position);
             h.showLoading(true);
             h.setPaused(false);

@@ -682,7 +682,10 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         if (position == POSITION_REELS) {
             Bundle args = new Bundle();
             args.putBoolean("hasMainTabs", true);
-            return new ReelsActivity(args);
+            ReelsActivity reels = new ReelsActivity(args);
+            // Let the reels pinch-zoom hide the floating bottom tab bar so the video rises above it.
+            reels.setMainTabsActivityController(new MainTabsActivityControllerImpl());
+            return reels;
         } else if (position == POSITION_SEARCH) {
             Bundle args = new Bundle();
             args.putBoolean("hasMainTabs", true);
