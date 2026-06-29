@@ -165,6 +165,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     // floating bottom tab bar so the zoomed video rises above it too (null in the search-seeded player).
     private MainTabsActivityController mainTabsController;
 
+    // ---- One-finger long-press "peek": hide ALL chrome (rail/caption/scrub/tab bar/pause icon) so the
+    // bare video shows; restore on release. Playback is untouched — playing stays playing, paused stays
+    // paused, and the pause icon is hidden while peeking. ----
+    private boolean peeking;
+    private ReelsHolder peekHolder;
+    private ValueAnimator peekAnimator;
+
     // Channels the user blocked this session — filtered from the feed immediately for instant feedback;
     // the BLOCK_CHANNEL event makes it durable + cross-device (the backend then excludes them server-side).
     // Thread-safe: written on the UI thread (block/undo), read on background feed-load threads.
@@ -346,6 +353,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 }
                 return false;
             }
+            @Override
+            public void onLongPress(MotionEvent e) {
+                // Press-and-hold to peek the bare video: hide everything over it. No play/pause change.
+                if (pinchClaimed) return; // a two-finger gesture owns this
+                ReelsHolder h = holderAt(currentPosition);
+                if (h != null) startPeek(h);
+            }
         });
         listView.addOnItemTouchListener(new RecyclerView.OnItemTouchListener() {
             @Override
@@ -361,11 +375,18 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     }
                     return true; // two-finger zoom owns the gesture — stop vertical paging
                 }
-                tapDetector.onTouchEvent(e);
+                tapDetector.onTouchEvent(e); // may fire onLongPress -> startPeek
+                if (peeking) {
+                    endPeekOnUp(e);
+                    return true; // hold the gesture while peeking — no paging
+                }
                 return false; // observe only — never intercept paging
             }
             @Override
-            public void onTouchEvent(RecyclerView rv, MotionEvent e) { handlePinch(e); }
+            public void onTouchEvent(RecyclerView rv, MotionEvent e) {
+                handlePinch(e);
+                if (peeking) endPeekOnUp(e);
+            }
             @Override
             public void onRequestDisallowInterceptTouchEvent(boolean disallow) {}
         });
@@ -1539,6 +1560,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void startPinch(MotionEvent e, ReelsHolder h) {
+        if (peeking) cancelPeek(); // a pinch supersedes a peek; the pinch manages chrome from here
         if (pinchFinishAnimator != null) { pinchFinishAnimator.cancel(); pinchFinishAnimator = null; }
         pinchHolder = h;
         pinchClaimed = true;
@@ -1655,6 +1677,56 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
      *  floating bottom tab bar (it lives in MainTabsActivity, above this fragment). */
     public void setMainTabsActivityController(MainTabsActivityController controller) {
         this.mainTabsController = controller;
+    }
+
+    // ===================== Long-press peek (hide all chrome) =====================
+    // Press and hold one finger on a reel to peek the bare video: rail, caption, scrub bar, the
+    // bottom tab bar and even the pause icon all fade away. Lift to bring them back. Playback is
+    // never touched — a playing reel keeps playing, a paused one stays paused (no pause icon while held).
+
+    private void startPeek(ReelsHolder h) {
+        if (peeking || pinchClaimed) return;
+        peeking = true;
+        peekHolder = h;
+        if (mainTabsController != null) mainTabsController.setTabsVisible(false);
+        animatePeek(h, 0f); // fade all chrome out
+        try { listView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); } catch (Exception ignore) {}
+    }
+
+    private void endPeek() {
+        if (!peeking) return;
+        peeking = false;
+        if (mainTabsController != null) mainTabsController.setTabsVisible(true);
+        final ReelsHolder h = peekHolder;
+        if (h != null) animatePeek(h, 1f); // fade all chrome back in
+    }
+
+    /** Drop the peek WITHOUT restoring chrome — used when a pinch takes over (the pinch owns chrome). */
+    private void cancelPeek() {
+        peeking = false;
+        if (peekAnimator != null) { peekAnimator.cancel(); peekAnimator = null; }
+        peekHolder = null;
+    }
+
+    private void animatePeek(ReelsHolder h, float to) {
+        if (peekAnimator != null) peekAnimator.cancel();
+        peekAnimator = ValueAnimator.ofFloat(to == 0f ? 1f : 0f, to);
+        peekAnimator.setDuration(180);
+        peekAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
+        peekAnimator.addUpdateListener(a -> setChromeAlpha(h, (float) a.getAnimatedValue()));
+        peekAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(Animator animation) {
+                setChromeAlpha(h, to); // snap to exact target
+                if (to == 1f && peekHolder == h) peekHolder = null;
+                peekAnimator = null;
+            }
+        });
+        peekAnimator.start();
+    }
+
+    private void endPeekOnUp(MotionEvent e) {
+        int a = e.getActionMasked();
+        if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) endPeek();
     }
 
     private void pauseWatchClock() {
