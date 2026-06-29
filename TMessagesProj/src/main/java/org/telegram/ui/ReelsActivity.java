@@ -1915,11 +1915,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 .add(R.drawable.msg_share, "Ulashish", () -> share(item))
                 .add(R.drawable.msg_copy, "Havolani nusxalash", () -> copyLink(item))
                 .add(R.drawable.msg_channel, "Kanalga o'tish", () -> openComments(item))
-                .add(R.drawable.msg_disable, "Qiziq emas", () -> {
+                .add(R.drawable.msg2_block2, "Qiziq emas", () -> {
                     sendEvent("NOT_INTERESTED", item);
                     BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "Bunday videolar kamroq ko'rsatiladi").show();
                 })
-                .add(R.drawable.msg_channel_block, "Kanalni bloklash", () -> blockChannel(item, h))
+                .add(R.drawable.msg_disable, "Kanalni bloklash", () -> blockChannel(item, h))
                 .add(R.drawable.msg_report, "Shikoyat", true, () -> reportMessage(item))
                 .show();
     }
