@@ -1,14 +1,19 @@
 package org.telegram.svipe;
 
 import android.app.Activity;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageInstaller;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
 
@@ -20,8 +25,11 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.ui.ActionBar.AlertDialog;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -393,6 +401,22 @@ public class SvipeUpdater {
                     .show();
             return;
         }
+        // Prefer the modern PackageInstaller session API. The legacy ACTION_VIEW hand-off below is what
+        // Telegram itself uses, but it fails on some OEM ROMs (notably MIUI/Xiaomi) with a generic
+        // "App not installed" and gives us no reason. The session API is more reliable there, can skip
+        // the confirm dialog entirely when the OS allows a same-package self-update, and reports the
+        // real failure code via a status callback. Fall back to the classic intent if the session
+        // can't even be created.
+        try {
+            installViaSession(activity.getApplicationContext(), apk);
+        } catch (Exception e) {
+            FileLog.e(e);
+            installViaView(activity, apk);
+        }
+    }
+
+    /** Classic hand-off to the system installer (Telegram's own approach); used as a fallback. */
+    private static void installViaView(Activity activity, File apk) {
         try {
             Intent intent = new Intent(Intent.ACTION_VIEW);
             Uri uri = FileProvider.getUriForFile(activity, activity.getPackageName() + ".provider", apk);
@@ -401,6 +425,99 @@ public class SvipeUpdater {
             activity.startActivity(intent);
         } catch (Exception e) {
             FileLog.e(e);
+        }
+    }
+
+    private static final String INSTALL_STATUS_ACTION = "org.telegram.svipe.SVIPE_INSTALL_STATUS";
+    private static volatile boolean installReceiverRegistered = false;
+
+    /** Stream the APK into a PackageInstaller session and commit it; status arrives on our receiver. */
+    private static void installViaSession(Context context, File apk) throws IOException {
+        Context appCtx = context.getApplicationContext();
+        registerInstallReceiver(appCtx);
+        PackageInstaller installer = appCtx.getPackageManager().getPackageInstaller();
+        PackageInstaller.SessionParams params =
+                new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+        params.setAppPackageName(appCtx.getPackageName());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Allow a silent self-update when the OS permits it (we're the same, identically-signed
+            // package). When it isn't allowed the system just falls back to STATUS_PENDING_USER_ACTION,
+            // which our receiver turns into the normal confirm dialog.
+            try {
+                params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
+            } catch (Throwable ignore) {}
+        }
+        int sessionId = installer.createSession(params);
+        PackageInstaller.Session session = installer.openSession(sessionId);
+        try (OutputStream out = session.openWrite("svipe_update.apk", 0, apk.length());
+             InputStream in = new FileInputStream(apk)) {
+            byte[] buf = new byte[1 << 16];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+            session.fsync(out);
+        }
+        Intent statusIntent = new Intent(INSTALL_STATUS_ACTION).setPackage(appCtx.getPackageName());
+        int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            piFlags |= PendingIntent.FLAG_MUTABLE; // the OS fills in the confirm Intent
+        }
+        PendingIntent pi = PendingIntent.getBroadcast(appCtx, sessionId, statusIntent, piFlags);
+        session.commit(pi.getIntentSender());
+        session.close();
+    }
+
+    /** One process-wide receiver for PackageInstaller session callbacks (confirm UI / success / error). */
+    private static void registerInstallReceiver(Context appCtx) {
+        if (installReceiverRegistered) return;
+        installReceiverRegistered = true;
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context ctx, Intent intent) {
+                int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS,
+                        PackageInstaller.STATUS_FAILURE);
+                if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                    Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
+                    if (confirm != null) {
+                        confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        try {
+                            ctx.startActivity(confirm);
+                        } catch (Exception e) {
+                            FileLog.e(e);
+                        }
+                    }
+                    return;
+                }
+                if (status == PackageInstaller.STATUS_SUCCESS) {
+                    clearPending(); // done — the system restarts us into the new build
+                    return;
+                }
+                if (status == PackageInstaller.STATUS_FAILURE_ABORTED) {
+                    return; // user dismissed the confirm dialog — stay quiet
+                }
+                final String msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
+                FileLog.e("Svipe self-update install failed: status=" + status + " msg=" + msg);
+                AndroidUtilities.runOnUIThread(() -> {
+                    try {
+                        Toast.makeText(ApplicationLoader.applicationContext,
+                                "O'rnatib bo'lmadi" + (msg != null ? ": " + msg : "")
+                                        + ". Saytdan qo'lda yuklab ko'ring.",
+                                Toast.LENGTH_LONG).show();
+                    } catch (Exception ignore) {}
+                });
+            }
+        };
+        IntentFilter filter = new IntentFilter(INSTALL_STATUS_ACTION);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                appCtx.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                appCtx.registerReceiver(receiver, filter);
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+            installReceiverRegistered = false;
         }
     }
 
