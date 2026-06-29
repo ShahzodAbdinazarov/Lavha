@@ -138,6 +138,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
 
     // Video progress / scrub bar (overlay on root, reflects currentPlayer; see SeekBarView).
     private SeekBarView seekBar;
+    // Clips shorter than this get no scrub bar — there's nothing meaningful to drag through.
+    private static final long MIN_SEEKBAR_DURATION_MS = 15_000;
     private Handler positionUpdateHandler;
     private Runnable updateProgressRunnable;
 
@@ -1481,8 +1483,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             try { currentPlayer.releasePlayer(true); } catch (Exception ignore) {}
             currentPlayer = null;
         }
-        // Reset the scrub bar so the incoming reel never briefly shows the previous reel's position.
-        if (seekBar != null) seekBar.setProgress(0f);
+        // Reset the scrub bar so the incoming reel never briefly shows the previous reel's position;
+        // hide it until the poll learns the new clip's duration (short clips then stay hidden, no flash).
+        if (seekBar != null) {
+            seekBar.setProgress(0f);
+            seekBar.setVisibility(View.GONE);
+        }
     }
 
     // ---------------- action handlers ----------------
@@ -1909,6 +1915,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 if (seekBar != null && currentPlayer != null && !seekBar.dragging) {
                     final long dur = currentPlayer.getDuration();
                     if (dur > 0) {
+                        // Show the scrub bar only once we know the clip is long enough to be worth scrubbing.
+                        seekBar.setVisibility(dur < MIN_SEEKBAR_DURATION_MS ? View.GONE : View.VISIBLE);
                         seekBar.setProgress((float) currentPlayer.getCurrentPosition() / dur);
                     }
                 }
