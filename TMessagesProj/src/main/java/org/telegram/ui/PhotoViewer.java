@@ -2076,6 +2076,11 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     private boolean wasLayout;
     private boolean dontResetZoomOnFirstLayout;
 
+    // Svipe: when set (from Search→Media), the pager swaps axes — a VERTICAL drag pages between
+    // media (reels-style) and a HORIZONTAL drag dismisses. translationX stays the "page scalar" and
+    // translationY the "dismiss scalar"; only the input mapping and the draw axis are transposed,
+    // and only at scale==1 (you can't page while zoomed), so the normal path is untouched.
+    public boolean verticalPaging;
     private boolean draggingDown;
     private float dragY;
     private float translationX;
@@ -2754,6 +2759,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         public int starOffset;
         public boolean fadeIn;
         public boolean keepImageReceiverVisible;
+        // Svipe: opening from Search→Media sets this so the viewer pages on the vertical axis.
+        public boolean verticalPaging;
     }
 
     public static class EmptyPhotoViewerProvider implements PhotoViewerProvider {
@@ -17612,6 +17619,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         }
 
         final PlaceProviderObject object = provider.getPlaceForPhoto(messageObject, fileLocation, index, true, false);
+        verticalPaging = object != null && object.verticalPaging;   // Svipe: reset per open; only Search→Media sets it
         WindowManager wm = (WindowManager) parentActivity.getSystemService(Context.WINDOW_SERVICE);
         if (attachedToWindow) {
             try {
@@ -19271,8 +19279,11 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 if (velocityTracker != null) {
                     velocityTracker.addMovement(ev);
                 }
-                float dx = Math.abs(ev.getX() - moveStartX);
-                float dy = Math.abs(ev.getY() - dragY);
+                // Svipe vertical paging: at scale==1, swap the gesture axes so a VERTICAL drag pages
+                // and a HORIZONTAL drag dismisses. dx = page-axis travel, dy = dismiss-axis travel.
+                final boolean vp = verticalPaging && scale == 1 && currentEditMode == EDIT_MODE_NONE && sendPhotoType != SELECT_TYPE_AVATAR && sendPhotoType != SELECT_TYPE_STICKER;
+                float dx = Math.abs((vp ? ev.getY() : ev.getX()) - (vp ? moveStartY : moveStartX));
+                float dy = Math.abs((vp ? ev.getX() : ev.getY()) - (vp ? moveStartX : dragY));
                 if (dx > touchSlop || dy > touchSlop) {
                     discardTap = true;
                     hidePressedDrawables();
@@ -19285,7 +19296,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     draggingDown = true;
                     hidePressedDrawables();
                     moving = false;
-                    dragY = ev.getY();
+                    dragY = vp ? ev.getX() : ev.getY();
                     if (isActionBarVisible && containerView.getTag() != null) {
                         toggleActionBar(false, true);
                     } else if (pickerView.getVisibility() == View.VISIBLE) {
@@ -19295,11 +19306,11 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     }
                     return true;
                 } else if (draggingDown) {
-                    translationY = ev.getY() - dragY;
+                    translationY = (vp ? ev.getX() : ev.getY()) - dragY;
                     containerView.invalidate();
                 } else if (!invalidCoords && animationStartTime == 0) {
-                    float moveDx = moveStartX - ev.getX();
-                    float moveDy = moveStartY - ev.getY();
+                    float moveDx = (vp ? moveStartY : moveStartX) - (vp ? ev.getY() : ev.getX());   // page-axis delta -> translationX
+                    float moveDy = (vp ? moveStartX : moveStartY) - (vp ? ev.getX() : ev.getY());   // dismiss-axis (perp) delta
                     if (moving || currentEditMode != EDIT_MODE_NONE || sendPhotoType == SELECT_TYPE_STICKER || scale == 1 && Math.abs(moveDy) + dp(12) < Math.abs(moveDx) || scale != 1) {
                         if (!moving) {
                             moveDx = 0;
@@ -19413,8 +19424,12 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 zooming = false;
                 moving = false;
             } else if (draggingDown) {
-                if (Math.abs(dragY - ev.getY()) > getContainerViewHeight() / 6.0f) {
-                    if (enableSwipeToPiP() && (dragY - ev.getY() > 0)) {
+                // Svipe vertical paging: the dismiss drag is horizontal, so measure it on X against width.
+                final boolean vpDismiss = verticalPaging && scale == 1;
+                final float dismissCoord = vpDismiss ? ev.getX() : ev.getY();
+                final float dismissExtent = vpDismiss ? getContainerViewWidth() : getContainerViewHeight();
+                if (Math.abs(dragY - dismissCoord) > dismissExtent / 6.0f) {
+                    if (enableSwipeToPiP() && !vpDismiss && (dragY - dismissCoord > 0)) {
                         switchToPip(true);
                     } else {
                         closePhoto(true, false);
@@ -19428,6 +19443,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 }
                 draggingDown = false;
             } else if (moving) {
+                // Svipe vertical paging: page on the vertical axis — read Y velocity, threshold on height.
+                final boolean vpPage = verticalPaging && scale == 1 && currentEditMode == EDIT_MODE_NONE && sendPhotoType != SELECT_TYPE_AVATAR && sendPhotoType != SELECT_TYPE_STICKER;
                 float moveToX = translationX;
                 float moveToY = translationY;
                 updateMinMax(scale);
@@ -19436,15 +19453,16 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 float velocity = 0;
                 if (velocityTracker != null && scale == 1) {
                     velocityTracker.computeCurrentVelocity(1000);
-                    velocity = velocityTracker.getXVelocity();
+                    velocity = vpPage ? velocityTracker.getYVelocity() : velocityTracker.getXVelocity();
                 }
 
                 if (currentEditMode == EDIT_MODE_NONE && sendPhotoType != SELECT_TYPE_AVATAR && sendPhotoType != SELECT_TYPE_STICKER) {
-                    if ((translationX < minX - getContainerViewWidth() / 3 || velocity < -dp(650)) && rightImage.hasImageSet()) {
+                    final float pageExtent = vpPage ? getContainerViewHeight() : getContainerViewWidth();
+                    if ((translationX < minX - pageExtent / 3 || velocity < -dp(650)) && rightImage.hasImageSet()) {
                         goToNext();
                         return true;
                     }
-                    if ((translationX > maxX + getContainerViewWidth() / 3 || velocity > dp(650)) && leftImage.hasImageSet()) {
+                    if ((translationX > maxX + pageExtent / 3 || velocity > dp(650)) && leftImage.hasImageSet()) {
                         goToPrev();
                         return true;
                     }
@@ -19489,7 +19507,9 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             extra = (getContainerViewWidth() - centerImage.getImageWidth()) / 2 * scale;
         }
         switchImageAfterAnimation = 1;
-        animateTo(scale, minX - getContainerViewWidth() - extra - dp(30) / 2, translationY, false);
+        // Svipe vertical paging slides the page scalar by the screen HEIGHT instead of width.
+        final float pageExtent = verticalPaging && scale == 1 ? getContainerViewHeight() : getContainerViewWidth();
+        animateTo(scale, minX - pageExtent - extra - dp(30) / 2, translationY, false);
     }
 
     private void goToPrev() {
@@ -19498,7 +19518,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             extra = (getContainerViewWidth() - centerImage.getImageWidth()) / 2 * scale;
         }
         switchImageAfterAnimation = 2;
-        animateTo(scale, maxX + getContainerViewWidth() + extra + dp(30) / 2, translationY, false);
+        final float pageExtent = verticalPaging && scale == 1 ? getContainerViewHeight() : getContainerViewWidth();
+        animateTo(scale, maxX + pageExtent + extra + dp(30) / 2, translationY, false);
     }
 
     private void cancelMoveZoomAnimation() {
@@ -19903,19 +19924,26 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         }
 
         if (sideImage == rightImage) {
+            // Svipe vertical paging: the "next" page sits BELOW and slides up on the Y axis.
+            final boolean vpDraw = verticalPaging && scale == 1 && currentEditMode == EDIT_MODE_NONE;
+            final float pageExtent = vpDraw ? containerHeight : containerWidth;
             float translateX = currentTranslationX;
             float scaleDiff = 0;
             float alpha = 1;
             if (!zoomAnimation && translateX < minX) {
-                alpha = Math.min(1.0f, (minX - translateX) / containerWidth);
+                alpha = Math.min(1.0f, (minX - translateX) / pageExtent);
                 scaleDiff = (1.0f - alpha) * 0.3f;
-                translateX = -containerWidth - dp(30) / 2;
+                translateX = -pageExtent - dp(30) / 2;
             }
 
             if (sideImage.hasBitmapImage()) {
                 canvas.save();
                 canvas.translate(containerWidth / 2, containerHeight / 2);
-                canvas.translate(containerWidth + dp(30) / 2 + translateX, 0);
+                if (vpDraw) {
+                    canvas.translate(0, containerHeight + dp(30) / 2 + translateX);
+                } else {
+                    canvas.translate(containerWidth + dp(30) / 2 + translateX, 0);
+                }
                 canvas.scale(1.0f - scaleDiff, 1.0f - scaleDiff);
                 int bitmapWidth = sideImage.getBitmapWidth();
                 int bitmapHeight = sideImage.getBitmapHeight();
@@ -20041,8 +20069,12 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             canvas.save();
             canvas.translate(containerWidth / 2f + getAdditionX(currentEditMode), containerHeight / 2f + getAdditionY(currentEditMode));
             centerImageTransform.preTranslate(containerWidth / 2f + getAdditionX(currentEditMode), containerHeight / 2f + getAdditionY(currentEditMode));
-            canvas.translate(translateX, currentTranslationY + (currentEditMode != EDIT_MODE_PAINT ? currentPanTranslationY : 0));
-            centerImageTransform.preTranslate(translateX, currentTranslationY + (currentEditMode != EDIT_MODE_PAINT ? currentPanTranslationY : 0));
+            // Svipe vertical paging: page scalar (translateX) drives the Y axis, dismiss (translationY) the X.
+            final boolean vpCenter = verticalPaging && scale == 1 && currentEditMode == EDIT_MODE_NONE;
+            final float centerTx = vpCenter ? currentTranslationY : translateX;
+            final float centerTy = (vpCenter ? translateX : currentTranslationY) + (currentEditMode != EDIT_MODE_PAINT ? currentPanTranslationY : 0);
+            canvas.translate(centerTx, centerTy);
+            centerImageTransform.preTranslate(centerTx, centerTy);
             canvas.scale(currentScale - scaleDiff, currentScale - scaleDiff);
             centerImageTransform.preScale(currentScale - scaleDiff, currentScale - scaleDiff);
             canvas.rotate(currentRotation);
@@ -20343,9 +20375,15 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
 
         if (sideImage == leftImage) {
             if (sideImage.hasBitmapImage()) {
+                // Svipe vertical paging: the "prev" page sits ABOVE and slides down on the Y axis.
+                final boolean vpDraw = verticalPaging && scale == 1 && currentEditMode == EDIT_MODE_NONE;
                 canvas.save();
                 canvas.translate(containerWidth / 2, containerHeight / 2);
-                canvas.translate(-(containerWidth * (scale + 1) + dp(30)) / 2 + currentTranslationX, 0);
+                if (vpDraw) {
+                    canvas.translate(0, -(containerHeight * (scale + 1) + dp(30)) / 2 + currentTranslationX);
+                } else {
+                    canvas.translate(-(containerWidth * (scale + 1) + dp(30)) / 2 + currentTranslationX, 0);
+                }
                 int bitmapWidth = sideImage.getBitmapWidth();
                 int bitmapHeight = sideImage.getBitmapHeight();
                 if (!leftImageIsVideo && leftCropState != null && leftCropTransform.hasViewTransform()) {
