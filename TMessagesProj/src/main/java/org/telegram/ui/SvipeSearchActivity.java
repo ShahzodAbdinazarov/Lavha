@@ -62,4 +62,17 @@ public class SvipeSearchActivity extends DialogsActivity {
         }
         return super.canParentTabsSlide(ev, forward);
     }
+
+    /**
+     * Re-tapping the already-selected Search tab scrolls back to the top. While the Explore grid is
+     * up (empty query) scroll the grid; once a query is typed the parent handles its own results.
+     */
+    @Override
+    public void onParentScrollToTop() {
+        if (exploreGrid != null && exploreGrid.getVisibility() == View.VISIBLE) {
+            exploreGrid.scrollToTop();
+            return;
+        }
+        super.onParentScrollToTop();
+    }
 }

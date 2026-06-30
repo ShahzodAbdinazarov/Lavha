@@ -158,6 +158,22 @@ public class SvipeExploreGrid extends RecyclerListView {
         loadPage();
     }
 
+    /**
+     * Re-tap-the-active-tab → scroll to the top. The grid can be very deep (endless scroll), so a
+     * plain smoothScrollToPosition(0) from far down would crawl through every row — jump close first,
+     * then smooth-scroll the last stretch for a clean finish. No-op when already at the top.
+     */
+    public void scrollToTop() {
+        stopScroll();
+        if (layoutManager.findFirstVisibleItemPosition() <= 0) {
+            return;
+        }
+        if (layoutManager.findFirstVisibleItemPosition() > SPAN_COUNT * 4) {
+            scrollToPosition(SPAN_COUNT * 4);
+        }
+        smoothScrollToPosition(0);
+    }
+
     // ---- pull-to-refresh ----
 
     @Override
