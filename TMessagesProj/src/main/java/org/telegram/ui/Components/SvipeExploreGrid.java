@@ -225,16 +225,46 @@ public class SvipeExploreGrid extends RecyclerListView {
         }
     }
 
-    /** Reset to a fresh feed (page 0) and spin until the load completes. */
+    /**
+     * Pull-to-refresh: fetch a fresh (server-rotated) page 0 while keeping the current grid on
+     * screen under the spinner, then swap the whole list in one pass when it lands. The old content
+     * is NOT cleared up-front — that clear-then-reload is what made the grid flash the skeleton (and
+     * stale recycled thumbnails) and look like it "reverted". With refresh=1 the server rotates to a
+     * different window, so the swap shows genuinely new content rather than the identical list.
+     */
     private void triggerRefresh() {
+        if (loading) {
+            animatePullTo(0f);   // a page load is already in flight; don't stack a refresh on it
+            return;
+        }
         refreshing = true;
-        items.clear();
-        resolvedChats.clear();
-        nextOffset = 0;
-        adapter.notifyDataSetChanged();
+        loading = true;          // block scroll-pagination until the swap completes
         startSpin();
         animatePullTo(PULL_THRESHOLD);   // settle at the resting position while loading
-        loadPage();
+        SvipeDiscover.load(account, null, 0, PAGE_SIZE, true, (result, next, error) -> {
+            loading = false;
+            refreshing = false;
+            stopSpin();
+            animatePullTo(0f);
+            if (result == null) {
+                return;   // network/auth failure: keep the current grid, never blank or revert
+            }
+            // Atomic swap: replace the list in one notify so there's no empty/skeleton frame. Keep
+            // resolvedChats as a warm cache so channels that reappear keep their thumbnails.
+            items.clear();
+            nextOffset = next;
+            final ArrayList<GridItem> fresh = new ArrayList<>(result.size());
+            for (SvipeDiscover.Item ref : result) {
+                GridItem gi = new GridItem(ref);
+                items.add(gi);
+                fresh.add(gi);
+            }
+            adapter.notifyDataSetChanged();
+            scrollToPosition(0);
+            if (!fresh.isEmpty()) {
+                resolveThumbnails(fresh);
+            }
+        });
     }
 
     private void finishRefresh() {

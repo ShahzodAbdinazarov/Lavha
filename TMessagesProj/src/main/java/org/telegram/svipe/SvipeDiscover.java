@@ -27,18 +27,26 @@ public class SvipeDiscover {
     }
 
     public static void load(int account, String category, int offset, int limit, Callback cb) {
+        load(account, category, offset, limit, false, cb);
+    }
+
+    /** refresh=true rotates the server grid to a fresh window (pull-to-refresh); page-0 only. */
+    public static void load(int account, String category, int offset, int limit, boolean refresh, Callback cb) {
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {
                 cb.onResult(null, null, "auth");
                 return;
             }
-            request(account, category, offset, limit, token, false, cb);
+            request(account, category, offset, limit, refresh, token, false, cb);
         });
     }
 
-    private static void request(int account, String category, int offset, int limit,
+    private static void request(int account, String category, int offset, int limit, boolean refresh,
                                 String token, boolean retried, Callback cb) {
         StringBuilder path = new StringBuilder("/v1/discover?limit=").append(limit).append("&offset=").append(offset);
+        if (refresh) {
+            path.append("&refresh=1");
+        }
         if (category != null && !category.isEmpty()) {
             try {
                 path.append("&category=").append(URLEncoder.encode(category, "UTF-8"));
@@ -54,7 +62,7 @@ public class SvipeDiscover {
                         cb.onResult(null, null, "auth");
                         return;
                     }
-                    request(account, category, offset, limit, t2, true, cb);
+                    request(account, category, offset, limit, refresh, t2, true, cb);
                 });
                 return;
             }
