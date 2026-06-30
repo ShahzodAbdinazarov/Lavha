@@ -3260,6 +3260,11 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             if (hasFocus) {
                 fragmentSearchFieldWatcher.toggleSearch(true);
                 svipeSearchEngaged = true;   // entered the search session; grid stays hidden until BACK
+                if (isSvipeSearchSection()) {
+                    // Show the X on every focus — onSearchExpand only fires on the FIRST expand, but the
+                    // Svipe section is permanently "searching", so re-focusing wouldn't re-show it.
+                    fragmentSearchField.setCloseButtonVisible(true);
+                }
             }
             // Svipe Search: focusing the field hides the Explore grid (revealing the native search
             // landing / results). A transient blur (opening a media) must NOT bring the grid back.
