@@ -8,6 +8,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Outline;
 import android.graphics.Paint;
 import android.os.Handler;
 import android.os.Looper;
@@ -24,6 +25,7 @@ import android.view.MotionEvent;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -397,6 +399,21 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             public void onScrollStateChanged(RecyclerView rv, int newState) {
                 if (newState == RecyclerView.SCROLL_STATE_IDLE) {
                     checkCurrentPage();
+                    // Settled on the snapped reel: the scrub bar belongs to it again at its anchor.
+                    if (seekBar != null) {
+                        seekBar.setTranslationY(0);
+                    }
+                }
+            }
+
+            @Override
+            public void onScrolled(RecyclerView rv, int dx, int dy) {
+                // Make the scrub bar swipe away together with its own video: follow the current
+                // (outgoing) reel page as it scrolls off, instead of hanging fixed over the next reel.
+                // Purely a translation, so scrubbing/touch dispatch is untouched once settled.
+                ReelsHolder h = holderAt(currentPosition);
+                if (seekBar != null && h != null) {
+                    seekBar.setTranslationY(h.itemView.getTop());
                 }
             }
         });
@@ -406,7 +423,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         // root (not inside the RecyclerListView) so it gets normal touch dispatch for scrubbing.
         seekBar = new SeekBarView(context);
         FrameLayout.LayoutParams seekLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 20, Gravity.BOTTOM | Gravity.LEFT);
-        seekLp.bottomMargin = bottomInset + AndroidUtilities.dp(6);   // between the caption cluster (above) and the tab bar (below)
+        // Sit just above the tab bar with a small gap (dropped lower than the old caption-hugging spot
+        // so the bar reads as its own row, but not so low it crowds the tab bar).
+        seekLp.bottomMargin = bottomInset - AndroidUtilities.dp(2);
         root.addView(seekBar, seekLp);
 
         statusView = new TextView(context);
@@ -452,10 +471,16 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (activity == null) return;
         final Theme.ResourcesProvider rp = getResourceProvider();
 
-        // Disabled bar (comments off): a non-interactive 56dp dark bar with a block icon + label.
-        // Sits in the same slot as the enter view; only one of the two is visible at a time.
+        // Disabled bar (comments off): a non-interactive rounded "pill" with a block icon + label,
+        // styled to match Telegram's channel bottom button / "Join request sent" bar — 44dp tall,
+        // 22dp corner radius, 7dp side insets, translucent dark. Sits in the same slot as the enter
+        // view; only one of the two is visible at a time.
         reelDisabledBar = new FrameLayout(context);
-        reelDisabledBar.setBackgroundColor(0xFF1C1C1E);
+        GradientDrawable reelDisabledBg = new GradientDrawable();
+        reelDisabledBg.setShape(GradientDrawable.RECTANGLE);
+        reelDisabledBg.setCornerRadius(AndroidUtilities.dp(22));
+        reelDisabledBg.setColor(0xCC1C1C1E);
+        reelDisabledBar.setBackground(reelDisabledBg);
         reelDisabledBar.setClickable(true);
         reelDisabledBar.setVisibility(View.GONE);
         LinearLayout disRow = new LinearLayout(context);
@@ -471,8 +496,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         disText.setText(LocaleController.getString(R.string.SvipeCommentsDisabled));
         disRow.addView(disText, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
         reelDisabledBar.addView(disRow, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
-        FrameLayout.LayoutParams disLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, COMMENT_BAR_HEIGHT_DP, Gravity.BOTTOM);
-        disLp.bottomMargin = AndroidUtilities.navigationBarHeight;
+        FrameLayout.LayoutParams disLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 44, Gravity.BOTTOM, 7, 0, 7, 0);
+        disLp.bottomMargin = AndroidUtilities.navigationBarHeight + AndroidUtilities.dp(6);
         root.addView(reelDisabledBar, disLp);
 
         // The real Telegram input. null ChatActivity fragment, root as the SizeNotifierFrameLayout
@@ -574,8 +599,18 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         reelEnterView.setAllowStickersAndGifs(true, true, true);
         reelEnterView.updateColors();
         reelEnterView.recordingGuid = classGuid;
-        FrameLayout.LayoutParams enterLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.BOTTOM);
-        enterLp.bottomMargin = AndroidUtilities.navigationBarHeight;
+        // Match Telegram's rounded floating composer (ChatInputViewsContainer's input bubble): the enter
+        // view paints its panel background flat edge-to-edge, so clip it to a 22dp round rect and inset it
+        // 7dp on the sides — same radius/insets as the chat input island and the disabled bar above.
+        reelEnterView.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), AndroidUtilities.dp(22));
+            }
+        });
+        reelEnterView.setClipToOutline(true);
+        FrameLayout.LayoutParams enterLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.BOTTOM, 7, 0, 7, 0);
+        enterLp.bottomMargin = AndroidUtilities.navigationBarHeight + AndroidUtilities.dp(6);
         root.addView(reelEnterView, enterLp);
         reelEnterView.onResume();
     }
