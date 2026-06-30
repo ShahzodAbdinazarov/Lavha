@@ -79,6 +79,11 @@ public class SvipeExploreGrid extends RecyclerListView {
     private int touchSlop;
     private float pullStartY = -1f;   // -1 = no pull candidate captured
     private boolean pulling;
+    // Horizontal-swipe yield: a horizontal-dominant drag belongs to the parent tab pager. Tracked
+    // from DOWN so we can bail BEFORE the RecyclerView claims it (which would intermittently steal
+    // bottom-tab swipes when the grid is scrolled).
+    private float downX, downY;
+    private boolean horizontalSwipe;
     private boolean refreshing;
     private float pullDistance;       // damped, px
     private float spinRotation;       // degrees, indeterminate spin while refreshing
@@ -180,9 +185,27 @@ public class SvipeExploreGrid extends RecyclerListView {
     public boolean onInterceptTouchEvent(MotionEvent e) {
         final int action = e.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
+            downX = e.getX();
+            downY = e.getY();
+            horizontalSwipe = false;
             // Only a candidate when resting at the very top and not already refreshing.
             pullStartY = (!refreshing && !canScrollVertically(-1)) ? e.getY() : -1f;
-        } else if (action == MotionEvent.ACTION_MOVE && pullStartY >= 0 && !pulling) {
+        } else if (action == MotionEvent.ACTION_MOVE && !pulling && !horizontalSwipe) {
+            // A horizontal-dominant drag belongs to the parent tab pager — bail before the
+            // RecyclerView claims it, and re-allow the parent to intercept (the RV may have already
+            // disallowed it on a tiny vertical jitter).
+            final float adx = Math.abs(e.getX() - downX);
+            final float ady = Math.abs(e.getY() - downY);
+            if (adx > touchSlop && adx > ady) {
+                horizontalSwipe = true;
+                disallowParentIntercept(false);
+                return false;
+            }
+        }
+        if (horizontalSwipe) {
+            return false;
+        }
+        if (action == MotionEvent.ACTION_MOVE && pullStartY >= 0 && !pulling) {
             // If a child consumed the DOWN, the MOVE stream routes through here — claim a clear
             // downward drag past slop (horizontal tab swipes / upward scrolls are left untouched).
             final float dy = e.getY() - pullStartY;
@@ -203,8 +226,24 @@ public class SvipeExploreGrid extends RecyclerListView {
         // The grid's item views don't consume ACTION_DOWN, so the MOVE stream is delivered straight
         // to onTouchEvent (not onInterceptTouchEvent). Detect and run the top-pull from here.
         if (action == MotionEvent.ACTION_DOWN) {
+            downX = e.getX();
+            downY = e.getY();
+            horizontalSwipe = false;
             pullStartY = (!refreshing && !canScrollVertically(-1)) ? e.getY() : -1f;
         } else if (action == MotionEvent.ACTION_MOVE) {
+            if (!pulling && !horizontalSwipe) {
+                final float adx = Math.abs(e.getX() - downX);
+                final float ady = Math.abs(e.getY() - downY);
+                if (adx > touchSlop && adx > ady) {
+                    // Horizontal-dominant drag — hand it to the parent tab pager, don't consume it.
+                    horizontalSwipe = true;
+                    disallowParentIntercept(false);
+                    return false;
+                }
+            }
+            if (horizontalSwipe) {
+                return false;
+            }
             if (!pulling && pullStartY >= 0 && (e.getY() - pullStartY) > touchSlop && !canScrollVertically(-1)) {
                 pulling = true;
                 disallowParentIntercept(true);
