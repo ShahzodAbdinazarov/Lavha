@@ -3252,6 +3252,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             if (hasFocus) {
                 fragmentSearchFieldWatcher.toggleSearch(true);
             }
+            // Svipe Search: focusing the field hides the Explore grid (revealing the native search
+            // landing); blurring it (when empty) brings the grid back.
+            svipeUpdateExploreGridVisibility();
         });
         fragmentSearchField.editText.addTextChangedListener(fragmentSearchFieldWatcher = new SearchTextWatcher(fragmentSearchField.editText, new ActionBarMenuItem.ActionBarMenuItemSearchListener() {
             @Override
@@ -3349,14 +3352,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 if (searchViewPager != null) {
                     searchViewPager.onTextChanged(text);
                 }
-                if (isSvipeSearchSection() && svipeExploreGrid != null) {
-                    // Empty query -> show the Explore grid; typing -> reveal the search results.
-                    final boolean empty = text.isEmpty();
-                    svipeExploreGrid.setVisibility(empty ? View.VISIBLE : View.GONE);
-                    if (empty) {
-                        svipeOnExploreGridVisible();
-                    }
-                }
+                svipeUpdateExploreGridVisibility();
             }
 
             @Override
@@ -7412,6 +7408,25 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
     /** Called when the Explore grid becomes visible (query empty) so the host can lazy-load it. */
     protected void svipeOnExploreGridVisible() {
+    }
+
+    /**
+     * Svipe Search: the Explore grid is the BROWSE state — show it ONLY while the search field is
+     * unfocused AND empty. Touching/focusing the field hides the grid so Telegram's native search
+     * landing (recent searches, top peers, suggested channels) shows underneath; typing then reveals
+     * the results. Blurring the empty field brings the grid back.
+     */
+    private void svipeUpdateExploreGridVisibility() {
+        if (!isSvipeSearchSection() || svipeExploreGrid == null || fragmentSearchField == null) {
+            return;
+        }
+        final boolean focused = fragmentSearchField.editText.isFocused();
+        final boolean empty = fragmentSearchField.editText.getText().length() == 0;
+        final boolean show = empty && !focused;
+        svipeExploreGrid.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (show) {
+            svipeOnExploreGridVisible();
+        }
     }
 
     private void showSearch(boolean show, boolean startFromDownloads, boolean animated) {
