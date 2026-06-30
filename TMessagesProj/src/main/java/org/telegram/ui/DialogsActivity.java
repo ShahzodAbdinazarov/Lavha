@@ -3246,7 +3246,15 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             fragmentSearchField.editText.getText().clear();
             AndroidUtilities.hideKeyboard(fragmentSearchField.editText);
             fragmentSearchField.editText.clearFocus();
-            fragmentSearchFieldWatcher.toggleSearch(false);
+            if (isSvipeSearchSection()) {
+                // Svipe: the X is the "exit search → Explore grid" button. It's tied to the engaged
+                // state (only shown while searching), so leaving search hides it too.
+                svipeSearchEngaged = false;
+                fragmentSearchField.setCloseButtonVisible(false);
+                svipeUpdateExploreGridVisibility();
+            } else {
+                fragmentSearchFieldWatcher.toggleSearch(false);
+            }
         });
         fragmentSearchField.editText.setOnFocusChangeListener((v, hasFocus) -> {
             if (hasFocus) {
@@ -7232,7 +7240,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             if (invoked) {
                 AndroidUtilities.hideKeyboard(fragmentSearchField.editText);
                 fragmentSearchField.editText.clearFocus();
-                fragmentSearchField.setCloseButtonVisible(false);   // restore the clean browse look (no X)
+                fragmentSearchField.setCloseButtonVisible(false);   // X is tied to the engaged state
                 svipeSearchEngaged = false;
                 svipeUpdateExploreGridVisibility();
             }
