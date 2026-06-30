@@ -12,8 +12,14 @@ package org.telegram.svipe;
  */
 public class SvipeQueuePlan {
 
-    /** Keep this many fully-downloaded, unwatched reels ready ahead of the current one. */
-    public static final int TARGET_AHEAD = 12;
+    /**
+     * Keep this many fully-downloaded, unwatched reels ready ahead of the current one. Kept modest
+     * so a burst of FULL downloads (videos run up to ~50MB) doesn't saturate the pipe and starve the
+     * current/next reel's playback buffer — live instant-start now leans on the prepared-next-player
+     * ({@link SvipePreloadPlan#shouldPrepareNextPlayer}); this queue is mainly the offline cold-start
+     * cushion, for which a handful is plenty.
+     */
+    public static final int TARGET_AHEAD = 6;
     /** Hard cap on persisted entries — a backstop above TARGET_AHEAD to absorb churn. */
     public static final int MAX_ENTRIES = 24;
     /** Disk budget for queued video bytes (~600MB). Downloading stops once this would be exceeded. */

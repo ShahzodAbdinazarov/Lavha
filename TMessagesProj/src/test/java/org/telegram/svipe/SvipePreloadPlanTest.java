@@ -44,11 +44,11 @@ public class SvipePreloadPlanTest {
     }
 
     @Test
-    public void preparesNextPlayerOnlyOnHighEndDevicesWithinBounds() {
-        assertTrue(SvipePreloadPlan.shouldPrepareNextPlayer(true, 5, 20));
-        assertFalse(SvipePreloadPlan.shouldPrepareNextPlayer(false, 5, 20)); // low-end device
-        assertFalse(SvipePreloadPlan.shouldPrepareNextPlayer(true, 20, 20)); // past the end
-        assertFalse(SvipePreloadPlan.shouldPrepareNextPlayer(true, -1, 20)); // no next
+    public void preparesNextPlayerWithinBoundsOnEveryDevice() {
+        assertTrue(SvipePreloadPlan.shouldPrepareNextPlayer(5, 20));   // a valid next reel
+        assertTrue(SvipePreloadPlan.shouldPrepareNextPlayer(0, 20));   // first next
+        assertFalse(SvipePreloadPlan.shouldPrepareNextPlayer(20, 20)); // past the end
+        assertFalse(SvipePreloadPlan.shouldPrepareNextPlayer(-1, 20)); // no next
     }
 
     @Test

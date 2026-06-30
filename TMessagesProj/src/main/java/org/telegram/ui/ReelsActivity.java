@@ -62,7 +62,6 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SendMessagesHelper;
-import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.ConnectionsManager;
@@ -1447,7 +1446,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     /** Build the next reel's player ahead of time: prepared, paused, buffering at LOW priority. */
     private void prepareNextPlayer(int pos) {
         releaseNextPlayer();
-        if (!SvipePreloadPlan.shouldPrepareNextPlayer(SharedConfig.deviceIsHigh(), pos, items.size())) return;
+        if (!SvipePreloadPlan.shouldPrepareNextPlayer(pos, items.size())) return;
         FeedItem item = items.get(pos);
         if (item.mo == null) {
             resolveItem(item, () -> {
@@ -1479,8 +1478,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 @Override
                 public boolean onSurfaceDestroyed(SurfaceTexture surfaceTexture) { return false; }
             });
-            // Buffer quietly: LOW priority keeps the playing reel in charge of the bandwidth.
-            FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_LOW);
+            // Buffer the next reel at NORMAL — fast enough to be ready by the swipe, but still below
+            // the current reel's HIGH stream and above the LOW background full-downloads, so it never
+            // starves what's playing.
+            FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_NORMAL);
             p.preparePlayer(vu.uri, "other");
             p.setPlayWhenReady(false);
             nextPlayer = p;

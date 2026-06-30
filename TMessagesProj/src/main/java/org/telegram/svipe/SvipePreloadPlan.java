@@ -37,11 +37,15 @@ public class SvipePreloadPlan {
     }
 
     /**
-     * Whether to keep a fully prepared (buffering, paused) player for the next reel — the
-     * Stories trick that makes a swipe start instantly. Costs a second decoder, so only on
-     * devices Telegram itself classifies as high-end.
+     * Whether to keep ONE fully prepared (buffering, paused) player for the next reel — the
+     * Stories/TikTok trick that makes a swipe start instantly. Enabled on every device (only bounds
+     * are checked): buffering every swipe from scratch is the single biggest source of the loading
+     * spinner, and our users skew low-end — the previous HIGH-only gate disabled it for exactly the
+     * devices that need it most (measured: 0/17 swipes served from a prepared player). A second
+     * short-reel decoder is the standard cost; a device that can't spare one degrades to on-demand
+     * creation via prepareNextPlayer's try/catch + the player's onError, never a crash.
      */
-    public static boolean shouldPrepareNextPlayer(boolean deviceIsHigh, int nextIndex, int itemCount) {
-        return deviceIsHigh && nextIndex >= 0 && nextIndex < itemCount;
+    public static boolean shouldPrepareNextPlayer(int nextIndex, int itemCount) {
+        return nextIndex >= 0 && nextIndex < itemCount;
     }
 }
