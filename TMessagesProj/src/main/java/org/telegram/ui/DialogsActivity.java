@@ -3251,9 +3251,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         fragmentSearchField.editText.setOnFocusChangeListener((v, hasFocus) -> {
             if (hasFocus) {
                 fragmentSearchFieldWatcher.toggleSearch(true);
+                svipeSearchEngaged = true;   // entered the search session; grid stays hidden until BACK
             }
             // Svipe Search: focusing the field hides the Explore grid (revealing the native search
-            // landing); blurring it (when empty) brings the grid back.
+            // landing / results). A transient blur (opening a media) must NOT bring the grid back.
             svipeUpdateExploreGridVisibility();
         });
         fragmentSearchField.editText.addTextChangedListener(fragmentSearchFieldWatcher = new SearchTextWatcher(fragmentSearchField.editText, new ActionBarMenuItem.ActionBarMenuItemSearchListener() {
@@ -7224,6 +7225,18 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 hideActionMode(true);
             }
             return false;
+        } else if (isSvipeSearchSection() && svipeSearchEngaged && fragmentSearchField != null && fragmentSearchField.editText.length() == 0) {
+            // Svipe Search: BACK from an empty search session returns to the Explore grid (browse),
+            // instead of trying to collapse the permanent search. A non-empty query is cleared first
+            // by the generic branch below; a second BACK then lands here.
+            if (invoked) {
+                AndroidUtilities.hideKeyboard(fragmentSearchField.editText);
+                fragmentSearchField.editText.clearFocus();
+                fragmentSearchField.setCloseButtonVisible(false);   // restore the clean browse look (no X)
+                svipeSearchEngaged = false;
+                svipeUpdateExploreGridVisibility();
+            }
+            return false;
         } else if (animatorSearchVisible.getValue()) {
             if (invoked) {
                 fragmentSearchField.editText.getText().clear();
@@ -7400,6 +7413,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     private float svipeSearchFieldRestTy;
     private boolean svipeSearchFieldRestTyCaptured;
     private int svipeHeaderOffset;
+    // Svipe: true once the user taps INTO search (focus) — hides the Explore grid for the whole
+    // search session. NOT cleared by a transient blur (e.g. opening a media in PhotoViewer), so
+    // dismissing the viewer returns to the search results, not the grid. Cleared by BACK -> browse.
+    private boolean svipeSearchEngaged;
 
     /** SvipeSearchActivity returns its Explore grid here; DialogsActivity hosts + toggles it. */
     protected View svipeCreateExploreGrid(Context context) {
@@ -7414,15 +7431,15 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
      * Svipe Search: the Explore grid is the BROWSE state — show it ONLY while the search field is
      * unfocused AND empty. Touching/focusing the field hides the grid so Telegram's native search
      * landing (recent searches, top peers, suggested channels) shows underneath; typing then reveals
-     * the results. Blurring the empty field brings the grid back.
+     * the results. The grid only comes back when the user BACKs out of the search session (see
+     * {@link #svipeSearchEngaged}) — never on a transient blur such as opening a media viewer.
      */
     private void svipeUpdateExploreGridVisibility() {
         if (!isSvipeSearchSection() || svipeExploreGrid == null || fragmentSearchField == null) {
             return;
         }
-        final boolean focused = fragmentSearchField.editText.isFocused();
         final boolean empty = fragmentSearchField.editText.getText().length() == 0;
-        final boolean show = empty && !focused;
+        final boolean show = empty && !svipeSearchEngaged;
         svipeExploreGrid.setVisibility(show ? View.VISIBLE : View.GONE);
         if (show) {
             svipeOnExploreGridVisible();
