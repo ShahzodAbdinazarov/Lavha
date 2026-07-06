@@ -50,6 +50,8 @@ import org.telegram.svipe.SvipeReelQueue;
 import org.telegram.svipe.SvipeWatchedSet;
 import org.telegram.svipe.SvipeWatchEvent;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.StatsController;
 import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.DownloadController;
 import org.telegram.messenger.FileLoader;
@@ -1185,7 +1187,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
      */
     private void prefetchAround(int pos) {
         for (int i = pos + 1; i <= pos + PREFETCH_AHEAD && i < items.size(); i++) {
-            if (i == pos + 1) continue; // full download supersedes head-preload for the next reel
+            // The next reel (pos+1) is normally owned by ensureFullDownloadsAhead's FULL download,
+            // so we skip its head-preload here — but only when full downloads are allowed (Wi-Fi).
+            // On cellular there is no full download, so let pos+1 get its cheap ~2MB head-preload.
+            if (i == pos + 1 && fullDownloadsAllowed()) continue;
             FeedItem it = items.get(i);
             it.preloadPriority = SvipePreloadPlan.priorityFor(i, pos) == SvipePreloadPlan.NORMAL
                     ? FileLoader.PRIORITY_NORMAL : FileLoader.PRIORITY_LOW;
@@ -1231,8 +1236,22 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
      * bounded by the count cap and disk budget. Starts FULL downloads (cacheType 0) on the nearest
      * not-yet-present items and persists each into the offline queue so it survives an app restart.
      */
+    /**
+     * Whether speculative FULL (cacheType 0) downloads may run. Restricted to unmetered Wi-Fi/
+     * Ethernet ({@link ApplicationLoader#getAutodownloadNetworkType()} treats metered Wi-Fi as
+     * mobile): on cellular/metered/roaming the ~2MB head-preload + prepared-next-player stream
+     * already give an instant first frame, so we never burn mobile data pre-fetching whole files.
+     */
+    private boolean fullDownloadsAllowed() {
+        return ApplicationLoader.getAutodownloadNetworkType() == StatsController.TYPE_WIFI;
+    }
+
     private void ensureFullDownloadsAhead(int pos) {
         if (reelQueue == null) return;
+        // Wi-Fi-only: the offline cold-start cushion is a nicety, not worth cellular data. pos+1's
+        // instant start is covered by prefetchAround's head-preload (gated on the same check there)
+        // and prepareNextPlayer's stream, so nothing regresses on mobile.
+        if (!fullDownloadsAllowed()) return;
         int have = countDownloadedUnwatchedAhead(pos);
         for (int i = pos + 1; i < items.size() && SvipeQueuePlan.needsMoreDownloads(have); i++) {
             FeedItem it = items.get(i);
@@ -1367,12 +1386,20 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 player.setIsReels();
                 player.setLooping(true);
             }
-            // This reel owns the bandwidth now: stream reads at HIGH and the whole file keeps
-            // pulling at HIGH so loops and seeks never stall (cancelled when swiped away).
+            // This reel owns the bandwidth now: stream reads at HIGH so playback, loops and seeks
+            // stay smooth. Don't force the whole file up front — a quick glance shouldn't cost the
+            // full download. Escalate to a full (cacheType 0) pull only once the user has dwelled
+            // past MIN_WATCHED_MS and is still on this reel, so engaged reels keep looping/seeking
+            // seamlessly while a skipped reel costs only the streamed prefix.
             FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_HIGH);
-            if (prepared) {
-                FileLoader.getInstance(account).loadFile(doc, mo, FileLoader.PRIORITY_HIGH, 0);
-            }
+            final VideoPlayer boundPlayer = player;
+            AndroidUtilities.runOnUIThread(() -> {
+                if (currentPosition == pos && currentPlayer == boundPlayer) {
+                    try {
+                        FileLoader.getInstance(account).loadFile(doc, mo, FileLoader.PRIORITY_HIGH, 0);
+                    } catch (Exception e) { FileLog.e(e); }
+                }
+            }, SvipeQueuePlan.MIN_WATCHED_MS);
             player.setTextureView(holder.textureView);
             player.setDelegate(new VideoPlayer.VideoPlayerDelegate() {
                 // No STATE_ENDED handling: the player loops, so completion is derived from the

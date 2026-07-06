@@ -17,9 +17,10 @@ public class SvipeQueuePlan {
      * so a burst of FULL downloads (videos run up to ~50MB) doesn't saturate the pipe and starve the
      * current/next reel's playback buffer — live instant-start now leans on the prepared-next-player
      * ({@link SvipePreloadPlan#shouldPrepareNextPlayer}); this queue is mainly the offline cold-start
-     * cushion, for which a handful is plenty.
+     * cushion, for which a handful is plenty. Speculative FULL downloads are additionally gated to
+     * Wi-Fi in ReelsActivity#ensureFullDownloadsAhead, so cellular users are never charged for them.
      */
-    public static final int TARGET_AHEAD = 6;
+    public static final int TARGET_AHEAD = 3;
     /** Hard cap on persisted entries — a backstop above TARGET_AHEAD to absorb churn. */
     public static final int MAX_ENTRIES = 24;
     /** Disk budget for queued video bytes (~600MB). Downloading stops once this would be exceeded. */

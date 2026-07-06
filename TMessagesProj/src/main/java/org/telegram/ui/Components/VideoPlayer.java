@@ -246,13 +246,16 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                     DefaultLoadControl.DEFAULT_BACK_BUFFER_DURATION_MS,
                     DefaultLoadControl.DEFAULT_RETAIN_BACK_BUFFER_FROM_KEYFRAME);
         } else if (isReels) {
-            // Svipe reels: start as fast as a normal video (100ms of buffer) but recover from a
-            // stall like a story (1s instead of the 5s default) — a swiping feed cannot afford
-            // a five-second freeze after a hiccup.
+            // Svipe reels: start as fast as a normal video (100ms of buffer) and recover from a
+            // stall like a story (1s, not the 5s default) — a swiping feed cannot afford a
+            // five-second freeze after a hiccup. Bound the read-ahead to a short prefix (6s/10s)
+            // instead of ExoPlayer's ~50s default so a reel swiped away costs roughly a prefix, not
+            // the whole file, and HD bitrate spikes stay smooth. Engaged reels (dwell past
+            // MIN_WATCHED_MS) escalate to a full download in startPlayback, keeping loops seamless.
             loadControl = new DefaultLoadControl(
                     new DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE),
-                    DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
-                    DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+                    6000,   // minBufferMs — bounded prefix (was DEFAULT_MIN_BUFFER_MS ~50s)
+                    10000,  // maxBufferMs — cap read-ahead so streamed bytes track watch time
                     100,
                     1000,
                     DefaultLoadControl.DEFAULT_TARGET_BUFFER_BYTES,
