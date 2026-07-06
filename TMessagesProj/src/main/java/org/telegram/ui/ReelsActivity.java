@@ -104,6 +104,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private static final String LIKE_EMOJI = "❤";
     private static final int PREFETCH_AHEAD = 5; // resolve + warm bytes for the next N reels
     private static final int LOAD_MORE_AHEAD = 4; // ask for the next page this close to the end
+    private static final int MAX_EMPTY_APPEND_PAGES = 25; // safety cap: chain through this many all-watched pages before giving up
 
     private SizeNotifierFrameLayout root;
     private RecyclerListView listView;
@@ -131,7 +132,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private String token;
     private boolean loadingFeed;
     private boolean feedLoadFailed; // auto-retried via didUpdateConnectionState when network returns
-    private boolean feedExhausted;  // append returned nothing new; reset on a fresh load
+    private boolean feedExhausted;  // the backend ran out of pages (null cursor); reset on a fresh load
+    private int emptyAppendStreak;  // consecutive append pages that added 0 new items — bounds cursor-chaining
 
     // Watch clock for the CURRENT reel: dwell since shown, play time accumulated across
     // pause/resume. Flushed into REPLAY/VIDEO_END/SWIPE_AWAY when the user leaves the reel.
@@ -854,6 +856,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
 
     private void loadFeed() {
         feedExhausted = false;
+        emptyAppendStreak = 0;
         requestFeed(false, false);
     }
 
@@ -948,13 +951,26 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 }
                 if (additive) {
                     if (added > 0) {
+                        emptyAppendStreak = 0;
                         adapter.notifyItemRangeInserted(before, added);
                         // A merge can newly satisfy the download-ahead target — top it up.
                         if (playing && currentPosition >= 0) ensureFullDownloadsAhead(currentPosition);
                     }
-                    // Stop asking when nothing new arrived or the backend gave no further cursor
-                    // (else a null cursor in seeded mode would re-request seed page 0).
-                    if (added == 0 || feedCursor == null) feedExhausted = true;
+                    // The feed is only truly exhausted when the backend stops giving a cursor. A page
+                    // that added 0 NEW items (all already watched/deduped) is NOT the end: early pages
+                    // are sparse for a heavily-watched account while later pages are full, so chain
+                    // straight on to the next page instead of dead-ending — bounded by a safety cap so
+                    // a misbehaving backend can't loop forever. A null cursor still stops us (that also
+                    // covers seeded mode, where the cursor — not the seed — drives continuation).
+                    if (feedCursor == null) {
+                        feedExhausted = true;
+                    } else if (added == 0) {
+                        if (++emptyAppendStreak >= MAX_EMPTY_APPEND_PAGES) {
+                            feedExhausted = true;
+                        } else {
+                            loadMore();
+                        }
+                    }
                 } else {
                     setStatus(items.isEmpty() ? "Hozircha video yo'q" : null);
                     adapter.notifyDataSetChanged();
