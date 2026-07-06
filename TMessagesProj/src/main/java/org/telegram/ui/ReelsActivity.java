@@ -111,6 +111,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private static final long STUCK_TICK_MS = 1200;              // sample interval
     private static final int STUCK_TICKS = 2;                    // consecutive no-progress ticks => stuck
     private static final int MAX_STUCK_RECOVERIES = 2;           // per position, prevents restart loops
+    private static final int MAX_RESOLVE_RETRIES = 3;            // transient resolve failures: bounded retry
+    private static final long RESOLVE_RETRY_DELAY_MS = 1500;
 
     private SizeNotifierFrameLayout root;
     private RecyclerListView listView;
@@ -243,6 +245,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         boolean liked;        // local like state (authoritative for the UI)
         int likeCount;        // total reactions count, kept in sync locally
         boolean resolving;    // an MTProto resolve is in flight (prevents duplicate prefetch)
+        final java.util.ArrayList<Runnable> resolveCallbacks = new java.util.ArrayList<>(); // waiters for an in-flight resolve — never dropped
+        int resolveAttempts;  // bounded retry counter for transient resolve failures
         boolean preloadStarted;                          // a head-preload was requested
         int preloadPriority = FileLoader.PRIORITY_LOW;   // set by prefetchAround before resolve
         boolean preloadBypassGate;                       // next-in-line skips the data-saving gate
@@ -1105,7 +1109,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             final int fpos = pos;
             resolveItem(item, () -> {
                 updateActions(fpos);
-                if (currentPosition == fpos && item.mo != null) {
+                if (currentPosition == fpos && item.mo != null && currentPlayer == null) {
                     startPlayback(item.mo, item.mo.getDocument(), fpos, item);
                 }
             });
@@ -1126,16 +1130,21 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
      */
     private void resolveItem(final FeedItem item, final Runnable onResolved) {
         if (item.mo != null && item.chat != null) { if (onResolved != null) onResolved.run(); return; }
-        if (item.resolving) return;
         // Queue-restored item: we already hold a playable MessageObject, only the chat is missing
         // (needed for the action rail). Fill it with one resolveUsername round-trip — skip getMessages.
         if (item.mo != null && item.chat == null) { resolveChatOnly(item, onResolved); return; }
+        // Full resolve (no mo yet). Queue the caller's callback so an already-in-flight resolve (e.g.
+        // one started by prefetch/read-ahead) still notifies THIS caller when it completes — otherwise
+        // playPosition's start-playback intent is silently dropped and the reel spins forever until a
+        // manual skip-and-back.
+        if (onResolved != null) item.resolveCallbacks.add(onResolved);
+        if (item.resolving) return;
         item.resolving = true;
         TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
         req.username = item.username.toLowerCase();
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
             if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
-                AndroidUtilities.runOnUIThread(() -> { item.resolving = false; hideLoadingFor(item); });
+                onResolveFail(item, true); // transient network failure — retry
                 return;
             }
             TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
@@ -1149,7 +1158,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 if (chat == null && !rp.chats.isEmpty()) chat = rp.chats.get(0);
             }
             if (chat == null) {
-                AndroidUtilities.runOnUIThread(() -> { item.resolving = false; hideLoadingFor(item); });
+                onResolveFail(item, false); // channel not found — give up
                 return;
             }
             final TLRPC.Chat fchat = chat;
@@ -1162,30 +1171,31 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             gm.id.add(item.messageId);
             ConnectionsManager.getInstance(account).sendRequest(gm, (resp2, err2) -> {
                 if (err2 != null || !(resp2 instanceof TLRPC.messages_Messages)) {
-                    AndroidUtilities.runOnUIThread(() -> { item.resolving = false; hideLoadingFor(item); });
+                    onResolveFail(item, true); // transient network failure — retry
                     return;
                 }
                 TLRPC.messages_Messages mm = (TLRPC.messages_Messages) resp2;
                 MessagesController.getInstance(account).putUsers(mm.users, false);
                 MessagesController.getInstance(account).putChats(mm.chats, false);
                 if (mm.messages == null || mm.messages.isEmpty()) {
-                    AndroidUtilities.runOnUIThread(() -> { item.resolving = false; hideLoadingFor(item); });
+                    onResolveFail(item, false); // message gone — give up
                     return;
                 }
                 final MessageObject mo = new MessageObject(account, mm.messages.get(0), false, true);
                 TLRPC.Document doc = mo.getDocument();
                 if (doc == null || !MessageObject.isVideoDocument(doc)) {
-                    AndroidUtilities.runOnUIThread(() -> { item.resolving = false; hideLoadingFor(item); });
+                    onResolveFail(item, false); // not a playable video — give up
                     return;
                 }
                 AndroidUtilities.runOnUIThread(() -> {
                     item.resolving = false;
+                    item.resolveAttempts = 0;
                     item.mo = mo;
                     item.chat = fchat;
                     item.liked = isLiked(mo);
                     item.likeCount = totalReactions(mo);
                     preloadMedia(item);
-                    if (onResolved != null) onResolved.run();
+                    drainResolveCallbacks(item); // wakes playPosition's queued start-playback intent
                 });
             });
         });
@@ -1213,6 +1223,57 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 }
                 if (onResolved != null) onResolved.run();
             });
+        });
+    }
+
+    /** Run and clear every queued waiter for this item's resolve (safe on success or on give-up). */
+    private void drainResolveCallbacks(FeedItem item) {
+        if (item.resolveCallbacks.isEmpty()) return;
+        java.util.ArrayList<Runnable> cbs = new java.util.ArrayList<>(item.resolveCallbacks);
+        item.resolveCallbacks.clear();
+        for (int i = 0; i < cbs.size(); i++) {
+            try { cbs.get(i).run(); } catch (Exception e) { FileLog.e(e); }
+        }
+    }
+
+    /**
+     * A resolve attempt failed. A transient (network) failure for a reel someone is waiting on gets a
+     * bounded, delayed retry, so a blip does not leave a permanent black frame (the manual skip-and-back
+     * users rely on). Data failures (not a video, message gone) give up and drain waiters — they no-op
+     * since mo stays null. Runs its own hop to the UI thread (callers are on a connection thread).
+     */
+    private void onResolveFail(final FeedItem item, final boolean retryable) {
+        AndroidUtilities.runOnUIThread(() -> {
+            item.resolving = false;
+            hideLoadingFor(item);
+            int idx = items.indexOf(item);
+            boolean awaited = idx == currentPosition || !item.resolveCallbacks.isEmpty();
+            if (retryable && awaited && item.resolveAttempts < MAX_RESOLVE_RETRIES) {
+                item.resolveAttempts++;
+                final int attempt = item.resolveAttempts;
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (item.mo == null && (items.indexOf(item) == currentPosition || !item.resolveCallbacks.isEmpty())) {
+                        FileLog.d("svipe: retrying resolve attempt=" + attempt);
+                        resolveItem(item, null); // waiters already queued; success drains them
+                    }
+                }, RESOLVE_RETRY_DELAY_MS);
+            } else {
+                drainResolveCallbacks(item); // give up cleanly so no queued play intent leaks
+            }
+        });
+    }
+
+    /** Resolve (if needed) and start the reel at {@code pos} — recovers a reel stuck before playback. */
+    private void resolveAndPlay(final int pos) {
+        if (pos < 0 || pos >= items.size()) return;
+        final FeedItem item = items.get(pos);
+        ReelsHolder holder = holderAt(pos);
+        if (holder != null) holder.showLoading(true);
+        resolveItem(item, () -> {
+            updateActions(pos);
+            if (currentPosition == pos && item.mo != null && currentPlayer == null) {
+                startPlayback(item.mo, item.mo.getDocument(), pos, item);
+            }
         });
     }
 
@@ -2483,6 +2544,15 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     loadFeed();
                 } else {
                     loadMore(); // an append failed offline — finish it without resetting the pager
+                }
+            }
+            // A current reel whose resolve failed while offline recovers the moment the link returns.
+            if (state == ConnectionsManager.ConnectionStateConnected
+                    && currentPosition >= 0 && currentPosition < items.size()) {
+                FeedItem cur = items.get(currentPosition);
+                if (cur.mo == null && !cur.resolving && currentPlayer == null) {
+                    cur.resolveAttempts = 0; // fresh retry budget now that we are back online
+                    resolveAndPlay(currentPosition);
                 }
             }
         } else if (id == NotificationCenter.fileLoaded) {
