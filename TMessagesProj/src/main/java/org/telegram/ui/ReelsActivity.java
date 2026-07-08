@@ -275,6 +275,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         boolean preloadBypassGate;                       // next-in-line skips the data-saving gate
         boolean fromQueue;                               // restored from the persisted offline queue
         boolean fullDownloadStarted;                     // a full (cacheType 0) download was requested
+        long downloadDocId;                              // the rendition doc a full download targets (0 = none); the observers key off this
         // Real comment availability, resolved via getDiscussionMessage (the message's isComments()
         // flag can be stale — true but with no actual discussion -> MSG_ID_INVALID). null=unknown.
         Boolean commentsAvailable;
@@ -809,10 +810,18 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 MessageObject mo = deserializeMessage(e.messageB64);
                 if (mo == null || mo.getDocument() == null) { skipDeser++; continue; }
                 // validate-on-load: drop entries whose cached file was evicted (keepMedia auto-delete).
-                // Same flags (useFileDatabaseQueue=false) the player uses in VideoUri.of below, so a
-                // "present" item is exactly one the player can actually play from disk offline.
-                File f = FileLoader.getInstance(account).getPathToAttach(mo.getDocument(), null, false, false);
-                if (f == null || !f.exists()) { skipNoFile++; continue; }
+                // Laddered entries store ONE rendition — count the item present when ANY rendition
+                // (or the original, for legacy entries) is fully on disk; playback pins exactly that
+                // cached file, so a "present" item is one the player can really play offline.
+                boolean present;
+                ArrayList<VideoPlayer.Quality> qs = qualitiesFor(mo);
+                if (qs != null) {
+                    present = cachedQualityOf(qs) != null;
+                } else {
+                    File f = FileLoader.getInstance(account).getPathToAttach(mo.getDocument(), null, false, false);
+                    present = f != null && f.exists();
+                }
+                if (!present) { skipNoFile++; continue; }
                 FeedItem it = new FeedItem();
                 it.channelId = e.channelId;
                 it.messageId = e.messageId;
@@ -1347,9 +1356,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         }
     }
 
-    /** Is this item's full video file already present on disk (not just head-preloaded)? */
+    /** Is this item playable entirely from disk (ANY rendition or the original fully present)? */
     private boolean fileFullyPresent(FeedItem it) {
         if (it == null || it.mo == null) return false;
+        ArrayList<VideoPlayer.Quality> qualities = qualitiesFor(it.mo);
+        if (qualities != null) return cachedQualityOf(qualities) != null;
         TLRPC.Document doc = it.mo.getDocument();
         if (doc == null) return false;
         File f = FileLoader.getInstance(account).getPathToAttach(doc, null, false, false);
@@ -1397,7 +1408,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 resolveItem(it, () -> ensureFullDownloadsAhead(currentPosition)); // retry once resolved
                 continue;
             }
-            TLRPC.Document doc = it.mo.getDocument();
+            // The queue stores ONE file per reel: the target rendition when a ladder exists (~720p,
+            // half the bytes of a 1080p source), the original document otherwise.
+            VideoPlayer.VideoUri target = targetRendition(qualitiesFor(it.mo));
+            TLRPC.Document doc = target != null ? target.document : it.mo.getDocument();
             if (doc == null) continue;
             if (fileFullyPresent(it)) {
                 enqueueResolved(it, true); // already on disk — make sure it's persisted
@@ -1417,6 +1431,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             if (!fullDownloadStarted.contains(doc.id)) {
                 fullDownloadStarted.add(doc.id);
                 it.fullDownloadStarted = true;
+                it.downloadDocId = doc.id; // the observers clean up by THIS id, not mo.getDocument()
                 fileNameToItem.put(FileLoader.getAttachFileName(doc), it);
                 enqueueResolved(it, false); // persist now (downloaded=false) so an in-flight load survives backgrounding
                 try {
@@ -1447,7 +1462,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         e.shareUrl = it.shareUrl;
         e.topicId = it.topicId;
         e.recId = it.recId;
-        TLRPC.Document doc = it.mo.getDocument();
+        // Persist the file the queue actually stores — the target rendition when a ladder exists.
+        // sizeBytes drives the disk budget, so it must match the bytes really downloaded.
+        VideoPlayer.VideoUri target = targetRendition(qualitiesFor(it.mo));
+        TLRPC.Document doc = target != null ? target.document : it.mo.getDocument();
         e.documentId = doc != null ? doc.id : 0;
         e.sizeBytes = doc != null ? doc.size : 0;
         e.downloaded = downloaded;
@@ -1466,6 +1484,27 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (item == null || item.mo == null || item.preloadStarted) return;
         try {
             if (!item.preloadBypassGate && !DownloadController.getInstance(account).canPreloadStories()) return;
+            ArrayList<VideoPlayer.Quality> qualities = qualitiesFor(item.mo);
+            if (qualities != null) {
+                // Laddered reel: warm the HLS manifests (a few hundred bytes each — the player
+                // fetches the selected rung's playlist synchronously at prepare, so having them on
+                // disk makes the adaptive start instant even on cellular) and head-preload the
+                // target rendition — the same file the Wi-Fi queue completes later, so every
+                // preloaded byte is reused rather than thrown away.
+                item.preloadStarted = true;
+                for (VideoPlayer.Quality q : qualities) {
+                    for (VideoPlayer.VideoUri u : q.uris) {
+                        if (u.manifestDocument != null && !u.isManifestCached()) {
+                            FileLoader.getInstance(account).loadFile(u.manifestDocument, item.mo, FileLoader.PRIORITY_NORMAL, 0);
+                        }
+                    }
+                }
+                VideoPlayer.VideoUri target = targetRendition(qualities);
+                if (target != null && target.document != null && !target.isCached()) {
+                    FileLoader.getInstance(account).loadFile(target.document, item.mo, item.preloadPriority, 10);
+                }
+                return;
+            }
             TLRPC.Document doc = item.mo.getDocument();
             if (doc == null) return;
             item.preloadStarted = true;
@@ -1481,13 +1520,48 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private void stopLoadingFor(FeedItem item) {
         if (item == null || item.mo == null) return;
         try {
-            TLRPC.Document doc = item.mo.getDocument();
-            if (doc == null) return;
-            // A repost can share the same file as the current reel — never cancel that one.
+            // A repost can share the same file(s) as the current reel — never cancel those.
             FeedItem cur = currentPosition >= 0 && currentPosition < items.size() ? items.get(currentPosition) : null;
-            TLRPC.Document curDoc = cur != null && cur.mo != null ? cur.mo.getDocument() : null;
-            if (curDoc != null && curDoc.id == doc.id) return;
-            FileLoader.getInstance(account).cancelLoadFile(doc);
+            if (cur == item) return; // never cancel the current reel from here
+            java.util.HashSet<Long> protect = new java.util.HashSet<>();
+            if (cur != null && cur.mo != null) {
+                TLRPC.Document cd = cur.mo.getDocument();
+                if (cd != null) protect.add(cd.id);
+                for (TLRPC.Document d : ladderDocsWithManifests(cur.mo)) protect.add(d.id);
+            }
+            // Under HLS any rung — or its manifest — may hold the in-flight op; cancel them all.
+            ArrayList<TLRPC.Document> docs = ladderDocsWithManifests(item.mo);
+            if (docs.isEmpty()) {
+                TLRPC.Document doc = item.mo.getDocument();
+                if (doc != null) docs.add(doc);
+            }
+            for (TLRPC.Document d : docs) {
+                if (!protect.contains(d.id)) {
+                    FileLoader.getInstance(account).cancelLoadFile(d);
+                }
+            }
+        } catch (Exception e) { FileLog.e(e); }
+    }
+
+    /**
+     * Cancel a reel's in-flight STREAM ops — every rung and its manifest, since under HLS/ABR the
+     * live op is on whichever rung the selector chose (and the dwell escalation fully downloads
+     * that same rung), not on mo.getDocument(). An in-flight OFFLINE-queue download (tracked by
+     * {@link FeedItem#downloadDocId}) is left running so it finishes and persists. Used on the way
+     * out (onFragmentDestroy) where those HIGH-priority pulls are pure waste once the screen is gone.
+     */
+    private void cancelReelStreams(FeedItem item) {
+        if (item == null || item.mo == null) return;
+        try {
+            ArrayList<TLRPC.Document> docs = ladderDocsWithManifests(item.mo);
+            if (docs.isEmpty()) {
+                TLRPC.Document d = item.mo.getDocument();
+                if (d != null) docs.add(d);
+            }
+            for (TLRPC.Document d : docs) {
+                if (item.downloadDocId != 0 && d.id == item.downloadDocId) continue; // keep the offline download
+                FileLoader.getInstance(account).cancelLoadFile(d);
+            }
         } catch (Exception e) { FileLog.e(e); }
     }
 
@@ -1496,6 +1570,111 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (idx < 0) return;
         ReelsHolder h = holderAt(idx);
         if (h != null) h.showLoading(false);
+    }
+
+    // ---------------- Telegram ABR ladder (multi-quality) helpers ----------------
+    // Popular channels' videos arrive with server-made renditions (480/720/1080) + per-rendition
+    // HLS manifests in media.alt_documents. Playing through VideoPlayer's qualities path gives
+    // Instagram-style adaptive streaming: ExoPlayer picks a rung the CURRENT bandwidth can sustain
+    // and switches mid-play, so a slowing connection degrades quality instead of buffering.
+
+    /**
+     * The quality ladder for a reel, or null when the message carries none (small channels) —
+     * callers then use the legacy single-document path. Recomputed per call: VideoUri cached-flags
+     * are resolved at build time, so a fresh call sees files downloaded since the last one.
+     *
+     * reference=0: inspection only (doc ids, sizes, cached-flags for priorities / cancels / budget /
+     * presence). A real MTProto file reference is minted ONLY on the playback path
+     * ({@link #playbackQualitiesFor}), because {@link FileLoader#getFileReference} inserts into a
+     * process-lifetime map that is never pruned — calling it in the per-swipe inspection loops would
+     * leak one MessageObject-retaining entry per call.
+     */
+    private ArrayList<VideoPlayer.Quality> qualitiesFor(MessageObject mo) {
+        return buildQualities(mo, 0);
+    }
+
+    /** Ladder built with a live file reference embedded in each stream URI — for preparePlayer only. */
+    private ArrayList<VideoPlayer.Quality> playbackQualitiesFor(MessageObject mo) {
+        return buildQualities(mo, FileLoader.getInstance(account).getFileReference(mo));
+    }
+
+    private ArrayList<VideoPlayer.Quality> buildQualities(MessageObject mo, int reference) {
+        if (mo == null || mo.messageOwner == null) return null;
+        TLRPC.MessageMedia media = mo.messageOwner.media;
+        if (!(media instanceof TLRPC.TL_messageMediaDocument) || media.alt_documents.isEmpty()) return null;
+        try {
+            // useFileDatabaseQueue=false — same flag the legacy VideoUri.of path uses here, so
+            // "cached" means exactly "the player can open it from disk right now".
+            ArrayList<VideoPlayer.Quality> q = VideoPlayer.getQualities(
+                    account, media.document, media.alt_documents, reference, false, false);
+            return q == null || q.isEmpty() ? null : q;
+        } catch (Exception e) {
+            FileLog.e(e);
+            return null;
+        }
+    }
+
+    /** Every doc a reel's playback touches — video rungs AND their HLS manifests — for cancels. */
+    private ArrayList<TLRPC.Document> ladderDocsWithManifests(MessageObject mo) {
+        ArrayList<VideoPlayer.Quality> qs = qualitiesFor(mo);
+        ArrayList<TLRPC.Document> docs = ladderVideoDocs(qs);
+        if (qs != null) {
+            for (VideoPlayer.Quality q : qs) {
+                for (VideoPlayer.VideoUri u : q.uris) {
+                    if (u.manifestDocument != null) docs.add(u.manifestDocument);
+                }
+            }
+        }
+        return docs;
+    }
+
+    /** Every playable rendition document of the ladder — the unit for priorities and cancels. */
+    private static ArrayList<TLRPC.Document> ladderVideoDocs(ArrayList<VideoPlayer.Quality> qualities) {
+        ArrayList<TLRPC.Document> docs = new ArrayList<>();
+        if (qualities == null) return docs;
+        for (VideoPlayer.Quality q : qualities) {
+            for (VideoPlayer.VideoUri u : q.uris) {
+                if (u.document != null) docs.add(u.document);
+            }
+        }
+        return docs;
+    }
+
+    /**
+     * The ONE file a reel is stored as (offline queue, Wi-Fi top-ups, dwell escalation): a rendition
+     * already on disk if any (never download a second copy of the same reel), else the highest rung
+     * at or below 720p — sharp on a phone at roughly half the bytes of a 1080p source — preferring
+     * the smaller file inside a rung (the more efficient codec), else the smallest rung available.
+     */
+    private static VideoPlayer.VideoUri targetRendition(ArrayList<VideoPlayer.Quality> qualities) {
+        if (qualities == null) return null;
+        VideoPlayer.VideoUri best = null, smallest = null;
+        for (VideoPlayer.Quality q : qualities) {
+            for (VideoPlayer.VideoUri u : q.uris) {
+                if (u.document == null) continue;
+                if (u.isCached()) return u;
+                if (smallest == null || u.size < smallest.size) smallest = u;
+                int p = Math.min(u.width, u.height);
+                if (p <= 720 + 55) { // the same rung tolerance Quality.p() uses
+                    int bp = best == null ? 0 : Math.min(best.width, best.height);
+                    if (best == null || bp < p || (bp == p && u.size < best.size)) {
+                        best = u;
+                    }
+                }
+            }
+        }
+        return best != null ? best : smallest;
+    }
+
+    /** The Quality wrapping a fully-cached rendition (pin it -> plays from disk, works offline), or null for AUTO. */
+    private static VideoPlayer.Quality cachedQualityOf(ArrayList<VideoPlayer.Quality> qualities) {
+        if (qualities == null) return null;
+        for (VideoPlayer.Quality q : qualities) {
+            for (VideoPlayer.VideoUri u : q.uris) {
+                if (u.isCached()) return q;
+            }
+        }
+        return null;
     }
 
     /** Width/height are known from the document long before the first frame — no layout jump. */
@@ -1533,16 +1712,38 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 player.setLooping(true);
             }
             // This reel owns the bandwidth now: stream reads at HIGH so playback, loops and seeks
-            // stay smooth. Don't force the whole file up front — a quick glance shouldn't cost the
-            // full download. Escalate to a full (cacheType 0) pull only once the user has dwelled
-            // past MIN_WATCHED_MS and is still on this reel, so engaged reels keep looping/seeking
-            // seamlessly while a skipped reel costs only the streamed prefix.
-            FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_HIGH);
+            // stay smooth. Under HLS every rung the selector may pick must be HIGH — the stream
+            // priority map is per-document. Don't force the whole file up front — a quick glance
+            // shouldn't cost the full download. Escalate to a full (cacheType 0) pull only once the
+            // user has dwelled past MIN_WATCHED_MS and is still on this reel, so engaged reels keep
+            // looping/seeking seamlessly while a skipped reel costs only the streamed prefix.
+            // Real reference: this ladder feeds preparePlayer, whose stream URIs must carry a live
+            // file reference (one getFileReference per played reel — legacy paid the same).
+            final ArrayList<VideoPlayer.Quality> qualities = playbackQualitiesFor(mo);
+            if (qualities != null) {
+                for (TLRPC.Document d : ladderVideoDocs(qualities)) {
+                    FileStreamLoadOperation.setPriorityForDocument(d, FileLoader.PRIORITY_HIGH);
+                }
+            } else {
+                FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_HIGH);
+            }
             final VideoPlayer boundPlayer = player;
             AndroidUtilities.runOnUIThread(() -> {
                 if (currentPosition == pos && currentPlayer == boundPlayer) {
                     try {
-                        FileLoader.getInstance(account).loadFile(doc, mo, FileLoader.PRIORITY_HIGH, 0);
+                        // Complete the file that is ACTUALLY streaming (same doc => FileLoader merges
+                        // it into the live stream op — zero extra bandwidth) so loops replay from
+                        // disk; fall back to the queue's target rendition, then the top document.
+                        TLRPC.Document full = null;
+                        if (qualities != null) {
+                            full = boundPlayer.getCurrentDocument();
+                            if (full == null) {
+                                VideoPlayer.VideoUri target = targetRendition(qualities);
+                                if (target != null) full = target.document;
+                            }
+                        }
+                        if (full == null) full = doc;
+                        FileLoader.getInstance(account).loadFile(full, mo, FileLoader.PRIORITY_HIGH, 0);
                     } catch (Exception e) { FileLog.e(e); }
                 }
             }, SvipeQueuePlan.MIN_WATCHED_MS);
@@ -1638,11 +1839,22 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             if (!prepared) {
                 // preparePlayer MUST come after setDelegate: VideoPlayer reports the first state
                 // change during prepare and NPEs on a null delegate.
-                int reference = FileLoader.getInstance(account).getFileReference(mo);
-                VideoPlayer.VideoUri vu = VideoPlayer.VideoUri.of(account, doc, null, reference, false);
-                FileLog.d("svipe: play pos=" + pos + " source=" + (vu.isCached() ? "LOCAL-cache" : "network")
-                        + " fromQueue=" + item.fromQueue);
-                player.preparePlayer(vu.uri, "other");
+                if (qualities != null) {
+                    // Adaptive path: a fully-cached rendition is pinned (plays from disk, works
+                    // offline); otherwise AUTO — ExoPlayer starts on a rung the bandwidth estimate
+                    // sustains and adapts mid-play instead of buffering.
+                    VideoPlayer.Quality cached = cachedQualityOf(qualities);
+                    FileLog.d("svipe: play pos=" + pos + " hls rungs=" + qualities.size()
+                            + " source=" + (cached != null ? "LOCAL-cache" : "network-auto")
+                            + " fromQueue=" + item.fromQueue);
+                    player.preparePlayer(qualities, cached);
+                } else {
+                    int reference = FileLoader.getInstance(account).getFileReference(mo);
+                    VideoPlayer.VideoUri vu = VideoPlayer.VideoUri.of(account, doc, null, reference, false);
+                    FileLog.d("svipe: play pos=" + pos + " source=" + (vu.isCached() ? "LOCAL-cache" : "network")
+                            + " fromQueue=" + item.fromQueue);
+                    player.preparePlayer(vu.uri, "other");
+                }
                 if (pendingSeekToMs > 0) {
                     // Mid-play recovery rebuild: pick up where the starved player left off.
                     try { player.seekTo(pendingSeekToMs); } catch (Exception ignore) {}
@@ -1842,9 +2054,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             if (other == null || (!other.preloadStarted && !other.fullDownloadStarted)) continue;
             other.preloadStarted = false;
             other.fullDownloadStarted = false;
-            if (other.mo != null && other.mo.getDocument() != null) {
-                fullDownloadStarted.remove(other.mo.getDocument().id); // let the Wi-Fi top-up retry later
-            }
+            // Free the in-flight-download guard by the id the download was REGISTERED under — the
+            // target rendition (downloadDocId), not mo.getDocument() (the top rung). Using the wrong
+            // id leaves a stale entry that blocks this reel from ever being re-queued this session.
+            long otherId = other.downloadDocId != 0 ? other.downloadDocId
+                    : (other.mo != null && other.mo.getDocument() != null ? other.mo.getDocument().id : 0);
+            if (otherId != 0) fullDownloadStarted.remove(otherId); // let the Wi-Fi top-up retry later
+            other.downloadDocId = 0;
             stopLoadingFor(other); // its guard keeps a repost sharing THIS reel's file untouched
         }
         // Destroy the wedged operation on EVERY attempt — the field-proven manual fix. Releasing
@@ -1856,8 +2072,16 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         // disk (.temp/.pt survive a cancel — only the in-flight chunk's progress is lost), and
         // the fresh operation the rebuild creates below passes the guard and issues brand-new
         // requests. The exponential cooldown in the watchdog paces these cancels, so even a very
-        // slow link keeps banking at least a chunk per attempt.
-        try { FileLoader.getInstance(account).cancelLoadFile(doc); } catch (Exception e) { FileLog.e(e); }
+        // slow link keeps banking at least a chunk per attempt. Under HLS any rung — or a rung's
+        // tiny MANIFEST fetch — may own the wedged op; a surviving wedged manifest op would be
+        // re-attached by the rebuild's playlist fetch and park it again. Reset all of them.
+        try {
+            ArrayList<TLRPC.Document> ownDocs = ladderDocsWithManifests(item.mo);
+            if (ownDocs.isEmpty()) ownDocs.add(doc);
+            for (TLRPC.Document d : ownDocs) {
+                FileLoader.getInstance(account).cancelLoadFile(d);
+            }
+        } catch (Exception e) { FileLog.e(e); }
         pendingPrefetchRearm = true;
         ReelsHolder holder = holderAt(pos);
         if (holder != null) holder.showLoading(true);
@@ -1917,8 +2141,6 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         try {
             TLRPC.Document doc = item.mo.getDocument();
             if (doc == null) return;
-            int reference = FileLoader.getInstance(account).getFileReference(item.mo);
-            VideoPlayer.VideoUri vu = VideoPlayer.VideoUri.of(account, doc, null, reference, false);
             VideoPlayer p = new VideoPlayer(false, false);
             p.setIsReels();
             p.setLooping(true);
@@ -1940,9 +2162,19 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             });
             // Buffer the next reel at NORMAL — fast enough to be ready by the swipe, but still below
             // the current reel's HIGH stream and above the LOW background full-downloads, so it never
-            // starves what's playing.
-            FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_NORMAL);
-            p.preparePlayer(vu.uri, "other");
+            // starves what's playing. (Promotion in startPlayback re-maps everything to HIGH.)
+            ArrayList<VideoPlayer.Quality> qualities = playbackQualitiesFor(item.mo);
+            if (qualities != null) {
+                for (TLRPC.Document d : ladderVideoDocs(qualities)) {
+                    FileStreamLoadOperation.setPriorityForDocument(d, FileLoader.PRIORITY_NORMAL);
+                }
+                p.preparePlayer(qualities, cachedQualityOf(qualities));
+            } else {
+                int reference = FileLoader.getInstance(account).getFileReference(item.mo);
+                VideoPlayer.VideoUri vu = VideoPlayer.VideoUri.of(account, doc, null, reference, false);
+                FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_NORMAL);
+                p.preparePlayer(vu.uri, "other");
+            }
             p.setPlayWhenReady(false);
             nextPlayer = p;
             nextPlayerPos = pos;
@@ -2676,16 +2908,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         updateProgressRunnable = null;
         releaseCurrentPlayer();
         releaseNextPlayer();
-        // Cancel only the CURRENT reel's stream (its high-priority pull is wasteful once the screen
-        // is gone). The LOW-priority background full-downloads for the ahead window are deliberately
-        // left running so they finish and persist; any that complete are picked up on next cold start
-        // by the file-exists validate-on-load check.
+        // Cancel the CURRENT reel's stream rungs (their high-priority pull is wasteful once the
+        // screen is gone) — but not an in-flight offline-queue download of this reel. The LOW-priority
+        // background full-downloads for the ahead window are deliberately left running so they finish
+        // and persist; any that complete are picked up on next cold start by the validate-on-load check.
         if (currentPosition >= 0 && currentPosition < items.size()) {
-            FeedItem cur = items.get(currentPosition);
-            if (cur.mo != null && cur.mo.getDocument() != null
-                    && !fullDownloadStarted.contains(cur.mo.getDocument().id)) {
-                try { FileLoader.getInstance(account).cancelLoadFile(cur.mo.getDocument()); } catch (Exception ignore) {}
-            }
+            cancelReelStreams(items.get(currentPosition));
         }
         super.onFragmentDestroy();
     }
@@ -2845,17 +3073,23 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             String fileName = args.length > 0 && args[0] instanceof String ? (String) args[0] : null;
             FeedItem it = fileName != null ? fileNameToItem.remove(fileName) : null;
             if (it != null) {
-                if (it.mo != null && it.mo.getDocument() != null) {
-                    fullDownloadStarted.remove(it.mo.getDocument().id); // completed — allow re-download if later evicted
-                }
+                // Clean up by the doc the download actually targeted (a rendition under HLS —
+                // mo.getDocument() would be the top rung and miss).
+                long id2 = it.downloadDocId != 0 ? it.downloadDocId
+                        : (it.mo != null && it.mo.getDocument() != null ? it.mo.getDocument().id : 0);
+                if (id2 != 0) fullDownloadStarted.remove(id2); // completed — allow re-download if later evicted
+                it.downloadDocId = 0;
                 enqueueResolved(it, true); // serialize + mark downloaded + persist
                 if (currentPosition >= 0) ensureFullDownloadsAhead(currentPosition); // a slot filled — top up
             }
         } else if (id == NotificationCenter.fileLoadFailed) {
             String fileName = args.length > 0 && args[0] instanceof String ? (String) args[0] : null;
             FeedItem it = fileName != null ? fileNameToItem.remove(fileName) : null;
-            if (it != null && it.mo != null && it.mo.getDocument() != null) {
-                fullDownloadStarted.remove(it.mo.getDocument().id); // allow a future retry
+            if (it != null) {
+                long id2 = it.downloadDocId != 0 ? it.downloadDocId
+                        : (it.mo != null && it.mo.getDocument() != null ? it.mo.getDocument().id : 0);
+                if (id2 != 0) fullDownloadStarted.remove(id2); // allow a future retry
+                it.downloadDocId = 0;
             }
         }
     }
