@@ -112,7 +112,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private static final long STUCK_TICK_MS = 1200;              // sample interval
     private static final int STUCK_TICKS = 2;                    // consecutive no-progress ticks => stuck
     private static final int MAX_STUCK_RECOVERIES = 2;           // quick attempts; past this, cooldown-paced retries
-    private static final long STUCK_HARD_DEADLINE_MS = 8000;     // no first frame this long after (re)arm => stuck even if bytes trickle
+    // 5s beats the user's own patience (field reports: manual skip-and-back at ~3-5s). A recovery
+    // is cheap — completed chunks survive the cancel — so firing on an honestly-slow reel only
+    // costs the in-flight chunk + a 250ms rebuild, while firing late means the user rescues
+    // manually and concludes the app can't heal itself.
+    private static final long STUCK_HARD_DEADLINE_MS = 5000;     // no first frame this long after (re)arm => stuck even if bytes trickle
     private static final long STUCK_RETRY_COOLDOWN_MS = 6000;    // pace of retries past the quick cap — the watchdog never gives up
     private static final long STUCK_REBUILD_DELAY_MS = 250;      // let cancels drain on the loader thread before rebuilding
     private static final long PLAYBACK_START_DEADLINE_MS = 4000; // no player at all this long after a page change => re-kick
@@ -227,6 +231,16 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private boolean pendingPrefetchRearm;  // recovery cleared the ahead-window ops; re-arm them on first frame
     private Runnable playbackStartChecker; // backstop for reels stuck BEFORE a player exists (resolve/startPlayback failed)
     private long playRequestMs; // for the "svipe: first frame" timing log
+    // Manual-rescue detector (diagnostics only): remembers the reel the user swiped AWAY from while
+    // it was still spinning. If they come back and it renders quickly, the manual skip-and-back
+    // rescued a reel the watchdog should have healed — reported via sendDiag so real-device failures
+    // of the auto-recovery are visible in the prod events table instead of anecdotal.
+    private long rescueChannelId;
+    private int rescueMessageId;
+    private long rescueLeftAtMs;
+    private int rescueLeftAttempts;
+    private long rescueLeftSpinnerMs;
+    private long pendingSeekToMs; // mid-play recovery: resume the rebuilt player here, not at 0
 
     // Persistent offline ready-queue: play instantly from disk on open, refill in the background.
     private SvipeReelQueue reelQueue;
@@ -1026,6 +1040,18 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         int prevPos = currentPosition;
         flushWatchEvent(prevPos);
         FeedItem prev = prevPos >= 0 && prevPos < items.size() ? items.get(prevPos) : null;
+        // Leaving a reel that never rendered after a real wait = the user giving up on a spinner.
+        // Remember it: if they swipe back and it renders instantly, that's a manual rescue the
+        // watchdog failed to deliver — the strongest field signal we can collect (see sendDiag).
+        // The 1.5s floor skips ordinary fast scrolling past reels that never got a chance.
+        if (prev != null && !currentReelFirstFrame && playRequestMs > 0
+                && System.currentTimeMillis() - playRequestMs >= 1500) {
+            rescueChannelId = prev.channelId;
+            rescueMessageId = prev.messageId;
+            rescueLeftAtMs = System.currentTimeMillis();
+            rescueLeftAttempts = stuckRecoveryAttempts;
+            rescueLeftSpinnerMs = System.currentTimeMillis() - playRequestMs;
+        }
         currentPosition = pos;
         userPaused = false;
         // Kill the previous reel's download BEFORE starting the new one: its stream operation
@@ -1089,6 +1115,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         noProgressTicks = 0;
         lastStuckRecoveryMs = 0;
         pendingPrefetchRearm = false;
+        pendingSeekToMs = 0; // a stale mid-play resume must never seek a NEW reel
         cancelStuckWatchdog();
         schedulePlaybackStartChecker(pos);
         if (nextPlayer != null && nextPlayerPos != pos) {
@@ -1561,9 +1588,33 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                         // The reel is genuinely rendering — disarm the stall watchdog. Guard so a late
                         // first frame from a PREVIOUS reel can't cancel the NEW reel's watchdog.
                         if (currentPosition == pos && currentPlayer == boundPlayer) {
+                            long sinceRequest = System.currentTimeMillis() - playRequestMs;
+                            if (rescueChannelId == item.channelId && rescueMessageId == item.messageId
+                                    && System.currentTimeMillis() - rescueLeftAtMs <= 30000) {
+                                // The user left this reel spinning, came back, and it now renders:
+                                // a manual skip-and-back rescue. Report what the auto-recovery had
+                                // (not) managed before they gave up — the exact evidence needed to
+                                // debug the stuck-reel bug on real devices.
+                                try {
+                                    JSONObject p = new JSONObject();
+                                    p.put("spinner_ms_before_leave", rescueLeftSpinnerMs);
+                                    p.put("attempts_before_leave", rescueLeftAttempts);
+                                    p.put("ms_away", playRequestMs - rescueLeftAtMs);
+                                    p.put("ms_to_frame_after_return", sinceRequest);
+                                    sendDiag(item, "manual_rescue", p);
+                                } catch (Exception ignore) {}
+                                rescueChannelId = 0;
+                                rescueMessageId = 0;
+                            }
                             currentReelFirstFrame = true;
-                            stuckRecoveryAttempts = 0; // healthy again — future stalls get a fresh quick budget
-                            cancelStuckWatchdog();
+                            // stuckRecoveryAttempts is NOT reset here: a recovery rebuild resumed
+                            // mid-reel renders its first frame from disk bytes and can starve again
+                            // within a second — resetting on the frame alone would grant every churn
+                            // cycle a fresh quick budget and defeat the exponential cooldown. The
+                            // watchdog's healthy PLAY tick resets it (and reports 'recovered') once
+                            // the reel demonstrably plays without buffering.
+                            // Watchdog stays armed: it flips into its PLAY phase to catch reels
+                            // that starve MID-playback (spinner with no pre-frame watchdog).
                             if (pendingPrefetchRearm) {
                                 // Recovery cleared the ahead-window downloads to free the pipe for this
                                 // reel; now that it renders, re-arm the window (same calls playPosition makes).
@@ -1592,6 +1643,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 FileLog.d("svipe: play pos=" + pos + " source=" + (vu.isCached() ? "LOCAL-cache" : "network")
                         + " fromQueue=" + item.fromQueue);
                 player.preparePlayer(vu.uri, "other");
+                if (pendingSeekToMs > 0) {
+                    // Mid-play recovery rebuild: pick up where the starved player left off.
+                    try { player.seekTo(pendingSeekToMs); } catch (Exception ignore) {}
+                    pendingSeekToMs = 0;
+                }
             }
             player.setPlayWhenReady(true);
             player.play();
@@ -1617,13 +1673,18 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     /**
      * Watchdog for the "reel stuck on an infinite spinner, skip-and-back fixes it" bug: a player
      * whose stream stalled (parked read in the FileLoader priority queue) is never woken by
-     * promotion, which only re-maps priority. Two stuck signatures:
-     *  - PARKED: zero buffered-position growth across consecutive ticks — the wedged-stream case;
-     *  - OVERDUE: bytes may still trickle, but no first frame long past the point ExoPlayer needs
-     *    (100ms of buffer) — playback is stuck regardless of the trickle.
+     * promotion, which only re-maps priority. Covers the reel's WHOLE visible life in two phases:
+     *  - PRE (no first frame yet): PARKED = zero buffered-position growth across consecutive
+     *    ticks (the wedged-stream case); OVERDUE = bytes may still trickle, but no first frame
+     *    long past the point ExoPlayer needs (100ms of buffer).
+     *  - PLAY (rendering started): a reel that starves MID-playback (buffered prefix exhausted,
+     *    stream wedged) shows the same infinite spinner with no watchdog to save it — reproduced
+     *    live on the emulator: network blip mid-reel wedges the op, and it never resumes even
+     *    after connectivity returns. Same two signatures, measured from when buffering began;
+     *    recovery additionally resumes from the playback position instead of restarting at 0.
      * Recovery rebuilds the reel fresh, exactly like a manual revisit. The user can repeat the
      * manual skip-and-back forever, so the watchdog never gives up either: quick attempts first,
-     * then cooldown-paced retries for as long as the reel stays current and unrendered.
+     * then cooldown-paced retries for as long as the reel stays current and stuck.
      */
     private void scheduleStuckWatchdog(final int pos, final VideoPlayer boundPlayer) {
         if (positionUpdateHandler == null) {
@@ -1636,30 +1697,78 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         noProgressTicks = 0;
         watchdogArmedMs = System.currentTimeMillis();
         stuckWatchdogRunnable = new Runnable() {
+            private long bufferingSinceMs; // PLAY phase: when the current mid-play stall began (0 = playing fine)
+
             @Override
             public void run() {
-                // Bail if the page changed, the player was swapped, or the first frame already rendered.
-                if (currentPosition != pos || currentPlayer != boundPlayer || currentReelFirstFrame) {
+                // Bail only if the page changed or the player was swapped — rendering reels stay
+                // watched (PLAY phase) because mid-playback starvation wedges just like startup.
+                if (currentPosition != pos || currentPlayer != boundPlayer) {
                     return;
                 }
                 if (userPaused) {
                     // The user deliberately paused a still-buffering reel — never force-restart it.
-                    // Refresh the deadline so OVERDUE can't fire the instant they unpause.
+                    // Refresh the deadlines so nothing fires the instant they unpause.
                     watchdogArmedMs = System.currentTimeMillis();
+                    bufferingSinceMs = 0;
                     positionUpdateHandler.postDelayed(this, STUCK_TICK_MS);
                     return;
                 }
                 long buffered = 0;
                 try { buffered = boundPlayer.getBufferedPosition(); } catch (Exception ignore) {}
+                if (currentReelFirstFrame) {
+                    long duration = 0;
+                    try { duration = boundPlayer.getDuration(); } catch (Exception ignore) {}
+                    boolean fullyBuffered = duration > 0 && buffered >= duration - 500;
+                    if (!safeIsBuffering(boundPlayer) || fullyBuffered) {
+                        // PLAY phase, playing healthily (or everything is already local — a stream
+                        // rebuild can't help a decoder hiccup): reset stall clock and counters.
+                        bufferingSinceMs = 0;
+                        lastBufferedPos = -1;
+                        noProgressTicks = 0;
+                        if (stuckRecoveryAttempts > 0) {
+                            // Demonstrably playing again after >=1 recovery — THIS is the real
+                            // "recovered" moment (a rebuilt frame alone can starve again at once).
+                            // Reset grants future stalls a fresh quick budget.
+                            int attempts = stuckRecoveryAttempts;
+                            stuckRecoveryAttempts = 0;
+                            if (pos < items.size()) {
+                                try {
+                                    JSONObject p = new JSONObject();
+                                    p.put("attempts", attempts);
+                                    p.put("spinner_ms", System.currentTimeMillis() - playRequestMs);
+                                    sendDiag(items.get(pos), "recovered", p);
+                                } catch (Exception ignore) {}
+                            }
+                        }
+                        positionUpdateHandler.postDelayed(this, STUCK_TICK_MS);
+                        return;
+                    }
+                }
                 if (buffered > lastBufferedPos && buffered > 0) {
                     noProgressTicks = 0;   // bytes are arriving — treat as slow, not parked
                 } else {
                     noProgressTicks++;     // a parked stream delivers exactly zero
                 }
                 if (buffered > lastBufferedPos) lastBufferedPos = buffered;
-                boolean parked = noProgressTicks >= STUCK_TICKS
-                        && (buffered == 0 || safeIsBuffering(boundPlayer));
-                boolean overdue = System.currentTimeMillis() - watchdogArmedMs >= STUCK_HARD_DEADLINE_MS;
+                boolean parked;
+                boolean overdue;
+                if (!currentReelFirstFrame) {
+                    parked = noProgressTicks >= STUCK_TICKS
+                            && (buffered == 0 || safeIsBuffering(boundPlayer));
+                    overdue = System.currentTimeMillis() - watchdogArmedMs >= STUCK_HARD_DEADLINE_MS;
+                } else {
+                    // PLAY phase, buffering: clock the stall from when buffering started, not from
+                    // arm time — a reel can play healthily for a minute before starving. PARKED
+                    // (zero growth of THIS reel's buffered position) is the precise wedge signature
+                    // — a dead request window delivers exactly nothing. An honest slow rebuffer
+                    // keeps trickling, so give it 3x the pre-frame deadline before forcing a
+                    // rebuild; cancelling a working op only re-buys the same wait.
+                    if (bufferingSinceMs == 0) bufferingSinceMs = System.currentTimeMillis();
+                    long stalled = System.currentTimeMillis() - bufferingSinceMs;
+                    parked = noProgressTicks >= STUCK_TICKS;
+                    overdue = stalled >= STUCK_HARD_DEADLINE_MS * 3;
+                }
                 if (parked || overdue) {
                     // Quick attempts fire immediately; past the cap keep retrying on an EXPONENTIAL
                     // cooldown (6s -> 12s -> 24s -> 48s cap). The growing window matters on very slow
@@ -1670,7 +1779,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                             << Math.min(3, Math.max(0, stuckRecoveryAttempts - MAX_STUCK_RECOVERIES));
                     if (stuckRecoveryAttempts < MAX_STUCK_RECOVERIES
                             || System.currentTimeMillis() - lastStuckRecoveryMs >= cooldown) {
-                        recoverStuckReel(pos);   // re-arms the watchdog via its startPlayback
+                        // re-arms the watchdog via its startPlayback
+                        recoverStuckReel(pos, (currentReelFirstFrame ? "midplay_" : "")
+                                + (parked ? "parked" : "overdue"));
                         return;
                     }
                     // inside the cooldown — keep watching rather than giving up
@@ -1682,8 +1793,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     }
 
     /** Rebuild a stuck reel from scratch — automates the manual skip-and-back that users rely on. */
-    private void recoverStuckReel(final int pos) {
-        if (pos != currentPosition || currentReelFirstFrame) return;
+    private void recoverStuckReel(final int pos, final String cause) {
+        if (pos != currentPosition) return;
         if (pos < 0 || pos >= items.size()) return;
         long now = System.currentTimeMillis();
         if (stuckRecoveryAttempts > 0 && now - lastStuckRecoveryMs < 1000) return; // debounce double-fires
@@ -1693,7 +1804,31 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (doc == null) return;
         stuckRecoveryAttempts++;
         lastStuckRecoveryMs = now;
-        FileLog.d("svipe: recovering stuck reel pos=" + pos + " attempt=" + stuckRecoveryAttempts);
+        // Mid-play recovery: resume where playback starved instead of restarting at 0, and drop
+        // back to pre-frame state so the rebuild guards, checker and PRE watchdog phase apply to
+        // the rebuilding reel exactly as they do to a fresh page.
+        long resumeMs = 0;
+        if (currentReelFirstFrame && currentPlayer != null) {
+            try { resumeMs = Math.max(0, currentPlayer.getCurrentPosition()); } catch (Exception ignore) {}
+        }
+        pendingSeekToMs = resumeMs > 500 ? resumeMs : 0;
+        currentReelFirstFrame = false;
+        FileLog.d("svipe: recovering stuck reel pos=" + pos + " attempt=" + stuckRecoveryAttempts
+                + " cause=" + cause + " resumeMs=" + resumeMs);
+        // First attempts only: cooldown-paced repeats add no information (the final count rides in
+        // the 'recovered' diag) and each diag is a blocking POST on the shared globalQueue — worst
+        // exactly when the network is bad, which is when long recovery loops happen.
+        if (stuckRecoveryAttempts <= 3) {
+            try {
+                JSONObject p = new JSONObject();
+                p.put("attempt", stuckRecoveryAttempts);
+                p.put("cause", cause);
+                p.put("spinner_ms", now - playRequestMs);
+                p.put("buffered_ms", lastBufferedPos);
+                if (resumeMs > 0) p.put("resume_ms", resumeMs);
+                sendDiag(item, "auto_recovery", p);
+            } catch (Exception ignore) {}
+        }
         releaseCurrentPlayer();
         releaseNextPlayer();
         // Free the download pipe the way a manual skip-and-back does: the large-file queue has only
@@ -1712,23 +1847,17 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             }
             stopLoadingFor(other); // its guard keeps a repost sharing THIS reel's file untouched
         }
-        // Cancel this reel's own wedged op only on the FIRST attempt. MTProto streams download in
-        // atomic 128KB chunks — a cancelled in-flight chunk persists NOTHING, so repeatedly
-        // cancelling on a very slow link would throw away the same partial chunk forever (livelock).
-        // Retries keep the surviving operation and instead force a queue re-evaluation: the
-        // NORMAL->HIGH changePriority pair coalesces into ONE deferred check (20ms debounce) with
-        // the op back at HIGH, which re-ranks + restarts a paused op without losing its bytes —
-        // the wake-up that a bare re-open can't deliver (loadFileInternal only re-checks the queue
-        // when the priority actually changed, and add() alone never starts anything).
-        if (stuckRecoveryAttempts == 1) {
-            try { FileLoader.getInstance(account).cancelLoadFile(doc); } catch (Exception e) { FileLog.e(e); }
-        } else {
-            try {
-                FileLoader fl = FileLoader.getInstance(account);
-                fl.changePriority(FileLoader.PRIORITY_NORMAL, doc, null, null, null, null, null);
-                fl.changePriority(FileLoader.PRIORITY_HIGH, doc, null, null, null, null, null);
-            } catch (Exception e) { FileLog.e(e); }
-        }
+        // Destroy the wedged operation on EVERY attempt — the field-proven manual fix. Releasing
+        // the player only detaches the stream listener: the operation stays in stateDownloading
+        // with its request window full of dead in-flight requests, so any start()/changePriority
+        // kick is silently swallowed by startDownloadRequest's full-window guard — no priority
+        // shuffle can ever revive it (v2 tried exactly that on retries; provably a no-op).
+        // cancelLoadFile() is the only reset that empties the window: completed chunks stay on
+        // disk (.temp/.pt survive a cancel — only the in-flight chunk's progress is lost), and
+        // the fresh operation the rebuild creates below passes the guard and issues brand-new
+        // requests. The exponential cooldown in the watchdog paces these cancels, so even a very
+        // slow link keeps banking at least a chunk per attempt.
+        try { FileLoader.getInstance(account).cancelLoadFile(doc); } catch (Exception e) { FileLog.e(e); }
         pendingPrefetchRearm = true;
         ReelsHolder holder = holderAt(pos);
         if (holder != null) holder.showLoading(true);
@@ -2400,6 +2529,26 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         }
     }
 
+    /**
+     * Stuck-reel diagnostics over the existing telemetry pipe. PLAY_FAILED is already whitelisted
+     * server-side but deliberately inert (not an exposure event, neutral for the recommender), so
+     * it can carry arbitrary payload fields (backend stores payload JSONB verbatim). Nothing shows
+     * it in the app — it exists to be queried from the prod video_event table while chasing the
+     * real-device "reel stuck on spinner" bug. Kinds: auto_recovery / recovered / manual_rescue.
+     */
+    private void sendDiag(FeedItem item, String kind, JSONObject extra) {
+        try {
+            JSONObject p = extra != null ? extra : new JSONObject();
+            p.put("diag", kind);
+            // 'net' alone conflates no-connectivity/metered-WiFi with mobile — read it WITH
+            // 'online' (ConnectivityManager truth) and 'conn' (MTProto connection state).
+            p.put("net", ApplicationLoader.getAutodownloadNetworkType());
+            p.put("online", ApplicationLoader.isNetworkOnline());
+            p.put("conn", ConnectionsManager.getInstance(account).getConnectionState());
+            sendEvent("PLAY_FAILED", item, p);
+        } catch (Exception ignore) {}
+    }
+
     private void sendEvent(String type, FeedItem item) {
         sendEvent(type, item, null);
     }
@@ -2448,13 +2597,17 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (reelEnterView != null) reelEnterView.onResume();
         if (root != null) root.onResume();
         startPositionUpdates();
-        // onPause killed the stall watchdog + start checker; if the current reel still hasn't
-        // rendered, re-arm them so a reel that was stuck when we left can't sit dead forever.
-        if (!currentReelFirstFrame && currentPosition >= 0 && currentPosition < items.size()) {
+        // onPause killed the stall watchdog + start checker; re-arm them. The watchdog now covers
+        // rendering reels too (PLAY phase, mid-play starvation), so it re-arms unconditionally;
+        // the checker only matters until the first frame. scheduleStuckWatchdog resets the arm
+        // time, so returning to a long-buffering reel gets a fresh deadline, not an instant fire.
+        if (currentPosition >= 0 && currentPosition < items.size()) {
             if (currentPlayer != null) {
                 scheduleStuckWatchdog(currentPosition, currentPlayer);
             }
-            schedulePlaybackStartChecker(currentPosition);
+            if (!currentReelFirstFrame) {
+                schedulePlaybackStartChecker(currentPosition);
+            }
         }
         Bulletin.addDelegate(this, bulletinDelegate);
     }
