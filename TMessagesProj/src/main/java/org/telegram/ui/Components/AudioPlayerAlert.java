@@ -1349,7 +1349,10 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         listAdapter.notifyDataSetChanged();
 
         actionBar.setTitle(LocaleController.getString(R.string.AttachMusic));
-        if (savedMusicList != null) {
+        if (savedMusicList instanceof org.telegram.svipe.SvipeMusicQueue) {
+            // Svipe catalog queue (music tab / My Vibe) — its own display title, not a profile playlist.
+            actionBar.setTitle(((org.telegram.svipe.SvipeMusicQueue) savedMusicList).title);
+        } else if (savedMusicList != null) {
             if (savedMusicList.dialogId == UserConfig.getInstance(currentAccount).getClientUserId()) {
                 actionBar.setTitle(getString(R.string.ProfilePlaylistTitleMine));
             } else {

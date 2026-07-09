@@ -1,0 +1,165 @@
+package org.telegram.svipe;
+
+import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.MessagesController;
+import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.tgnet.TLRPC;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Resolves music track references (channel_id, message_id, username) into real TLRPC.Messages via
+ * the same two MTProto round-trips the reels pipeline uses: contacts.resolveUsername (cached per
+ * account) + channels.getMessages batched per channel. Callbacks arrive on the UI thread.
+ */
+public class SvipeMusicResolver {
+
+    public interface Callback {
+        /** resolved maps Track.key() -> real channel TLRPC.Message with a music document. */
+        void onResolved(Map<String, TLRPC.Message> resolved);
+    }
+
+    // username -> resolved Chat, per account. Chats are small; the map only ever holds curated
+    // music channels, so no eviction is needed.
+    private static final ConcurrentHashMap<Integer, ConcurrentHashMap<String, TLRPC.Chat>> chatCache = new ConcurrentHashMap<>();
+
+    public static void resolve(int account, List<SvipeMusic.Track> tracks, Callback cb) {
+        final HashMap<String, ArrayList<SvipeMusic.Track>> byUser = new HashMap<>();
+        for (SvipeMusic.Track t : tracks) {
+            if (t.username == null || t.username.isEmpty()) {
+                continue;
+            }
+            String u = t.username.toLowerCase();
+            ArrayList<SvipeMusic.Track> group = byUser.get(u);
+            if (group == null) {
+                group = new ArrayList<>();
+                byUser.put(u, group);
+            }
+            group.add(t);
+        }
+        if (byUser.isEmpty()) {
+            AndroidUtilities.runOnUIThread(() -> cb.onResolved(new HashMap<>()));
+            return;
+        }
+        final Map<String, TLRPC.Message> resolved = new ConcurrentHashMap<>();
+        final int[] pending = {byUser.size()};
+        for (Map.Entry<String, ArrayList<SvipeMusic.Track>> e : byUser.entrySet()) {
+            resolveGroup(account, e.getKey(), e.getValue(), resolved, () -> {
+                // Always invoked on the UI thread, so the countdown needs no extra sync.
+                if (--pending[0] == 0) {
+                    cb.onResolved(resolved);
+                }
+            });
+        }
+    }
+
+    private static void resolveGroup(int account, String username, ArrayList<SvipeMusic.Track> group,
+                                     Map<String, TLRPC.Message> resolved, Runnable done) {
+        ConcurrentHashMap<String, TLRPC.Chat> cache = chatCache.get(account);
+        if (cache == null) {
+            cache = new ConcurrentHashMap<>();
+            ConcurrentHashMap<String, TLRPC.Chat> prev = chatCache.putIfAbsent(account, cache);
+            if (prev != null) {
+                cache = prev;
+            }
+        }
+        final ConcurrentHashMap<String, TLRPC.Chat> chats = cache;
+
+        TLRPC.Chat cached = chats.get(username);
+        if (cached != null) {
+            fetchMessages(account, cached, group, resolved, done);
+            return;
+        }
+
+        TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
+        req.username = username;
+        ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+            if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
+                done.run();
+                return;
+            }
+            TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
+            MessagesController mc = MessagesController.getInstance(account);
+            mc.putUsers(rp.users, false);
+            mc.putChats(rp.chats, false);
+            TLRPC.Chat chat = null;
+            long channelId = group.get(0).channelId;
+            if (rp.chats != null && !rp.chats.isEmpty()) {
+                for (int i = 0; i < rp.chats.size(); i++) {
+                    if (rp.chats.get(i).id == channelId) {
+                        chat = rp.chats.get(i);
+                        break;
+                    }
+                }
+                if (chat == null) {
+                    chat = rp.chats.get(0);
+                }
+            }
+            if (chat == null) {
+                done.run();
+                return;
+            }
+            chats.put(username, chat);
+            fetchMessages(account, chat, group, resolved, done);
+        }));
+    }
+
+    private static void fetchMessages(int account, TLRPC.Chat chat, ArrayList<SvipeMusic.Track> group,
+                                      Map<String, TLRPC.Message> resolved, Runnable done) {
+        TLRPC.TL_inputChannel inputChannel = new TLRPC.TL_inputChannel();
+        inputChannel.channel_id = chat.id;
+        inputChannel.access_hash = chat.access_hash;
+        TLRPC.TL_channels_getMessages gm = new TLRPC.TL_channels_getMessages();
+        gm.channel = inputChannel;
+        for (SvipeMusic.Track t : group) {
+            gm.id.add(t.messageId);
+        }
+        ConnectionsManager.getInstance(account).sendRequest(gm, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+            if (error != null || !(response instanceof TLRPC.messages_Messages)) {
+                done.run();
+                return;
+            }
+            TLRPC.messages_Messages mm = (TLRPC.messages_Messages) response;
+            MessagesController mc = MessagesController.getInstance(account);
+            mc.putUsers(mm.users, false);
+            mc.putChats(mm.chats, false);
+            if (mm.messages != null) {
+                HashMap<Integer, TLRPC.Message> byId = new HashMap<>();
+                for (int i = 0; i < mm.messages.size(); i++) {
+                    TLRPC.Message m = mm.messages.get(i);
+                    if (m == null || m instanceof TLRPC.TL_messageEmpty) {
+                        continue;
+                    }
+                    byId.put(m.id, m);
+                }
+                for (SvipeMusic.Track t : group) {
+                    TLRPC.Message m = byId.get(t.messageId);
+                    if (m != null && m.media != null && m.media.document != null
+                        && MessageObject.isMusicDocument(m.media.document)) {
+                        resolved.put(t.key(), m);
+                    } else if (m == null) {
+                        // getMessages succeeded but the post is gone (TL_messageEmpty or absent id):
+                        // a permanent dead reference. Report it so the backend can stop serving the
+                        // track once enough distinct users independently agree. This is ONLY the
+                        // success branch — a transient error above never reaches here, so a network
+                        // blip can't wrongly retire a live track.
+                        try {
+                            org.json.JSONObject p = new org.json.JSONObject();
+                            p.put("reason", "ref_dead");
+                            SvipeMusic.sendEvent(account, t, "PLAY_FAILED", p);
+                        } catch (Exception e) {
+                            org.telegram.messenger.FileLog.e(e);
+                        }
+                    }
+                    // exists-but-not-music: leave untouched (not a dead ref).
+                }
+            }
+            done.run();
+        }));
+    }
+}

@@ -84,21 +84,21 @@ import me.vkryl.android.animator.FactorAnimator;
 
 public class MainTabsActivity extends ViewPagerActivity implements NotificationCenter.NotificationCenterDelegate, FactorAnimator.Target {
     public static final int TABS_COUNT = 5;
-    private static final int POSITION_REELS = 0;
-    private static final int POSITION_CHATS = 1;
+    private static final int POSITION_CHATS = 0;
+    private static final int POSITION_REELS = 1;
     private static final int POSITION_SEARCH = 2;
-    private static final int POSITION_CALLS_OR_SETTINGS = 3;
+    private static final int POSITION_CALLS_OR_MUSIC = 3;
     private static final int POSITION_PROFILE = 4;
 
-    private static final int INDEX_REELS = 0;
-    private static final int INDEX_CHATS = 1;
+    private static final int INDEX_CHATS = 0;
+    private static final int INDEX_REELS = 1;
     private static final int INDEX_SEARCH = 2;
-    private static final int INDEX_SETTINGS = 3;
+    private static final int INDEX_MUSIC = 3;
     private static final int INDEX_CALLS = 4;
     private static final int INDEX_PROFILE = 5;
 
-    // Settings + Calls share one visible slot (indices 3 & 4 -> the same position), so every index
-    // above that shared slot maps one lower. With Reels added first, the shared slot is at index 3.
+    // Music + Calls share one visible slot (indices 3 & 4 -> the same position), so every index
+    // above that shared slot maps one lower. With Chats first, the shared slot is at index 3.
     private static int indexToPosition(int index) {
         return index > 3 ? index - 1 : index;
     }
@@ -281,10 +281,10 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         tabsView.setMaxWidth(dp(328 + DialogsActivity.MAIN_TABS_MARGIN * 2));
 
         tabs = new GlassTabView[6];
-        tabs[INDEX_REELS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.REELS, R.string.MainTabsReels);
         tabs[INDEX_CHATS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.CHATS, R.string.MainTabsChats);
+        tabs[INDEX_REELS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.REELS, R.string.MainTabsReels);
         tabs[INDEX_SEARCH] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.SEARCH, R.string.MainTabsSearch);
-        tabs[INDEX_SETTINGS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.SETTINGS, R.string.Settings);
+        tabs[INDEX_MUSIC] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.MUSIC, R.string.MainTabsMusic);
         tabs[INDEX_CALLS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.CALLS, R.string.MainTabsCalls);
         tabs[INDEX_PROFILE] = GlassTabView.createAvatar(context, resourceProvider, currentAccount, R.string.MainTabsProfile);
         tabs[INDEX_CHATS].setOnLongClickListener(this::openFoldersSelector);
@@ -606,8 +606,8 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
         if (viewPager != null) {
             final int currentPosition = viewPager.getCurrentPosition();
-            if (currentPosition != POSITION_CALLS_OR_SETTINGS && dropCallsFragmentAfterPageScroll) {
-                dropFragmentAtPosition(POSITION_CALLS_OR_SETTINGS);
+            if (currentPosition != POSITION_CALLS_OR_MUSIC && dropCallsFragmentAfterPageScroll) {
+                dropFragmentAtPosition(POSITION_CALLS_OR_MUSIC);
                 dropCallsFragmentAfterPageScroll = false;
             }
             if (currentPosition != POSITION_PROFILE) {
@@ -645,7 +645,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     @Override
     protected int getStartPosition() {
-        return POSITION_REELS;
+        return POSITION_CHATS;
     }
 
     private DialogsActivity dialogsActivity;
@@ -690,7 +690,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             Bundle args = new Bundle();
             args.putBoolean("hasMainTabs", true);
             return new SvipeSearchActivity(args);
-        } else if (position == POSITION_CALLS_OR_SETTINGS) {
+        } else if (position == POSITION_CALLS_OR_MUSIC) {
             if (getUserConfig().showCallsTab) {
                 Bundle args = new Bundle();
                 args.putBoolean("needFinishFragment", false);
@@ -699,7 +699,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             }
             Bundle args = new Bundle();
             args.putBoolean("hasMainTabs", true);
-            return new SettingsActivity(args);
+            return new MusicActivity(args);
         } else if (position == POSITION_CHATS) {
             Bundle args = new Bundle();
             args.putBoolean("hasMainTabs", true);
@@ -862,12 +862,12 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         } else if (id == NotificationCenter.callTabsVisibleToggled) {
             final boolean callTabsVisible = getUserConfig().showCallsTab;
             checkUi_callTabVisible(callTabsVisible, true);
-            if (viewPager != null && viewPager.getCurrentPosition() == POSITION_CALLS_OR_SETTINGS) {
+            if (viewPager != null && viewPager.getCurrentPosition() == POSITION_CALLS_OR_MUSIC) {
                 viewPager.scrollToPosition(POSITION_CHATS);
                 selectTab(POSITION_CHATS, true);
                 dropCallsFragmentAfterPageScroll = true;
             } else {
-                dropFragmentAtPosition(POSITION_CALLS_OR_SETTINGS);
+                dropFragmentAtPosition(POSITION_CALLS_OR_MUSIC);
             }
         } else if (id == NotificationCenter.mainUserInfoChanged) {
             if (tabs != null && tabs[INDEX_PROFILE] != null) {
@@ -956,7 +956,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     private void checkUi_callTabVisible(boolean callTabsVisible, boolean animated) {
         if (tabsView != null) {
-            tabsView.setViewVisible(tabs[INDEX_SETTINGS], !callTabsVisible, animated);
+            tabsView.setViewVisible(tabs[INDEX_MUSIC], !callTabsVisible, animated);
             tabsView.setViewVisible(tabs[INDEX_CALLS], callTabsVisible, animated);
         }
     }

@@ -267,4 +267,15 @@
     <string name="SvipeIntroTitle">Svipe</string>
     <string name="SvipeIntroMessage">Самые интересные короткие видео из Telegram-каналов в одной ленте.</string>
     <string name="SvipeIntroStart">Начать свайпинг</string>
+
+    <!-- Music tab -->
+    <string name="MusicTabTitle">Музыка</string>
+    <string name="MusicMyVibe">Мой вайб</string>
+    <string name="MusicMyVibeInfo">Бесконечное радио под ваш вкус</string>
+    <string name="MusicSectionLiked">Любимое</string>
+    <string name="MusicSectionTrending">В тренде</string>
+    <string name="MusicSectionFresh">Новое</string>
+    <string name="MusicSearchHint">Поиск треков и исполнителей</string>
+    <string name="MusicSearchEmpty">Ничего не найдено</string>
+    <string name="MusicLoadFailed">Не загрузилось — нажмите, чтобы повторить</string>
 </resources>

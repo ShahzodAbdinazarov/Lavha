@@ -10491,10 +10491,21 @@
     <string name="MainTabsContacts">Contacts</string>
     <string name="MainTabsCalls">Calls</string>
     <string name="MainTabsChats">Chats</string>
+    <string name="MainTabsMusic">Music</string>
     <string name="MainTabsProfile">Profile</string>
     <string name="MainTabsReels">Reels</string>
     <string name="MainTabsSearch">Search</string>
     <string name="MainTabsSettings">Settings</string>
+
+    <string name="MusicTabTitle">Music</string>
+    <string name="MusicMyVibe">My Vibe</string>
+    <string name="MusicMyVibeInfo">Endless radio tuned to your taste</string>
+    <string name="MusicSectionLiked">Liked</string>
+    <string name="MusicSectionTrending">Trending</string>
+    <string name="MusicSectionFresh">New</string>
+    <string name="MusicSearchHint">Search artists and tracks</string>
+    <string name="MusicSearchEmpty">Nothing found</string>
+    <string name="MusicLoadFailed">Couldn\'t load — tap to retry</string>
     <string name="SwitchThemeToDay">Day Mode</string>
     <string name="SwitchThemeToNight">Night Mode</string>
 
