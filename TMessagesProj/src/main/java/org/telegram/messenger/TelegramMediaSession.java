@@ -2,6 +2,7 @@ package org.telegram.messenger;
 
 import android.annotation.SuppressLint;
 import android.app.PendingIntent;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -94,7 +95,21 @@ public class TelegramMediaSession {
         this.currentAccount = UserConfig.selectedAccount;
         this.lastSelectedDialog = AndroidUtilities.getPrefIntOrLong(MessagesController.getNotificationsSettings(currentAccount), "auto_lastSelectedDialog", 0);
 
-        session = new MediaSessionCompat(appContext, SESSION_TAG);
+        // Pin the media-button receiver explicitly. The 2-arg constructor auto-detects a manifest
+        // ACTION_MEDIA_BUTTON receiver only when EXACTLY ONE exists — but we ship two
+        // (MusicPlayerReceiver + VoIPMediaButtonReceiver), so it silently sets none, leaving the
+        // session with no media-button PendingIntent. Backgrounded Bluetooth/AVRCP media keys
+        // (car head unit, AirPods next) then never reach the session's onSkipToNext, while the
+        // notification's own PendingIntent keeps working. Naming the receiver restores routing.
+        final ComponentName mbrComponent = new ComponentName(appContext, MusicPlayerReceiver.class);
+        final Intent mbrIntent = new Intent(Intent.ACTION_MEDIA_BUTTON);
+        mbrIntent.setComponent(mbrComponent);
+        int mbrFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            mbrFlags |= PendingIntent.FLAG_MUTABLE;
+        }
+        final PendingIntent mbrPendingIntent = PendingIntent.getBroadcast(appContext, 0, mbrIntent, mbrFlags);
+        session = new MediaSessionCompat(appContext, SESSION_TAG, mbrComponent, mbrPendingIntent);
         session.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS | MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
         session.setCallback(new SessionCallback());
 

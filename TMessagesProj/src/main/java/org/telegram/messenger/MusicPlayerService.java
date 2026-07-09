@@ -370,7 +370,14 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
 
             playbackState = new PlaybackStateCompat.Builder();
             if (MediaController.getInstance().isDownloadingCurrentMessage()) {
-                playbackState.setState(PlaybackStateCompat.STATE_BUFFERING, 0, 1).setActions(0);
+                // Keep transport actions advertised while a track buffers/downloads — onSkipToNext
+                // works regardless of buffering, so dropping the actions here would make a car/BT
+                // NEXT get dropped by the framework whenever a non-cached track is loading.
+                long bufferingActions = PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE | PlaybackStateCompat.ACTION_STOP;
+                if (messageObject.isMusic()) {
+                    bufferingActions |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SKIP_TO_NEXT;
+                }
+                playbackState.setState(PlaybackStateCompat.STATE_BUFFERING, 0, 1).setActions(bufferingActions);
                 if (messageObject.isMusic()) {
                     bldr.addAction(new Notification.Action.Builder(R.drawable.ic_action_previous, previousDescription, pendingPrev).build());
                 }
@@ -619,7 +626,13 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
         playbackState = new PlaybackStateCompat.Builder();
         boolean isPlaying = !MediaController.getInstance().isMessagePaused();
         if (MediaController.getInstance().isDownloadingCurrentMessage()) {
-            playbackState.setState(PlaybackStateCompat.STATE_BUFFERING, 0, 1).setActions(0);
+            // See createNotification(): keep skip actions during buffering so BT/AVRCP NEXT still routes.
+            MessageObject bufferingObject = MediaController.getInstance().getPlayingMessageObject();
+            long bufferingActions = PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE | PlaybackStateCompat.ACTION_STOP;
+            if (bufferingObject != null && bufferingObject.isMusic()) {
+                bufferingActions |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SKIP_TO_NEXT;
+            }
+            playbackState.setState(PlaybackStateCompat.STATE_BUFFERING, 0, 1).setActions(bufferingActions);
         } else {
             long actions = PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PAUSE | PlaybackStateCompat.ACTION_SEEK_TO | PlaybackStateCompat.ACTION_SET_REPEAT_MODE | PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE;
             MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
