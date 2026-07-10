@@ -66,7 +66,15 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
     private AudioManager audioManager;
 
     private static boolean supportBigNotifications = Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN;
-    private static boolean supportLockScreenControls = Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP || !TextUtils.isEmpty(AndroidUtilities.getSystemProperty("ro.miui.ui.version.code"));
+    // Pre-Lollipop only. The old MIUI carve-out (ro.miui.ui.version.code) forced the legacy
+    // RemoteControlClient + registerMediaButtonEventReceiver path on ALL API levels on Xiaomi.
+    // On API21+ those deprecated calls are shimmed (MediaSessionLegacyHelper) into a SECOND,
+    // competing media-button session; since RCC pushes PLAYSTATE_PLAYING at the end of
+    // createNotification (after the modern session's setPlaybackState), the legacy shim wins the
+    // framework's single media-button slot and Bluetooth/AVRCP NEXT/PREV get delivered to it and
+    // dropped — never reaching TelegramMediaSession.onSkipToNext. Modern MIUI honours the
+    // MediaSession/MediaStyle notification, so the carve-out is obsolete and actively harmful.
+    private static boolean supportLockScreenControls = Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP;
 
     private TelegramMediaSession sessionHolder;
     private MediaSessionCompat mediaSession;

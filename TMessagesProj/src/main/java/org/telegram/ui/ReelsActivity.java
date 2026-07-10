@@ -79,6 +79,7 @@ import org.telegram.ui.Components.Bulletin;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.CubicBezierInterpolator;
+import org.telegram.ui.Components.PlayPauseDrawable;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.ChatActivityEnterView;
 import org.telegram.ui.Components.LayoutHelper;
@@ -3227,16 +3228,21 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             ProgressBar pb = new ProgressBar(ctx);
             page.addView(pb, LayoutHelper.createFrame(46, 46, Gravity.CENTER));
 
-            // Center pause indicator = Telegram's own player look: a white play triangle inside a
-            // translucent circle (circle_big + ic_action_play via CombinedDrawable). Kept self-contained
-            // (no PlayPauseDrawable) because that needs Theme.playPauseAnimator, which isn't initialised
-            // in the reels (only when a chat is opened) — so its glyph would render empty here.
+            // Center pause indicator = Telegram's own video-player play button, 1:1: the exact
+            // PlayPauseDrawable (Theme.playPauseAnimator morph) inside circle_big — identical to
+            // PhotoViewer's playDrawable. That animator is built only by createChatResources (when a
+            // chat opens), so on a cold reels start it can be null and the glyph renders empty (a bare
+            // circle) — initialise it here so the play triangle always shows.
+            if (Theme.playPauseAnimator == null) {
+                Theme.createChatResources(ctx, false);
+            }
             ImageView paused = new ImageView(ctx);
+            PlayPauseDrawable pausedGlyph = new PlayPauseDrawable(28);
+            pausedGlyph.setPause(false, false); // static play triangle — "tap to resume"
             android.graphics.drawable.Drawable pauseCircle = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.circle_big);
-            android.graphics.drawable.Drawable pausePlay = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.ic_action_play);
-            CombinedDrawable pausedDrawable = new CombinedDrawable(pauseCircle != null ? pauseCircle.mutate() : null, pausePlay);
+            CombinedDrawable pausedDrawable = new CombinedDrawable(pauseCircle != null ? pauseCircle.mutate() : null, pausedGlyph);
             pausedDrawable.setCustomSize(AndroidUtilities.dp(64), AndroidUtilities.dp(64));
-            pausedDrawable.setIconSize(AndroidUtilities.dp(30), AndroidUtilities.dp(30));
+            pausedDrawable.setIconSize(AndroidUtilities.dp(28), AndroidUtilities.dp(28));
             paused.setImageDrawable(pausedDrawable);
             paused.setVisibility(View.GONE);
             page.addView(paused, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));

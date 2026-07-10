@@ -545,18 +545,17 @@ public class TelegramMediaSession {
 
         @Override
         public void onSkipToNext() {
-            MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
-            if (playing != null && playing.isMusic()) {
-                MediaController.getInstance().playNextMessage();
-            }
+            // Mirror the notification's NOTIFY_NEXT path (unconditional playNextMessage). The
+            // framework only routes a hardware/AVRCP SKIP here when the PlaybackState advertises
+            // ACTION_SKIP_TO_NEXT, which we set only for music — so no extra isMusic gate is needed,
+            // and the old gate silently dropped a BT press when getPlayingMessageObject() was
+            // momentarily null during a track transition.
+            MediaController.getInstance().playNextMessage();
         }
 
         @Override
         public void onSkipToPrevious() {
-            MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
-            if (playing != null && playing.isMusic()) {
-                MediaController.getInstance().playPreviousMessage();
-            }
+            MediaController.getInstance().playPreviousMessage();
         }
 
         @Override
