@@ -38,6 +38,69 @@ public class SvipeMusic {
         public final ArrayList<Track> tracks = new ArrayList<>();
     }
 
+    // ---------------- Canonical layer (Zona-style songs / artists) ----------------
+    public static class Artist {
+        public long id;
+        public String name;
+        public String role = "primary";     // "primary" | "featured"
+        public long artChannelId;
+        public int artMessageId;
+    }
+
+    public static class Song {
+        public long id;
+        public String title;
+        public String variantLabel;          // null | "remix" | "live" | ...
+        public final ArrayList<Artist> artists = new ArrayList<>();
+        public int versionCount = 1;
+        public long artChannelId;
+        public int artMessageId;
+        public Track defaultTrack;           // the version to play for this user (may be null)
+
+        /** "Artist, Artist2 feat. Artist3" for one-line display. */
+        public String artistLine() {
+            if (artists.isEmpty()) return "";
+            StringBuilder sb = new StringBuilder();
+            String prevRole = null;
+            for (int i = 0; i < artists.size(); i++) {
+                Artist a = artists.get(i);
+                if (i > 0) sb.append("featured".equals(a.role) && !"featured".equals(prevRole) ? " feat. " : ", ");
+                sb.append(a.name);
+                prevRole = a.role;
+            }
+            return sb.toString();
+        }
+    }
+
+    public static class SongVersion extends Track {
+        public int voteCount;
+        public boolean isMyDefault;
+        public boolean isDefault;            // the current crowd default
+    }
+
+    public static class SongDetail extends Song {
+        public final ArrayList<SongVersion> versions = new ArrayList<>();
+    }
+
+    public static class SongSection {
+        public String key;
+        public String title;
+        public final ArrayList<Song> songs = new ArrayList<>();
+    }
+
+    public static class ArtistPage {
+        public Artist artist;
+        public int songCount;
+        public final ArrayList<Song> songs = new ArrayList<>();
+        public String nextOffset;
+    }
+
+    public static class DefaultAck {
+        public long songId;
+        public long defaultChannelId;
+        public int defaultMessageId;
+    }
+
     public interface HomeCallback {
         /** sections==null on failure. */
         void onResult(List<Section> sections, String error);
@@ -175,6 +238,148 @@ public class SvipeMusic {
         });
     }
 
+    // ---------------- Canonical song / artist endpoints ----------------
+    public interface SongsCallback { void onResult(List<Song> items, String nextOffset, String error); }
+    public interface SongHomeCallback { void onResult(List<SongSection> sections, String error); }
+    public interface SongDetailCallback { void onResult(SongDetail song, String error); }
+    public interface ArtistCallback { void onResult(ArtistPage page, String error); }
+    public interface DefaultCallback { void onResult(DefaultAck ack, String error); }
+
+    public static void songsHome(int account, SongHomeCallback cb) {
+        withToken(account, () -> cb.onResult(null, "auth"),
+            token -> songsHomeRequest(account, token, false, cb));
+    }
+
+    private static void songsHomeRequest(int account, String token, boolean retried, SongHomeCallback cb) {
+        SvipeApi.get("/v1/music/songs/home", token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> cb.onResult(null, "auth"), t2 -> songsHomeRequest(account, t2, true, cb));
+                return;
+            }
+            if (res == null || !res.has("sections")) { cb.onResult(null, err != null ? err : ("http " + code)); return; }
+            ArrayList<SongSection> out = new ArrayList<>();
+            JSONArray arr = res.optJSONArray("sections");
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject o = arr.optJSONObject(i);
+                    if (o == null) continue;
+                    SongSection s = new SongSection();
+                    s.key = o.optString("key");
+                    s.title = o.optString("title");
+                    parseSongs(o.optJSONArray("items"), s.songs);
+                    if (!s.songs.isEmpty()) out.add(s);
+                }
+            }
+            cb.onResult(out, null);
+        });
+    }
+
+    public static void songsSearch(int account, String query, int offset, int limit, SongsCallback cb) {
+        songsListGet(account, "/v1/music/songs/search?q=" + urlEncode(query) + "&limit=" + limit + "&offset=" + offset, cb);
+    }
+
+    private static void songsListGet(int account, String path, SongsCallback cb) {
+        withToken(account, () -> cb.onResult(null, null, "auth"),
+            token -> songsListRequest(account, path, token, false, cb));
+    }
+
+    private static void songsListRequest(int account, String path, String token, boolean retried, SongsCallback cb) {
+        SvipeApi.get(path, token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> cb.onResult(null, null, "auth"), t2 -> songsListRequest(account, path, t2, true, cb));
+                return;
+            }
+            if (res == null || !res.has("items")) { cb.onResult(null, null, err != null ? err : ("http " + code)); return; }
+            ArrayList<Song> out = new ArrayList<>();
+            parseSongs(res.optJSONArray("items"), out);
+            String next = res.isNull("next_offset") ? null : String.valueOf(res.optInt("next_offset"));
+            cb.onResult(out, next, null);
+        });
+    }
+
+    public static void song(int account, long songId, SongDetailCallback cb) {
+        withToken(account, () -> cb.onResult(null, "auth"),
+            token -> songRequest(account, songId, token, false, cb));
+    }
+
+    private static void songRequest(int account, long songId, String token, boolean retried, SongDetailCallback cb) {
+        SvipeApi.get("/v1/music/song/" + songId, token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> cb.onResult(null, "auth"), t2 -> songRequest(account, songId, t2, true, cb));
+                return;
+            }
+            if (res == null || !res.has("id")) { cb.onResult(null, err != null ? err : ("http " + code)); return; }
+            cb.onResult(parseSongDetail(res), null);
+        });
+    }
+
+    public static void artist(int account, long artistId, int offset, int limit, ArtistCallback cb) {
+        withToken(account, () -> cb.onResult(null, "auth"),
+            token -> artistRequest(account, artistId, offset, limit, token, false, cb));
+    }
+
+    private static void artistRequest(int account, long artistId, int offset, int limit, String token, boolean retried, ArtistCallback cb) {
+        SvipeApi.get("/v1/music/artist/" + artistId + "?limit=" + limit + "&offset=" + offset, token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> cb.onResult(null, "auth"), t2 -> artistRequest(account, artistId, offset, limit, t2, true, cb));
+                return;
+            }
+            if (res == null || !res.has("id")) { cb.onResult(null, err != null ? err : ("http " + code)); return; }
+            ArtistPage p = new ArtistPage();
+            Artist a = new Artist();
+            a.id = res.optLong("id");
+            a.name = res.optString("name", "");
+            a.artChannelId = res.optLong("art_channel_id");
+            a.artMessageId = res.optInt("art_message_id");
+            p.artist = a;
+            p.songCount = res.optInt("song_count");
+            parseSongs(res.optJSONArray("songs"), p.songs);
+            p.nextOffset = res.isNull("next_offset") ? null : String.valueOf(res.optInt("next_offset"));
+            cb.onResult(p, null);
+        });
+    }
+
+    public static void setDefault(int account, long songId, long channelId, int messageId, DefaultCallback cb) {
+        withToken(account, () -> cb.onResult(null, "auth"),
+            token -> setDefaultRequest(account, songId, channelId, messageId, token, false, cb));
+    }
+
+    private static void setDefaultRequest(int account, long songId, long channelId, int messageId, String token, boolean retried, DefaultCallback cb) {
+        JSONObject body = new JSONObject();
+        try { body.put("channel_id", channelId); body.put("message_id", messageId); } catch (Exception e) { FileLog.e(e); }
+        SvipeApi.post("/v1/music/song/" + songId + "/default", body, token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> cb.onResult(null, "auth"), t2 -> setDefaultRequest(account, songId, channelId, messageId, t2, true, cb));
+                return;
+            }
+            handleDefaultAck(res, code, err, cb);
+        });
+    }
+
+    public static void clearDefault(int account, long songId, DefaultCallback cb) {
+        withToken(account, () -> cb.onResult(null, "auth"),
+            token -> clearDefaultRequest(account, songId, token, false, cb));
+    }
+
+    private static void clearDefaultRequest(int account, long songId, String token, boolean retried, DefaultCallback cb) {
+        SvipeApi.delete("/v1/music/song/" + songId + "/default", token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> cb.onResult(null, "auth"), t2 -> clearDefaultRequest(account, songId, t2, true, cb));
+                return;
+            }
+            handleDefaultAck(res, code, err, cb);
+        });
+    }
+
+    private static void handleDefaultAck(JSONObject res, int code, String err, DefaultCallback cb) {
+        if (res == null || !res.has("song_id")) { cb.onResult(null, err != null ? err : ("http " + code)); return; }
+        DefaultAck ack = new DefaultAck();
+        ack.songId = res.optLong("song_id");
+        ack.defaultChannelId = res.isNull("default_channel_id") ? 0 : res.optLong("default_channel_id");
+        ack.defaultMessageId = res.isNull("default_message_id") ? 0 : res.optInt("default_message_id");
+        cb.onResult(ack, null);
+    }
+
     /* internals */
 
     private interface TokenAction {
@@ -204,25 +409,98 @@ public class SvipeMusic {
     }
 
     private static void parseTracks(JSONArray arr, List<Track> out) {
-        if (arr == null) {
-            return;
-        }
+        if (arr == null) return;
         for (int i = 0; i < arr.length(); i++) {
-            JSONObject o = arr.optJSONObject(i);
-            if (o == null) continue;
-            String username = o.isNull("username") ? null : o.optString("username", null);
-            if (username == null || username.isEmpty()) continue;
             Track t = new Track();
-            t.channelId = o.optLong("channel_id");
-            t.messageId = o.optInt("message_id");
-            t.username = username;
-            t.title = o.isNull("title") ? null : o.optString("title", null);
-            t.performer = o.isNull("performer") ? null : o.optString("performer", null);
-            t.durationS = o.optInt("duration_s");
-            t.size = o.optLong("size");
-            t.hasThumb = o.optBoolean("has_thumb", false);
-            out.add(t);
+            if (fillTrack(arr.optJSONObject(i), t)) out.add(t);
         }
+    }
+
+    /** Fill the reference-only track fields shared by Track / SongVersion. Returns false (skip) when
+     * the row has no username — it can't be turned into a t.me handle or resolved to play. */
+    private static boolean fillTrack(JSONObject o, Track t) {
+        if (o == null) return false;
+        String username = o.isNull("username") ? null : o.optString("username", null);
+        if (username == null || username.isEmpty()) return false;
+        t.channelId = o.optLong("channel_id");
+        t.messageId = o.optInt("message_id");
+        t.username = username;
+        t.title = o.isNull("title") ? null : o.optString("title", null);
+        t.performer = o.isNull("performer") ? null : o.optString("performer", null);
+        t.durationS = o.optInt("duration_s");
+        t.size = o.optLong("size");
+        t.hasThumb = o.optBoolean("has_thumb", false);
+        return true;
+    }
+
+    private static void parseSongs(JSONArray arr, List<Song> out) {
+        if (arr == null) return;
+        for (int i = 0; i < arr.length(); i++) {
+            Song s = parseSong(arr.optJSONObject(i));
+            if (s != null) out.add(s);
+        }
+    }
+
+    private static Artist parseArtist(JSONObject o) {
+        if (o == null) return null;
+        Artist a = new Artist();
+        a.id = o.optLong("id");
+        a.name = o.optString("name", "");
+        a.role = o.optString("role", "primary");
+        a.artChannelId = o.optLong("art_channel_id");
+        a.artMessageId = o.optInt("art_message_id");
+        return a;
+    }
+
+    private static Song parseSong(JSONObject o) {
+        if (o == null) return null;
+        Song s = new Song();
+        s.id = o.optLong("id");
+        s.title = o.optString("title", "");
+        s.variantLabel = o.isNull("variant_label") ? null : o.optString("variant_label", null);
+        s.versionCount = o.optInt("version_count", 1);
+        s.artChannelId = o.optLong("art_channel_id");
+        s.artMessageId = o.optInt("art_message_id");
+        JSONArray arts = o.optJSONArray("artists");
+        if (arts != null) {
+            for (int i = 0; i < arts.length(); i++) {
+                Artist a = parseArtist(arts.optJSONObject(i));
+                if (a != null) s.artists.add(a);
+            }
+        }
+        JSONObject dt = o.optJSONObject("default");
+        if (dt != null) {
+            Track t = new Track();
+            if (fillTrack(dt, t)) s.defaultTrack = t;
+        }
+        return s;
+    }
+
+    private static SongDetail parseSongDetail(JSONObject o) {
+        Song base = parseSong(o);
+        if (base == null) return null;
+        SongDetail d = new SongDetail();
+        d.id = base.id;
+        d.title = base.title;
+        d.variantLabel = base.variantLabel;
+        d.artists.addAll(base.artists);
+        d.versionCount = base.versionCount;
+        d.artChannelId = base.artChannelId;
+        d.artMessageId = base.artMessageId;
+        d.defaultTrack = base.defaultTrack;
+        JSONArray vers = o.optJSONArray("versions");
+        if (vers != null) {
+            for (int i = 0; i < vers.length(); i++) {
+                JSONObject vo = vers.optJSONObject(i);
+                SongVersion v = new SongVersion();
+                if (!fillTrack(vo, v)) continue;
+                v.voteCount = vo.optInt("vote_count");
+                v.isMyDefault = vo.optBoolean("is_my_default", false);
+                v.isDefault = vo.optBoolean("is_default", false);
+                d.versions.add(v);
+            }
+        }
+        return d;
     }
 
     private static String urlEncode(String s) {

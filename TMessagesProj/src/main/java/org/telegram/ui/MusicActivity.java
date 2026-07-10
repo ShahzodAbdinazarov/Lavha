@@ -72,6 +72,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private static final int ROW_LOADING = 3;
     private static final int ROW_EMPTY = 4;
     private static final int ROW_RETRY = 5;
+    private static final int ROW_SONG = 6;      // canonical song card (search results)
 
     private static final int SEARCH_MIN_CHARS = 2;
     private static final int SEARCH_PAGE = 50;
@@ -96,6 +97,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
     private String query = "";
     private String searchedQuery;
+    // Search now returns canonical SONGS (1 card = 1 real song); tapping opens the version picker.
+    private final ArrayList<SvipeMusic.Song> songResults = new ArrayList<>();
     private final ArrayList<SvipeMusic.Track> searchResults = new ArrayList<>();
     private boolean searchLoading;
     private boolean searchFailed;
@@ -116,6 +119,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         final int type;
         SvipeMusic.Section section;
         SvipeMusic.Track track;
+        SvipeMusic.Song song;
 
         Row(int type) {
             this.type = type;
@@ -311,7 +315,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         }
         if (query.length() < SEARCH_MIN_CHARS) {
             searchedQuery = null;
-            searchResults.clear();
+            songResults.clear();
             searchLoading = false;
             searchFailed = false;
             updateRows();
@@ -325,18 +329,18 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void runSearch(String q) {
-        SvipeMusic.search(currentAccount, q, 0, SEARCH_PAGE, (items, recId, next, error) -> {
+        SvipeMusic.songsSearch(currentAccount, q, 0, SEARCH_PAGE, (items, next, error) -> {
             if (!q.equals(query)) {
                 return;
             }
             searchLoading = false;
             searchedQuery = q;
-            searchResults.clear();
+            songResults.clear();
             if (items == null) {
                 searchFailed = true;
             } else {
                 searchFailed = false;
-                searchResults.addAll(items);
+                songResults.addAll(items);
             }
             updateRows();
         });
@@ -353,12 +357,12 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 rows.add(new Row(ROW_LOADING));
             } else if (searchFailed) {
                 rows.add(new Row(ROW_RETRY));
-            } else if (searchResults.isEmpty()) {
+            } else if (songResults.isEmpty()) {
                 rows.add(new Row(ROW_EMPTY));
             } else {
-                for (SvipeMusic.Track t : searchResults) {
-                    Row r = new Row(ROW_TRACK);
-                    r.track = t;
+                for (SvipeMusic.Song s : songResults) {
+                    Row r = new Row(ROW_SONG);
+                    r.song = s;
                     rows.add(r);
                 }
             }
@@ -398,6 +402,10 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             onVibeTap();
         } else if (row.type == ROW_TRACK) {
             onTrackTap(row);
+        } else if (row.type == ROW_SONG) {
+            if (row.song != null) {
+                presentFragment(new MusicSongActivity(row.song.id, row.song.title));
+            }
         } else if (row.type == ROW_RETRY) {
             if (inSearchMode()) {
                 searchLoading = true;
@@ -694,7 +702,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int type = holder.getItemViewType();
-            return type == ROW_TRACK || type == ROW_VIBE || type == ROW_RETRY;
+            return type == ROW_TRACK || type == ROW_VIBE || type == ROW_RETRY || type == ROW_SONG;
         }
 
         @NonNull
@@ -713,6 +721,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 view = tv;
             } else if (viewType == ROW_TRACK) {
                 view = new TrackCell(context);
+            } else if (viewType == ROW_SONG) {
+                view = new SongCell(context);
             } else if (viewType == ROW_EMPTY || viewType == ROW_RETRY) {
                 TextView tv = new TextView(context);
                 tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
@@ -745,6 +755,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 tv.setText(t);
             } else if (row.type == ROW_TRACK) {
                 ((TrackCell) holder.itemView).bind(row.track);
+            } else if (row.type == ROW_SONG) {
+                ((SongCell) holder.itemView).bind(row.song);
             } else if (row.type == ROW_EMPTY) {
                 ((TextView) holder.itemView).setText(getString(R.string.MusicSearchEmpty));
             } else if (row.type == ROW_RETRY) {
@@ -754,6 +766,67 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     }
 
     /* cells */
+
+    // A canonical song row (search results): letter cover + title (+variant) + artist line + a
+    // version-count badge. Tapping opens the version picker (MusicSongActivity).
+    private class SongCell extends FrameLayout {
+        private final TextView letterView;
+        private final TextView titleView;
+        private final TextView subtitleView;
+        private final TextView badgeView;
+
+        SongCell(Context context) {
+            super(context);
+            setPadding(dp(16), dp(6), dp(12), dp(6));
+
+            FrameLayout cover = new FrameLayout(context);
+            cover.setBackground(Theme.createRoundRectDrawable(dp(10), getThemedColor(Theme.key_windowBackgroundGray)));
+            addView(cover, LayoutHelper.createFrame(48, 48, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+
+            letterView = new TextView(context);
+            letterView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+            letterView.setTypeface(AndroidUtilities.bold());
+            letterView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
+            letterView.setGravity(Gravity.CENTER);
+            cover.addView(letterView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+            LinearLayout texts = new LinearLayout(context);
+            texts.setOrientation(LinearLayout.VERTICAL);
+            addView(texts, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 76, 0, 56, 0));
+
+            titleView = new TextView(context);
+            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+            titleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
+            titleView.setSingleLine(true);
+            titleView.setEllipsize(TextUtils.TruncateAt.END);
+            texts.addView(titleView);
+
+            subtitleView = new TextView(context);
+            subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            subtitleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
+            subtitleView.setSingleLine(true);
+            subtitleView.setEllipsize(TextUtils.TruncateAt.END);
+            texts.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+
+            badgeView = new TextView(context);
+            badgeView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            badgeView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
+            badgeView.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
+            addView(badgeView, LayoutHelper.createFrame(52, LayoutHelper.MATCH_PARENT, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
+        }
+
+        void bind(SvipeMusic.Song s) {
+            String title = s.title != null && !s.title.isEmpty() ? s.title : getString(R.string.AudioUnknownTitle);
+            if (s.variantLabel != null && !s.variantLabel.isEmpty()) {
+                title = title + " (" + s.variantLabel + ")";
+            }
+            titleView.setText(title);
+            letterView.setText(title.isEmpty() ? "♪" : title.substring(0, 1).toUpperCase());
+            String artistLine = s.artistLine();
+            subtitleView.setText(artistLine.isEmpty() ? getString(R.string.AudioUnknownArtist) : artistLine);
+            badgeView.setText(s.versionCount > 1 ? (s.versionCount + "  ›") : "›");
+        }
+    }
 
     private class VibeCard extends FrameLayout {
 

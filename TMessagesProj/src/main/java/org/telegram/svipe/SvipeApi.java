@@ -28,6 +28,10 @@ public class SvipeApi {
         request("POST", path, body, bearer, cb);
     }
 
+    public static void delete(String path, String bearer, JsonCallback cb) {
+        request("DELETE", path, null, bearer, cb);
+    }
+
     private static void request(String method, String path, JSONObject body, String bearer, JsonCallback cb) {
         Utilities.globalQueue.postRunnable(() -> {
             HttpURLConnection conn = null;
