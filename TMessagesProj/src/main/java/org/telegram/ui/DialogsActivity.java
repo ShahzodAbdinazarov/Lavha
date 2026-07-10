@@ -5277,9 +5277,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             animatedStatusView = new AnimatedStatusView(context, 20, 60);
             contentView.addView(animatedStatusView, LayoutHelper.createFrame(20, 20, Gravity.LEFT | Gravity.TOP));
         }
-        // Svipe: the chats tab no longer hosts a search field — search lives in the dedicated Search
-        // section (SvipeSearchActivity). Standalone/picker screens and the Search section keep it.
-        if (fragmentSearchField != null && (!hasMainTabs || isSvipeSearchSection())) {
+        if (fragmentSearchField != null) {
             contentView.addView(fragmentSearchField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.TOP, 7, -2, 7, 0));
         }
 
@@ -5697,12 +5695,12 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         return false;
     }
 
-    // Svipe: the chats main tab dropped its inline search field (search lives in the dedicated
-    // Search section). It therefore reserves no header space, has no pull-to-reveal range, and
-    // never shows the action-bar search button. Standalone/picker screens + the Search section keep
-    // the field, so they keep the full SEARCH_FIELD_HEIGHT.
+    // Svipe: the chats main tab keeps its original inline search field again (the dedicated Search
+    // section stays too). Reverted to false so every screen reserves the full SEARCH_FIELD_HEIGHT and
+    // shows the field exactly like stock Telegram; the Search section is unaffected (it was never
+    // gated on this — it uses isSvipeSearchSection()).
     private boolean svipeChatsTabNoSearch() {
-        return hasMainTabs && !isSvipeSearchSection();
+        return false;
     }
 
     private int searchFieldReservedHeight() {
