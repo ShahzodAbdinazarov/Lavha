@@ -3,12 +3,15 @@ package org.telegram.ui;
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.messenger.LocaleController.getString;
 
+import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
+import android.graphics.RadialGradient;
+import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.text.Editable;
@@ -25,6 +28,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -49,6 +53,7 @@ import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.EditTextBoldCursor;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.PlayPauseDrawable;
 import org.telegram.ui.Components.RecyclerListView;
 
 import java.util.ArrayList;
@@ -66,7 +71,6 @@ import java.util.Map;
  */
 public class MusicActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate, MainTabsActivity.TabFragmentDelegate {
 
-    private static final int ROW_VIBE = 0;
     private static final int ROW_SECTION = 1;
     private static final int ROW_TRACK = 2;
     private static final int ROW_LOADING = 3;
@@ -82,12 +86,12 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private int additionNavigationBarHeight;
 
     private FrameLayout root;
-    private LinearLayout headerLayout;
     private EditTextBoldCursor searchField;
     private ImageView searchClear;
     private RecyclerListView listView;
     private LinearLayoutManager layoutManager;
     private ListAdapter adapter;
+    private VibeScreen vibeScreen;
     private MiniPlayerView miniPlayer;
 
     private final ArrayList<SvipeMusic.Section> sections = new ArrayList<>();
@@ -166,25 +170,41 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         root = new FrameLayout(context);
         root.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
 
-        LinearLayout content = new LinearLayout(context);
-        content.setOrientation(LinearLayout.VERTICAL);
-        root.addView(content, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        // Full-screen music-reactive backdrop + centered hero button (the "home" screen). It sits at
+        // the very back and spans under the status bar, so the gradient reaches the top edge.
+        vibeScreen = new VibeScreen(context);
+        root.addView(vibeScreen, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        headerLayout = new LinearLayout(context);
-        headerLayout.setOrientation(LinearLayout.VERTICAL);
-        headerLayout.setPadding(0, AndroidUtilities.statusBarHeight + dp(8), 0, dp(4));
-        content.addView(headerLayout, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        // Search results list. Opaque so results stay readable; its content is pushed below the
+        // floating search bar via top padding (see listTopPadding()).
+        listView = new RecyclerListView(context);
+        layoutManager = new LinearLayoutManager(context);
+        listView.setLayoutManager(layoutManager);
+        adapter = new ListAdapter();
+        listView.setAdapter(adapter);
+        listView.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+        listView.setClipToPadding(true);
+        listView.setPadding(0, listTopPadding(), 0, listBottomPadding());
+        listView.setOnItemClickListener((view, position) -> onRowClick(position));
+        listView.setOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrollStateChanged(@NonNull RecyclerView recyclerView, int newState) {
+                if (newState == RecyclerView.SCROLL_STATE_DRAGGING) {
+                    AndroidUtilities.hideKeyboard(searchField);
+                }
+            }
+        });
+        root.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        TextView title = new TextView(context);
-        title.setText(getString(R.string.MusicTabTitle));
-        title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 26);
-        title.setTypeface(AndroidUtilities.bold());
-        title.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
-        headerLayout.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 20, 2, 20, 8));
+        // Floating search bar over everything — no title, just the pill. Container is transparent so
+        // the backdrop shows through around it (Yandex-Music style).
+        FrameLayout searchContainer = new FrameLayout(context);
+        searchContainer.setPadding(0, AndroidUtilities.statusBarHeight + dp(8), 0, dp(8));
+        root.addView(searchContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
 
         FrameLayout searchBox = new FrameLayout(context);
         searchBox.setBackground(Theme.createRoundRectDrawable(dp(12), getThemedColor(Theme.key_dialogSearchBackground)));
-        headerLayout.addView(searchBox, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 42, 16, 0, 16, 4));
+        searchContainer.addView(searchBox, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 42, Gravity.TOP, 16, 0, 16, 0));
 
         ImageView searchIcon = new ImageView(context);
         searchIcon.setImageResource(R.drawable.outline_header_search);
@@ -229,24 +249,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         });
         searchBox.addView(searchClear, LayoutHelper.createFrame(40, LayoutHelper.MATCH_PARENT, Gravity.RIGHT));
 
-        listView = new RecyclerListView(context);
-        layoutManager = new LinearLayoutManager(context);
-        listView.setLayoutManager(layoutManager);
-        adapter = new ListAdapter();
-        listView.setAdapter(adapter);
-        listView.setClipToPadding(false);
-        listView.setPadding(0, dp(4), 0, listBottomPadding());
-        listView.setOnItemClickListener((view, position) -> onRowClick(position));
-        listView.setOnScrollListener(new RecyclerView.OnScrollListener() {
-            @Override
-            public void onScrollStateChanged(@NonNull RecyclerView recyclerView, int newState) {
-                if (newState == RecyclerView.SCROLL_STATE_DRAGGING) {
-                    AndroidUtilities.hideKeyboard(searchField);
-                }
-            }
-        });
-        content.addView(listView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, 1f));
-
         miniPlayer = new MiniPlayerView(context);
         miniPlayer.setVisibility(View.GONE);
         int miniBottom = AndroidUtilities.navigationBarHeight + additionNavigationBarHeight + dp(6);
@@ -259,6 +261,12 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         return root;
     }
 
+    // Reserve room for the floating search bar (status bar + pill + margins) so the first result
+    // isn't hidden underneath it.
+    private int listTopPadding() {
+        return AndroidUtilities.statusBarHeight + dp(58);
+    }
+
     private int listBottomPadding() {
         int pad = AndroidUtilities.navigationBarHeight + additionNavigationBarHeight + dp(12);
         if (miniPlayer != null && miniPlayer.getVisibility() == View.VISIBLE) {
@@ -269,7 +277,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
     private void refreshListPadding() {
         if (listView != null) {
-            listView.setPadding(0, dp(4), 0, listBottomPadding());
+            listView.setPadding(0, listTopPadding(), 0, listBottomPadding());
         }
     }
 
@@ -351,6 +359,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void updateRows() {
+        // The list now only serves search; "home" is the full-screen VibeScreen, not a row list.
         rows.clear();
         if (inSearchMode()) {
             if (searchLoading) {
@@ -366,28 +375,35 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                     rows.add(r);
                 }
             }
-        } else {
-            rows.add(new Row(ROW_VIBE));
-            if (homeLoading && sections.isEmpty()) {
-                rows.add(new Row(ROW_LOADING));
-            } else if (homeFailed && sections.isEmpty()) {
-                rows.add(new Row(ROW_RETRY));
-            } else {
-                for (SvipeMusic.Section s : sections) {
-                    Row header = new Row(ROW_SECTION);
-                    header.section = s;
-                    rows.add(header);
-                    for (SvipeMusic.Track t : s.tracks) {
-                        Row r = new Row(ROW_TRACK);
-                        r.track = t;
-                        r.section = s;
-                        rows.add(r);
-                    }
-                }
-            }
         }
         if (adapter != null) {
             adapter.notifyDataSetChanged();
+        }
+        updateMode();
+    }
+
+    // Swap between the search list and the immersive vibe screen based on whether a query is active.
+    private void updateMode() {
+        boolean search = inSearchMode();
+        if (listView != null) {
+            listView.setVisibility(search ? View.VISIBLE : View.GONE);
+        }
+        if (vibeScreen != null) {
+            vibeScreen.setVisibility(search ? View.GONE : View.VISIBLE);
+            if (!search) {
+                vibeScreen.update();
+            }
+        }
+        // Home shows the dark immersive backdrop (light status-bar icons); search shows the opaque
+        // white list (dark icons). Re-apply on every switch.
+        if (getParentActivity() != null) {
+            AndroidUtilities.setLightStatusBar(getParentActivity().getWindow(), isLightStatusBar());
+        }
+    }
+
+    private void refreshVibe() {
+        if (vibeScreen != null && vibeScreen.getVisibility() == View.VISIBLE) {
+            vibeScreen.update();
         }
     }
 
@@ -398,9 +414,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             return;
         }
         Row row = rows.get(position);
-        if (row.type == ROW_VIBE) {
-            onVibeTap();
-        } else if (row.type == ROW_TRACK) {
+        if (row.type == ROW_TRACK) {
             onTrackTap(row);
         } else if (row.type == ROW_SONG) {
             if (row.song != null) {
@@ -428,7 +442,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             } else {
                 mc.pauseMessage(playing);
             }
-            adapter.notifyDataSetChanged();
+            refreshVibe();
             return;
         }
         startVibe();
@@ -439,11 +453,11 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             return;
         }
         vibeLoading = true;
-        adapter.notifyDataSetChanged();
+        refreshVibe();
         SvipeMusic.vibe(currentAccount, null, null, null, (items, recId, cursor, error) -> {
             if (items == null || items.isEmpty()) {
                 vibeLoading = false;
-                adapter.notifyDataSetChanged();
+                refreshVibe();
                 return;
             }
             // Fresh My Vibe session (cursor was null; pagination uses a separate path). Tells the
@@ -460,7 +474,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 if (!queue.list.isEmpty()) {
                     queue.play(queue.list.get(0));
                 }
-                adapter.notifyDataSetChanged();
+                refreshVibe();
             });
         });
     }
@@ -656,6 +670,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             if (adapter != null) {
                 adapter.notifyDataSetChanged();
             }
+            refreshVibe();
             if (miniPlayer != null) {
                 miniPlayer.update(id != NotificationCenter.messagePlayingProgressDidChanged);
             }
@@ -668,6 +683,10 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
     @Override
     public boolean isLightStatusBar() {
+        // Home = dark immersive aura -> want light (white) status-bar icons -> not a light bar.
+        if (!inSearchMode()) {
+            return false;
+        }
         return androidx.core.graphics.ColorUtils.calculateLuminance(getThemedColor(Theme.key_windowBackgroundWhite)) > 0.7f;
     }
 
@@ -702,7 +721,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int type = holder.getItemViewType();
-            return type == ROW_TRACK || type == ROW_VIBE || type == ROW_RETRY || type == ROW_SONG;
+            return type == ROW_TRACK || type == ROW_RETRY || type == ROW_SONG;
         }
 
         @NonNull
@@ -710,9 +729,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             View view;
             Context context = parent.getContext();
-            if (viewType == ROW_VIBE) {
-                view = new VibeCard(context);
-            } else if (viewType == ROW_SECTION) {
+            if (viewType == ROW_SECTION) {
                 TextView tv = new TextView(context);
                 tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
                 tv.setTypeface(AndroidUtilities.bold());
@@ -744,9 +761,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
             Row row = rows.get(position);
-            if (row.type == ROW_VIBE) {
-                ((VibeCard) holder.itemView).update();
-            } else if (row.type == ROW_SECTION) {
+            if (row.type == ROW_SECTION) {
                 TextView tv = (TextView) holder.itemView;
                 String t = row.section.title;
                 if (t == null || t.isEmpty()) {
@@ -828,52 +843,74 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         }
     }
 
-    private class VibeCard extends FrameLayout {
+    // The full-screen "My Vibe" home: a single hero play/pause button floating over a slow,
+    // music-reactive gradient (Yandex-Music "Моя волна" style). The aura animates only while a vibe
+    // track is actually playing, so the background "breathes" with the music.
+    private class VibeScreen extends FrameLayout {
 
-        private final TextView subtitle;
+        private final AuraView aura;
+        private final TextView titleView;
+        private final TextView subtitleView;
         private final ImageView playButton;
+        private final PlayPauseDrawable playPauseDrawable;
         private final org.telegram.ui.Components.RadialProgressView progressView;
 
-        VibeCard(Context context) {
+        VibeScreen(Context context) {
             super(context);
-            setPadding(dp(16), dp(8), dp(16), dp(4));
 
-            FrameLayout card = new FrameLayout(context);
-            GradientDrawable gradient = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{0xFF7C4DFF, 0xFF3D5AFE, 0xFF00B0FF});
-            gradient.setCornerRadius(dp(20));
-            card.setBackground(gradient);
-            addView(card, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 108));
+            // Tapping anywhere on the vibe screen toggles play/pause (or starts the vibe). The
+            // floating search bar sits on top as a separate view, so it still gets its own taps.
+            setOnClickListener(v -> onVibeTap());
 
-            LinearLayout texts = new LinearLayout(context);
-            texts.setOrientation(LinearLayout.VERTICAL);
-            card.addView(texts, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 20, 0, 92, 0));
+            aura = new AuraView(context);
+            addView(aura, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-            TextView title = new TextView(context);
-            title.setText(getString(R.string.MusicMyVibe));
-            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
-            title.setTypeface(AndroidUtilities.bold());
-            title.setTextColor(0xFFFFFFFF);
-            texts.addView(title);
+            LinearLayout center = new LinearLayout(context);
+            center.setOrientation(LinearLayout.VERTICAL);
+            center.setGravity(Gravity.CENTER_HORIZONTAL);
+            addView(center, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
 
-            subtitle = new TextView(context);
-            subtitle.setText(getString(R.string.MusicMyVibeInfo));
-            subtitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-            subtitle.setTextColor(0xCCFFFFFF);
-            texts.addView(subtitle, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 3, 0, 0));
+            titleView = new TextView(context);
+            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 26);
+            titleView.setTypeface(AndroidUtilities.bold());
+            titleView.setTextColor(0xFFFFFFFF);
+            titleView.setGravity(Gravity.CENTER);
+            titleView.setSingleLine(true);
+            titleView.setEllipsize(TextUtils.TruncateAt.END);
+            titleView.setShadowLayer(dp(12), 0, dp(1), 0x66000000);
+            center.addView(titleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 36, 0, 36, 0));
 
+            subtitleView = new TextView(context);
+            subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+            subtitleView.setTextColor(0xCCFFFFFF);
+            subtitleView.setGravity(Gravity.CENTER);
+            subtitleView.setSingleLine(true);
+            subtitleView.setEllipsize(TextUtils.TruncateAt.END);
+            subtitleView.setShadowLayer(dp(10), 0, dp(1), 0x55000000);
+            center.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 36, 8, 36, 0));
+
+            // Telegram's native video-player play button, 1:1 — the translucent dark disc
+            // (circle_big) + the animated white play/pause glyph on top, as one unit. Identical
+            // dimensions to PhotoViewer: 64dp disc with PlayPauseDrawable(28).
             FrameLayout button = new FrameLayout(context);
-            button.setBackground(Theme.createCircleDrawable(dp(56), 0xFFFFFFFF));
-            card.addView(button, LayoutHelper.createFrame(56, 56, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 18, 0));
+            button.setBackground(ContextCompat.getDrawable(context, R.drawable.circle_big));
+            button.setOnClickListener(v -> onVibeTap());
+            center.addView(button, LayoutHelper.createLinear(64, 64, Gravity.CENTER_HORIZONTAL, 0, 44, 0, 0));
+
+            playPauseDrawable = new PlayPauseDrawable(28);
+            playPauseDrawable.setDuration(200);
+            playPauseDrawable.setColor(0xFFFFFFFF);
+            playPauseDrawable.setPause(false, false);
 
             playButton = new ImageView(context);
             playButton.setScaleType(ImageView.ScaleType.CENTER);
-            playButton.setColorFilter(new PorterDuffColorFilter(0xFF3D5AFE, PorterDuff.Mode.MULTIPLY));
+            playButton.setImageDrawable(playPauseDrawable);
+            playPauseDrawable.setParent(playButton);
             button.addView(playButton, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
             progressView = new org.telegram.ui.Components.RadialProgressView(context);
-            progressView.setSize(dp(26));
-            progressView.setProgressColor(0xFF3D5AFE);
+            progressView.setSize(dp(22));
+            progressView.setProgressColor(0xFFFFFFFF);
             progressView.setVisibility(GONE);
             button.addView(progressView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
 
@@ -881,21 +918,102 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         }
 
         void update() {
-            boolean playing = false;
             SvipeMusicQueue active = SvipeMusicQueue.getActive();
             MessageObject mo = MediaController.getInstance().getPlayingMessageObject();
-            if (active != null && SvipeMusicQueue.SOURCE_VIBE.equals(active.source) && mo != null
-                && active.trackFor(mo) != null && !MediaController.getInstance().isMessagePaused()) {
-                playing = true;
-            }
+            boolean isVibe = active != null && SvipeMusicQueue.SOURCE_VIBE.equals(active.source)
+                && mo != null && active.trackFor(mo) != null;
+            boolean playing = isVibe && !MediaController.getInstance().isMessagePaused();
+
             if (vibeLoading) {
                 playButton.setVisibility(GONE);
                 progressView.setVisibility(VISIBLE);
             } else {
                 progressView.setVisibility(GONE);
                 playButton.setVisibility(VISIBLE);
-                playButton.setImageResource(playing ? R.drawable.ic_pause : R.drawable.ic_play);
+                // setPause(true) => pause bars (playing); setPause(false) => play triangle.
+                playPauseDrawable.setPause(playing);
             }
+
+            if (isVibe && mo != null) {
+                titleView.setText(mo.getMusicTitle());
+                subtitleView.setText(mo.getMusicAuthor());
+            } else {
+                titleView.setText(getString(R.string.MusicMyVibe));
+                subtitleView.setText(getString(R.string.MusicMyVibeInfo));
+            }
+
+            aura.setPlaying(playing);
+        }
+    }
+
+    // Ambient animated gradient: a handful of soft radial "blobs" drifting on slow circular paths.
+    // Their overlap over a dark base yields a fluid, ever-shifting wash of colour. The drift only
+    // advances while playing, so the screen visibly settles when the music is paused.
+    private static class AuraView extends View {
+
+        private static final int[] BLOB_COLORS = {0xFF7C4DFF, 0xFF3D5AFE, 0xFF00B0FF, 0xFFFF4081};
+
+        private final Paint blobPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private float phase;
+        private ValueAnimator animator;
+
+        AuraView(Context context) {
+            super(context);
+        }
+
+        void setPlaying(boolean playing) {
+            if (playing) {
+                if (animator == null) {
+                    animator = ValueAnimator.ofFloat(0f, (float) (Math.PI * 2));
+                    animator.setDuration(18000);
+                    animator.setRepeatCount(ValueAnimator.INFINITE);
+                    animator.setInterpolator(new android.view.animation.LinearInterpolator());
+                    animator.addUpdateListener(a -> {
+                        phase = (float) a.getAnimatedValue();
+                        invalidate();
+                    });
+                }
+                if (!animator.isStarted()) {
+                    animator.start();
+                } else if (animator.isPaused()) {
+                    animator.resume();
+                }
+            } else if (animator != null && animator.isRunning()) {
+                animator.pause();
+            }
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            super.onDetachedFromWindow();
+            if (animator != null) {
+                animator.cancel();
+                animator = null;
+            }
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            int w = getWidth();
+            int h = getHeight();
+            if (w == 0 || h == 0) {
+                return;
+            }
+            canvas.drawColor(0xFF120A22);
+            float radius = Math.max(w, h) * 0.8f;
+            int save = canvas.saveLayer(0, 0, w, h, null);
+            for (int i = 0; i < BLOB_COLORS.length; i++) {
+                double t = phase * (0.6 + 0.16 * i) + i * (Math.PI * 2 / BLOB_COLORS.length);
+                float cx = (float) (w * (0.5 + 0.32 * Math.cos(t)));
+                float cy = (float) (h * (0.5 + 0.32 * Math.sin(t * 1.2 + i)));
+                int rgb = BLOB_COLORS[i] & 0x00FFFFFF;
+                RadialGradient rg = new RadialGradient(cx, cy, radius,
+                    rgb | 0xCC000000, rgb, Shader.TileMode.CLAMP);
+                blobPaint.setShader(rg);
+                canvas.drawRect(0, 0, w, h, blobPaint);
+            }
+            canvas.restoreToCount(save);
+            blobPaint.setShader(null);
         }
     }
 

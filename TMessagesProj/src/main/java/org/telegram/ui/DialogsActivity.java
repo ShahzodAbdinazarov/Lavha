@@ -5381,6 +5381,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                             // stays fully visible at the top and reveals as you scroll back up.
                             if (svipeHeaderOffset > scrollY) svipeHeaderOffset = scrollY;
                             fragmentSearchField.setTranslationY(svipeSearchFieldRestTy - svipeHeaderOffset);
+                            // Keep the music mini-player glued right under the collapsing field.
+                            updateContextViewPosition();
                         }
                     });
                 }
@@ -6550,10 +6552,27 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         }
 
         if (topPanelLayout != null) {
-            topPanelLayout.setTranslationY(lerp(
-                totalOffset - searchOffset,
-                -dp(3) - (searchTabsView == null ? dp(44) : 0),
-                animatorSearchVisible.getFloatValue()));
+            if (isSvipeSearchSection() && fragmentSearchField != null) {
+                // Svipe Search section: the music mini-player normally rides just under the search
+                // field. But as the field collapses and scrolls off the top, the mini-player must NOT
+                // follow it off-screen — it rises until it reaches the top (the field's resting slot)
+                // and PINS there, staying visible while the field disappears above it. Sliding back
+                // down re-glues it under the returning field. Derived from live positions so it holds
+                // regardless of the exact layout constants.
+                float fieldTop = fragmentSearchField.getTop();
+                float fieldTy = fragmentSearchField.getTranslationY();
+                float fieldBottom = fieldTop + fieldTy + fragmentSearchField.getHeight();
+                // Top pin = where the field sits at rest; the panel never rises above this line.
+                float pinTop = fieldTop + (svipeSearchFieldRestTyCaptured ? svipeSearchFieldRestTy : fieldTy);
+                float contentTop = Math.max(fieldBottom + dp(4), pinTop);
+                topPanelLayout.setTranslationY(
+                        contentTop - topPanelLayout.getTop() - topPanelLayout.getPaddingTop());
+            } else {
+                topPanelLayout.setTranslationY(lerp(
+                    totalOffset - searchOffset,
+                    -dp(3) - (searchTabsView == null ? dp(44) : 0),
+                    animatorSearchVisible.getFloatValue()));
+            }
             topPanelsVisibility = topPanelLayout.getMetadata().getTotalVisibility();
             topPanelsHeight = topPanelLayout.getAnimatedHeightWithPadding(0);
         }
