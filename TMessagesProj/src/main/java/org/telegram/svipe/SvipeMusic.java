@@ -26,6 +26,7 @@ public class SvipeMusic {
         public int durationS;
         public long size;
         public boolean hasThumb;
+        public long songId;   // canonical song this track maps to; 0 = not canonicalized (no deep-link)
 
         public String key() {
             return channelId + ":" + messageId;
@@ -430,6 +431,7 @@ public class SvipeMusic {
         t.durationS = o.optInt("duration_s");
         t.size = o.optLong("size");
         t.hasThumb = o.optBoolean("has_thumb", false);
+        t.songId = o.optLong("song_id");
         return true;
     }
 

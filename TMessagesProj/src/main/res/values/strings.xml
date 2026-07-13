@@ -10506,6 +10506,7 @@
     <string name="MusicSearchHint">Search artists and tracks</string>
     <string name="MusicSearchEmpty">Nothing found</string>
     <string name="MusicLoadFailed">Couldn\'t load — tap to retry</string>
+    <string name="MusicAboutSong">About song</string>
     <string name="SwitchThemeToDay">Day Mode</string>
     <string name="SwitchThemeToNight">Night Mode</string>
 

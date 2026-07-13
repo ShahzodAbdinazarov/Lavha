@@ -114,7 +114,10 @@ import org.telegram.ui.ActionBar.ThemeDescription;
 import org.telegram.ui.Adapters.FiltersView;
 import org.telegram.ui.CastSync;
 import org.telegram.ui.Cells.AudioPlayerCell;
+import org.telegram.svipe.SvipeMusic;
+import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.ui.ChatActivity;
+import org.telegram.ui.MusicSongActivity;
 import org.telegram.ui.ChooseQualityLayout;
 import org.telegram.ui.Components.Forum.ForumUtilities;
 import org.telegram.ui.DialogsActivity;
@@ -1084,6 +1087,10 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         optionsButton.setAdditionalYOffset(-dp(157 + 40));
         optionsButton.setBackgroundDrawable(Theme.createSelectorDrawable(getThemedColor(Theme.key_listSelector), 1, dp(18)));
         bottomView.addView(optionsButton, LayoutHelper.createFrame(48, 48, Gravity.LEFT | Gravity.TOP));
+        // Svipe: jump to the canonical song profile (version picker + artists) for the playing track.
+        // Shown per-track (see setSubItemShown below) only for a canonical svipe music track.
+        optionsButton.addSubItem(101, R.drawable.msg_info, LocaleController.getString(R.string.MusicAboutSong));
+        optionsButton.setSubItemShown(101, false);
         optionsButton.addSubItem(1, R.drawable.msg_forward, LocaleController.getString(R.string.Forward));
         optionsButton.addSubItem(2, R.drawable.msg_shareout, LocaleController.getString(R.string.ShareFile));
         optionsButton.addSubItem(5, R.drawable.msg_download, LocaleController.getString(R.string.SaveToMusic));
@@ -1688,6 +1695,17 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         }
     }
 
+    /** The canonical song id of the currently-playing svipe track, or 0 if it isn't svipe music. */
+    private long svipeSongIdForPlaying() {
+        SvipeMusicQueue active = SvipeMusicQueue.getActive();
+        MessageObject mo = MediaController.getInstance().getPlayingMessageObject();
+        if (active == null || mo == null) {
+            return 0;
+        }
+        SvipeMusic.Track t = active.trackFor(mo);
+        return t != null ? t.songId : 0;
+    }
+
     private void onSubItemClick(int id) {
         final MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
         if (messageObject == null || parentActivity == null) {
@@ -1695,6 +1713,12 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         }
         if (id == 1) {
             forward(messageObject);
+        } else if (id == 101) {
+            long songId = svipeSongIdForPlaying();
+            if (songId != 0) {
+                parentActivity.presentFragment(new MusicSongActivity(songId, messageObject.getMusicTitle()), false, false);
+                dismiss();
+            }
         } else if (id == 2) {
             share(messageObject);
         } else if (id == 4) {
@@ -2291,6 +2315,7 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
             }
             optionsButton.setSubItemShown(4, messageObject.getId() > 0);
             optionsButton.setSubItemShown(7, isMyList());
+            optionsButton.setSubItemShown(101, svipeSongIdForPlaying() != 0);
 
             checkIfMusicDownloaded(messageObject);
             updateProgress(messageObject, !sameMessageObject);

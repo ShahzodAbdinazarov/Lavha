@@ -431,6 +431,34 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         }
     }
 
+    /** The currently-playing svipe track if it maps to a canonical song, else null. */
+    private SvipeMusic.Track playingSongTrack() {
+        SvipeMusicQueue active = SvipeMusicQueue.getActive();
+        MessageObject mo = MediaController.getInstance().getPlayingMessageObject();
+        if (active == null || mo == null) {
+            return null;
+        }
+        SvipeMusic.Track t = active.trackFor(mo);
+        return t != null && t.songId != 0 ? t : null;
+    }
+
+    /**
+     * Opens the canonical song profile for whatever svipe track is currently playing. No-op if nothing
+     * is playing or the track isn't canonicalized (songId 0). The "now playing → song" bridge: reached
+     * from the vibe screen's link and from the mini player, so a listener can jump straight to a song's
+     * versions and artists (the Zona-style profile) without going through search.
+     */
+    private void openSongProfileForPlaying() {
+        SvipeMusic.Track t = playingSongTrack();
+        if (t == null) {
+            return;
+        }
+        MessageObject mo = MediaController.getInstance().getPlayingMessageObject();
+        String title = t.title != null && !t.title.isEmpty() ? t.title
+            : (mo != null ? mo.getMusicTitle() : null);
+        presentFragment(new MusicSongActivity(t.songId, title));
+    }
+
     private void onVibeTap() {
         SvipeMusicQueue active = SvipeMusicQueue.getActive();
         MediaController mc = MediaController.getInstance();
@@ -854,6 +882,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         private final ImageView playButton;
         private final PlayPauseDrawable playPauseDrawable;
         private final org.telegram.ui.Components.RadialProgressView progressView;
+        private final TextView songLink;
 
         VibeScreen(Context context) {
             super(context);
@@ -914,6 +943,25 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             progressView.setVisibility(GONE);
             button.addView(progressView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
 
+            // "Now playing → song profile" bridge. Shown only while a vibe track that maps to a
+            // canonical song is playing; opens its version picker + artist list. It's a child with
+            // its own click target, so tapping it doesn't trigger the screen's play/pause toggle.
+            songLink = new TextView(context);
+            songLink.setText("Versiyalar va ijrochilar  ›");
+            songLink.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            songLink.setTextColor(0xFFFFFFFF);
+            // Same shadow the title/subtitle carry, so glyphs stay legible when a bright aura blob
+            // drifts behind the pill.
+            songLink.setShadowLayer(dp(10), 0, dp(1), 0x55000000);
+            songLink.setGravity(Gravity.CENTER);
+            songLink.setPadding(dp(16), dp(8), dp(16), dp(8));
+            songLink.setBackground(Theme.createRoundRectDrawable(dp(16), 0x33FFFFFF));
+            // INVISIBLE (not GONE): the pill's slot is always reserved so toggling it per-track never
+            // reflows the vertically-centered hero button/title.
+            songLink.setVisibility(INVISIBLE);
+            songLink.setOnClickListener(v -> openSongProfileForPlaying());
+            center.addView(songLink, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 24, 0, 0));
+
             update();
         }
 
@@ -941,6 +989,11 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 titleView.setText(getString(R.string.MusicMyVibe));
                 subtitleView.setText(getString(R.string.MusicMyVibeInfo));
             }
+
+            // Offer the "→ song profile" link only when the shown vibe track maps to a canonical song.
+            // INVISIBLE (not GONE) keeps the slot reserved so the centered hero stack never jumps.
+            SvipeMusic.Track vt = isVibe ? active.trackFor(mo) : null;
+            songLink.setVisibility(vt != null && vt.songId != 0 ? VISIBLE : INVISIBLE);
 
             aura.setPlaying(playing);
         }
@@ -1181,6 +1234,9 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 if (getParentActivity() == null) {
                     return;
                 }
+                // The now-playing bar keeps its standard role: open the full native player (seek,
+                // queue, next/prev). The "→ song profile" entry lives on the vibe screen's pill, so
+                // this gesture stays unambiguous and the seekable player remains reachable in-tab.
                 showDialog(new AudioPlayerAlert(getParentActivity(), getResourceProvider()));
             });
         }
