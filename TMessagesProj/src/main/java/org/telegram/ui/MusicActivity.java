@@ -11,9 +11,11 @@ import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.RadialGradient;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
@@ -35,11 +37,13 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.ImageLocation;
+import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SharedConfig;
 import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.svipe.SvipeMusicResolver;
@@ -49,12 +53,25 @@ import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AudioPlayerAlert;
 import org.telegram.ui.Components.BackupImageView;
+import org.telegram.ui.Components.FragmentContextView;
 import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.EditTextBoldCursor;
+import org.telegram.ui.Components.FragmentSearchField;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.PlayPauseDrawable;
 import org.telegram.ui.Components.RecyclerListView;
+import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
+import org.telegram.ui.Components.blur3.DownscaleScrollableNoiseSuppressor;
+import org.telegram.ui.Components.blur3.RenderNodeWithHash;
+import org.telegram.ui.Components.blur3.capture.IBlur3Capture;
+import org.telegram.ui.Components.blur3.capture.IBlur3Hash;
+import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
+import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
+import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceColor;
+import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceRenderNode;
+import org.telegram.ui.Components.blur3.utils.Blur3Utils;
+import org.telegram.ui.Components.chat.ViewPositionWatcher;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -86,13 +103,32 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private int additionNavigationBarHeight;
 
     private FrameLayout root;
-    private EditTextBoldCursor searchField;
-    private ImageView searchClear;
+    private EditTextBoldCursor searchField;   // == fragmentSearchField.editText
+    private FragmentSearchField fragmentSearchField;
     private RecyclerListView listView;
     private LinearLayoutManager layoutManager;
     private ListAdapter adapter;
     private VibeScreen vibeScreen;
-    private MiniPlayerView miniPlayer;
+    private FragmentContextView fragmentContextView;
+    private FrameLayout contextWrap;
+
+    /* Liquid glass (iBlur3) — the same pipeline DialogsActivity uses to frost its search pill and top
+     * panel. When LiteMode liquid glass is enabled (S+), the search pill and the now-playing island
+     * render real frosted glass over whatever is scrolling behind them; otherwise they keep the plain
+     * solid look. */
+    private ViewPositionWatcher viewPositionWatcher;
+    private DownscaleScrollableNoiseSuppressor scrollableViewNoiseSuppressor;
+    private BlurredBackgroundSourceRenderNode iBlur3SourceGlass;
+    private BlurredBackgroundSourceColor iBlur3SourceColor;
+    private BlurredBackgroundDrawableViewFactory iBlur3FactoryLiquidGlass;
+    private IBlur3Capture iBlur3Capture;
+    private IBlur3Capture iBlur3VibeCapture;
+    private boolean iBlur3Active;
+    private final ArrayList<RectF> iBlur3Positions = new ArrayList<>();
+    private final RectF iBlur3PositionTop = new RectF();
+    {
+        iBlur3Positions.add(iBlur3PositionTop);
+    }
 
     private final ArrayList<SvipeMusic.Section> sections = new ArrayList<>();
     private boolean homeLoading;
@@ -146,7 +182,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         nc.addObserver(this, NotificationCenter.messagePlayingDidStart);
         nc.addObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
         nc.addObserver(this, NotificationCenter.messagePlayingDidReset);
-        nc.addObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
         SvipeMusicTelemetry.getInstance(currentAccount).attach();
         return super.onFragmentCreate();
     }
@@ -157,7 +192,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         nc.removeObserver(this, NotificationCenter.messagePlayingDidStart);
         nc.removeObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
         nc.removeObserver(this, NotificationCenter.messagePlayingDidReset);
-        nc.removeObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
         super.onFragmentDestroy();
     }
 
@@ -167,8 +201,44 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         hasOwnBackground = true;
         actionBar.setAddToContainer(false);
 
-        root = new FrameLayout(context);
+        // Build the liquid-glass sources/factory before any view that needs a glass background.
+        initBlur3();
+
+        // `root` drives the blur pipeline once per frame: DialogsActivity does the same from its
+        // ContentView.dispatchDraw. Recapturing the scrolling content here (before children draw) keeps
+        // the frosted pill/island in sync with whatever is behind them.
+        root = new FrameLayout(context) {
+            @Override
+            protected void dispatchDraw(Canvas canvas) {
+                if (iBlur3Active && Build.VERSION.SDK_INT >= 31 && scrollableViewNoiseSuppressor != null) {
+                    blur3_InvalidateBlur();
+                }
+                super.dispatchDraw(canvas);
+            }
+        };
         root.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+
+        // Wire the blur pipeline to `root` as the content root. The capture draws whichever backdrop is
+        // currently on screen (the immersive vibe home or the search list) into the blur source so the
+        // pill/island frost it. Must run before iBlur3FactoryLiquidGlass.create() is used below.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            viewPositionWatcher = new ViewPositionWatcher(root);
+            iBlur3FactoryLiquidGlass.setSourceRootView(viewPositionWatcher, root);
+            iBlur3VibeCapture = (canvas, position) -> {
+                if (vibeScreen != null) {
+                    vibeScreen.draw(canvas);
+                }
+            };
+            iBlur3Capture = (canvas, position) -> {
+                if (vibeScreen != null && vibeScreen.getVisibility() == View.VISIBLE) {
+                    Blur3Utils.captureRelativeParent(iBlur3VibeCapture, canvas, position, vibeScreen, root, 255);
+                }
+                if (listView != null && listView.getVisibility() == View.VISIBLE) {
+                    Blur3Utils.captureRelativeParent(listView, canvas, position, listView, root, 255);
+                }
+            };
+            iBlur3Active = LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) && scrollableViewNoiseSuppressor != null;
+        }
 
         // Full-screen music-reactive backdrop + centered hero button (the "home" screen). It sits at
         // the very back and spans under the status bar, so the gradient reaches the top edge.
@@ -193,6 +263,13 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                     AndroidUtilities.hideKeyboard(searchField);
                 }
             }
+
+            @Override
+            public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+                if (iBlur3Active && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && scrollableViewNoiseSuppressor != null) {
+                    scrollableViewNoiseSuppressor.onScrolled(dx, dy);
+                }
+            }
         });
         root.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
@@ -202,28 +279,14 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         searchContainer.setPadding(0, AndroidUtilities.statusBarHeight + dp(8), 0, dp(8));
         root.addView(searchContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
 
-        FrameLayout searchBox = new FrameLayout(context);
-        searchBox.setBackground(Theme.createRoundRectDrawable(dp(12), getThemedColor(Theme.key_dialogSearchBackground)));
-        searchContainer.addView(searchBox, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 42, Gravity.TOP, 16, 0, 16, 0));
-
-        ImageView searchIcon = new ImageView(context);
-        searchIcon.setImageResource(R.drawable.outline_header_search);
-        searchIcon.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_dialogSearchHint), PorterDuff.Mode.MULTIPLY));
-        searchBox.addView(searchIcon, LayoutHelper.createFrame(24, 24, Gravity.LEFT | Gravity.CENTER_VERTICAL, 12, 0, 0, 0));
-
-        searchField = new EditTextBoldCursor(context);
-        searchField.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        searchField.setHint(getString(R.string.MusicSearchHint));
-        searchField.setHintTextColor(getThemedColor(Theme.key_dialogSearchHint));
-        searchField.setTextColor(getThemedColor(Theme.key_dialogSearchText));
-        searchField.setBackground(null);
-        searchField.setSingleLine(true);
-        searchField.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
-        searchField.setCursorColor(getThemedColor(Theme.key_dialogSearchText));
-        searchField.setCursorSize(dp(19));
-        searchField.setCursorWidth(1.5f);
-        searchBox.addView(searchField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL, 44, 0, 40, 0));
-        searchField.addTextChangedListener(new TextWatcher() {
+        // The rounded search pill is the SAME reusable component the Chats/Search tabs use
+        // (FragmentSearchField) — one shared component across tabs, not a hand-matched copy. Its
+        // rounded background, clear ("x") button and colours all come from there; here we only wire the
+        // hint and the query listener. (Liquid-glass blur is attached separately.)
+        fragmentSearchField = new FragmentSearchField(context, getResourceProvider());
+        fragmentSearchField.setPadding(dp(4), dp(4), dp(4), dp(4));
+        fragmentSearchField.editText.setHint(getString(R.string.MusicSearchHint));
+        fragmentSearchField.editText.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {
             }
@@ -237,42 +300,120 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 onQueryChanged(s != null ? s.toString() : "");
             }
         });
+        searchField = fragmentSearchField.editText;
+        // Real liquid-glass pill, exactly like DialogsActivity's search field. Falls back to the pill's
+        // own solid background when glass isn't active.
+        if (iBlur3Active) {
+            fragmentSearchField.setupBlurredBackground(iBlur3FactoryLiquidGlass.create(fragmentSearchField, BlurredBackgroundProviderImpl.topPanel(getResourceProvider())));
+        }
+        searchContainer.addView(fragmentSearchField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.TOP, 7, 0, 7, 0));
 
-        searchClear = new ImageView(context);
-        searchClear.setImageResource(R.drawable.miniplayer_close);
-        searchClear.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_dialogSearchHint), PorterDuff.Mode.MULTIPLY));
-        searchClear.setScaleType(ImageView.ScaleType.CENTER);
-        searchClear.setVisibility(View.GONE);
-        searchClear.setOnClickListener(v -> {
-            searchField.setText("");
-            AndroidUtilities.hideKeyboard(searchField);
-        });
-        searchBox.addView(searchClear, LayoutHelper.createFrame(40, LayoutHelper.MATCH_PARENT, Gravity.RIGHT));
-
-        miniPlayer = new MiniPlayerView(context);
-        miniPlayer.setVisibility(View.GONE);
-        int miniBottom = AndroidUtilities.navigationBarHeight + additionNavigationBarHeight + dp(6);
-        root.addView(miniPlayer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 58, Gravity.BOTTOM, 10, 0, 10, miniBottom / AndroidUtilities.density));
+        // Standard Telegram now-playing bar — the same one the chats/search list uses. It sits in a
+        // fixed slot right under the floating search field and opens the full native player on tap.
+        // Hosted in a wrapper exactly as the chats list does: in bubble mode the bar draws with a
+        // transparent background and doesn't move its own top-margin, so the wrapper both paints the
+        // player background and pins it in place. The bar toggles the wrapper's visibility with its
+        // own, and we reflow the results list so nothing hides behind it. Passing the wrapper as the
+        // padding view keeps the constructor from touching fragmentView (not assigned yet here).
+        contextWrap = new FrameLayout(context);
+        if (iBlur3Active) {
+            // Same frosted glass the pill uses; the create() call subscribes it to the position watcher
+            // so its blur tracks the island as it shows/hides. Rounded to match the original island.
+            BlurredBackgroundDrawable islandGlass = iBlur3FactoryLiquidGlass.create(contextWrap, BlurredBackgroundProviderImpl.topPanel(getResourceProvider()));
+            islandGlass.setRadius(dp(12));
+            contextWrap.setBackground(islandGlass);
+        } else {
+            contextWrap.setBackground(Theme.createRoundRectDrawable(dp(12), getThemedColor(Theme.key_inappPlayerBackground)));
+        }
+        contextWrap.setClipToOutline(true);  // round the (transparent-bubble) bar's corners like the chats/search island
+        contextWrap.setVisibility(View.GONE);
+        float ctxTopDp = (AndroidUtilities.statusBarHeight + dp(58)) / AndroidUtilities.density;
+        root.addView(contextWrap, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT, 16, ctxTopDp, 16, 0));
+        fragmentContextView = new FragmentContextView(context, this, contextWrap, false, null) {
+            @Override
+            public void setVisibility(int visibility) {
+                super.setVisibility(visibility);
+                contextWrap.setVisibility(visibility);
+                refreshListPadding();
+            }
+        };
+        fragmentContextView.isInsideBubble = true;
+        contextWrap.addView(fragmentContextView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         fragmentView = root;
         updateRows();
         ensureHomeLoaded();
-        miniPlayer.update(false);
         return root;
+    }
+
+    /* Liquid glass (iBlur3) */
+
+    // Builds the glass source + drawable factory, mirroring the LIQUID-GLASS half of
+    // DialogsActivity's constructor. Below S there is no render-node pipeline, so the factory falls
+    // back to a solid-colour source and every glass drawable it makes is a plain solid fill.
+    private void initBlur3() {
+        iBlur3SourceColor = new BlurredBackgroundSourceColor();
+        iBlur3SourceColor.setColor(getThemedColor(Theme.key_windowBackgroundWhite));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            scrollableViewNoiseSuppressor = new DownscaleScrollableNoiseSuppressor();
+            iBlur3SourceGlass = new BlurredBackgroundSourceRenderNode(null);
+            iBlur3SourceGlass.setupRenderer(new RenderNodeWithHash.Renderer() {
+                @Override
+                public void renderNodeCalculateHash(IBlur3Hash hash) {
+                    hash.add(getThemedColor(Theme.key_windowBackgroundWhite));
+                    hash.add(SharedConfig.chatBlurEnabled());
+                }
+
+                @Override
+                public void renderNodeUpdateDisplayList(Canvas canvas) {
+                    canvas.drawColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                    if (SharedConfig.chatBlurEnabled()) {
+                        scrollableViewNoiseSuppressor.draw(canvas, DownscaleScrollableNoiseSuppressor.DRAW_GLASS);
+                    }
+                }
+            });
+            iBlur3FactoryLiquidGlass = new BlurredBackgroundDrawableViewFactory(iBlur3SourceGlass);
+            iBlur3FactoryLiquidGlass.setLiquidGlassEffectAllowed(LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS));
+        } else {
+            scrollableViewNoiseSuppressor = null;
+            iBlur3SourceGlass = null;
+            iBlur3FactoryLiquidGlass = new BlurredBackgroundDrawableViewFactory(iBlur3SourceColor);
+        }
+    }
+
+    // One blur region covering the top strip where the search pill and the now-playing island float.
+    // Simplified from DialogsActivity#blur3_InvalidateBlur (no bottom tab region here).
+    private void blur3_InvalidateBlur() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || scrollableViewNoiseSuppressor == null
+                || root == null || iBlur3Capture == null) {
+            return;
+        }
+        final int w = root.getMeasuredWidth();
+        final int h = root.getMeasuredHeight();
+        if (w == 0 || h == 0) {
+            return;
+        }
+        iBlur3PositionTop.set(0, -dp(48), w, AndroidUtilities.statusBarHeight + dp(58) + dp(39) + dp(48));
+        scrollableViewNoiseSuppressor.setupRenderNodes(iBlur3Positions, 1);
+        scrollableViewNoiseSuppressor.invalidateResultRenderNodes(iBlur3Capture, w, h);
+        if (iBlur3SourceGlass != null) {
+            iBlur3SourceGlass.setSize(w, h);
+            iBlur3SourceGlass.updateDisplayListIfNeeded();
+        }
     }
 
     // Reserve room for the floating search bar (status bar + pill + margins) so the first result
     // isn't hidden underneath it.
     private int listTopPadding() {
-        return AndroidUtilities.statusBarHeight + dp(58);
+        int pad = AndroidUtilities.statusBarHeight + dp(58);
+        if (fragmentContextView != null && fragmentContextView.getVisibility() == View.VISIBLE) {
+            pad += dp(39);  // clear the now-playing bar that sits under the search field
+        }
+        return pad;
     }
 
     private int listBottomPadding() {
-        int pad = AndroidUtilities.navigationBarHeight + additionNavigationBarHeight + dp(12);
-        if (miniPlayer != null && miniPlayer.getVisibility() == View.VISIBLE) {
-            pad += dp(66);
-        }
-        return pad;
+        return AndroidUtilities.navigationBarHeight + additionNavigationBarHeight + dp(12);
     }
 
     private void refreshListPadding() {
@@ -316,7 +457,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
     private void onQueryChanged(String q) {
         query = q != null ? q.trim() : "";
-        searchClear.setVisibility(query.isEmpty() ? View.GONE : View.VISIBLE);
+        // FragmentSearchField shows/hides its own clear button from the text; nothing to do here.
         if (pendingSearch != null) {
             AndroidUtilities.cancelRunOnUIThread(pendingSearch);
             pendingSearch = null;
@@ -429,34 +570,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 loadHome();
             }
         }
-    }
-
-    /** The currently-playing svipe track if it maps to a canonical song, else null. */
-    private SvipeMusic.Track playingSongTrack() {
-        SvipeMusicQueue active = SvipeMusicQueue.getActive();
-        MessageObject mo = MediaController.getInstance().getPlayingMessageObject();
-        if (active == null || mo == null) {
-            return null;
-        }
-        SvipeMusic.Track t = active.trackFor(mo);
-        return t != null && t.songId != 0 ? t : null;
-    }
-
-    /**
-     * Opens the canonical song profile for whatever svipe track is currently playing. No-op if nothing
-     * is playing or the track isn't canonicalized (songId 0). The "now playing → song" bridge: reached
-     * from the vibe screen's link and from the mini player, so a listener can jump straight to a song's
-     * versions and artists (the Zona-style profile) without going through search.
-     */
-    private void openSongProfileForPlaying() {
-        SvipeMusic.Track t = playingSongTrack();
-        if (t == null) {
-            return;
-        }
-        MessageObject mo = MediaController.getInstance().getPlayingMessageObject();
-        String title = t.title != null && !t.title.isEmpty() ? t.title
-            : (mo != null ? mo.getMusicTitle() : null);
-        presentFragment(new MusicSongActivity(t.songId, title));
     }
 
     private void onVibeTap() {
@@ -663,9 +776,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                         if (adapter != null) {
                             adapter.notifyDataSetChanged();
                         }
-                        if (miniPlayer != null) {
-                            miniPlayer.update(false);
-                        }
                     }
                 });
             };
@@ -699,13 +809,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 adapter.notifyDataSetChanged();
             }
             refreshVibe();
-            if (miniPlayer != null) {
-                miniPlayer.update(id != NotificationCenter.messagePlayingProgressDidChanged);
-            }
-        } else if (id == NotificationCenter.messagePlayingProgressDidChanged) {
-            if (miniPlayer != null) {
-                miniPlayer.updateProgressOnly();
-            }
         }
     }
 
@@ -882,7 +985,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         private final ImageView playButton;
         private final PlayPauseDrawable playPauseDrawable;
         private final org.telegram.ui.Components.RadialProgressView progressView;
-        private final TextView songLink;
 
         VibeScreen(Context context) {
             super(context);
@@ -943,25 +1045,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             progressView.setVisibility(GONE);
             button.addView(progressView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
 
-            // "Now playing → song profile" bridge. Shown only while a vibe track that maps to a
-            // canonical song is playing; opens its version picker + artist list. It's a child with
-            // its own click target, so tapping it doesn't trigger the screen's play/pause toggle.
-            songLink = new TextView(context);
-            songLink.setText("Versiyalar va ijrochilar  ›");
-            songLink.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-            songLink.setTextColor(0xFFFFFFFF);
-            // Same shadow the title/subtitle carry, so glyphs stay legible when a bright aura blob
-            // drifts behind the pill.
-            songLink.setShadowLayer(dp(10), 0, dp(1), 0x55000000);
-            songLink.setGravity(Gravity.CENTER);
-            songLink.setPadding(dp(16), dp(8), dp(16), dp(8));
-            songLink.setBackground(Theme.createRoundRectDrawable(dp(16), 0x33FFFFFF));
-            // INVISIBLE (not GONE): the pill's slot is always reserved so toggling it per-track never
-            // reflows the vertically-centered hero button/title.
-            songLink.setVisibility(INVISIBLE);
-            songLink.setOnClickListener(v -> openSongProfileForPlaying());
-            center.addView(songLink, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 24, 0, 0));
-
             update();
         }
 
@@ -989,11 +1072,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 titleView.setText(getString(R.string.MusicMyVibe));
                 subtitleView.setText(getString(R.string.MusicMyVibeInfo));
             }
-
-            // Offer the "→ song profile" link only when the shown vibe track maps to a canonical song.
-            // INVISIBLE (not GONE) keeps the slot reserved so the centered hero stack never jumps.
-            SvipeMusic.Track vt = isVibe ? active.trackFor(mo) : null;
-            songLink.setVisibility(vt != null && vt.songId != 0 ? VISIBLE : INVISIBLE);
 
             aura.setPlaying(playing);
         }
@@ -1169,129 +1247,5 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         cd.setCustomSize(dp(46), dp(46));
         cd.setIconSize(dp(24), dp(24));
         return cd;
-    }
-
-    /* mini player */
-
-    private class MiniPlayerView extends FrameLayout {
-
-        private final BackupImageView cover;
-        private final TextView titleView;
-        private final TextView subtitleView;
-        private final ImageView playPause;
-        private final Paint progressPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private float progress;
-
-        MiniPlayerView(Context context) {
-            super(context);
-            setWillNotDraw(false);
-            setBackground(Theme.createRoundRectDrawable(dp(14), getThemedColor(Theme.key_windowBackgroundGray)));
-            progressPaint.setColor(getThemedColor(Theme.key_featuredStickers_addButton));
-            progressPaint.setStrokeWidth(dp(2));
-
-            cover = new BackupImageView(context);
-            cover.setRoundRadius(dp(8));
-            addView(cover, LayoutHelper.createFrame(40, 40, Gravity.LEFT | Gravity.CENTER_VERTICAL, 10, 0, 0, 0));
-
-            LinearLayout texts = new LinearLayout(context);
-            texts.setOrientation(LinearLayout.VERTICAL);
-            addView(texts, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 60, 0, 54, 0));
-
-            titleView = new TextView(context);
-            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-            titleView.setTypeface(AndroidUtilities.bold());
-            titleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
-            titleView.setSingleLine(true);
-            titleView.setEllipsize(TextUtils.TruncateAt.END);
-            texts.addView(titleView);
-
-            subtitleView = new TextView(context);
-            subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
-            subtitleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
-            subtitleView.setSingleLine(true);
-            subtitleView.setEllipsize(TextUtils.TruncateAt.END);
-            texts.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 1, 0, 0));
-
-            playPause = new ImageView(context);
-            playPause.setScaleType(ImageView.ScaleType.CENTER);
-            playPause.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_windowBackgroundWhiteBlackText), PorterDuff.Mode.MULTIPLY));
-            playPause.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_listSelector), 1, dp(22)));
-            playPause.setOnClickListener(v -> {
-                MediaController mc = MediaController.getInstance();
-                MessageObject mo = mc.getPlayingMessageObject();
-                if (mo == null) {
-                    return;
-                }
-                if (mc.isMessagePaused()) {
-                    mc.playMessage(mo);
-                } else {
-                    mc.pauseMessage(mo);
-                }
-            });
-            addView(playPause, LayoutHelper.createFrame(44, 44, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 6, 0));
-
-            setOnClickListener(v -> {
-                if (getParentActivity() == null) {
-                    return;
-                }
-                // The now-playing bar keeps its standard role: open the full native player (seek,
-                // queue, next/prev). The "→ song profile" entry lives on the vibe screen's pill, so
-                // this gesture stays unambiguous and the seekable player remains reachable in-tab.
-                showDialog(new AudioPlayerAlert(getParentActivity(), getResourceProvider()));
-            });
-        }
-
-        void update(boolean animated) {
-            MessageObject mo = MediaController.getInstance().getPlayingMessageObject();
-            boolean show = mo != null && mo.isMusic();
-            boolean wasVisible = getVisibility() == VISIBLE;
-            if (!show) {
-                if (wasVisible) {
-                    setVisibility(GONE);
-                    refreshListPadding();
-                }
-                return;
-            }
-            if (!wasVisible) {
-                setVisibility(VISIBLE);
-                if (animated) {
-                    setAlpha(0f);
-                    setTranslationY(dp(24));
-                    animate().alpha(1f).translationY(0f).setDuration(220)
-                        .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).start();
-                }
-                refreshListPadding();
-            }
-            titleView.setText(mo.getMusicTitle());
-            subtitleView.setText(mo.getMusicAuthor());
-            playPause.setImageResource(MediaController.getInstance().isMessagePaused() ? R.drawable.ic_play : R.drawable.ic_pause);
-
-            TLRPC.Document doc = mo.getDocument();
-            TLRPC.PhotoSize ps = doc != null ? FileLoader.getClosestPhotoSizeWithSize(doc.thumbs, 90) : null;
-            if (ps != null && !(ps instanceof TLRPC.TL_photoSizeEmpty)) {
-                cover.setImage(ImageLocation.getForDocument(ps, doc), "40_40", coverPlaceholder(), MusicActivity.this);
-            } else {
-                cover.setImageDrawable(coverPlaceholder());
-            }
-            updateProgressOnly();
-        }
-
-        void updateProgressOnly() {
-            MessageObject mo = MediaController.getInstance().getPlayingMessageObject();
-            float p = mo != null ? mo.audioProgress : 0f;
-            if (Math.abs(p - progress) > 0.003f) {
-                progress = p;
-                invalidate();
-            }
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-            if (progress > 0f) {
-                float w = (getWidth() - dp(20)) * Math.min(1f, progress);
-                canvas.drawLine(dp(10), getHeight() - dp(3), dp(10) + w, getHeight() - dp(3), progressPaint);
-            }
-        }
     }
 }
