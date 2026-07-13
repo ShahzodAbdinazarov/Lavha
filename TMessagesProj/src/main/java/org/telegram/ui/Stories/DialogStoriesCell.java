@@ -626,11 +626,13 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
                     currentTitle = str;
                 }
             } else {
-                currentTitle = menuItemsOffset < dp(50) ? null :
+                // Collapsed header shows the brand as text ("Svipe") instead of the Telegram wordmark logo.
+            currentTitle = menuItemsOffset < dp(50) ? "Svipe" :
                     LocaleController.getString(R.string.MyStory);
             }
         } else {
-            currentTitle = menuItemsOffset < dp(50) ? null :
+            // Collapsed header shows the brand as text ("Svipe") instead of the Telegram wordmark logo.
+            currentTitle = menuItemsOffset < dp(50) ? "Svipe" :
                 LocaleController.formatPluralString("Stories", totalCount);
         }
 
