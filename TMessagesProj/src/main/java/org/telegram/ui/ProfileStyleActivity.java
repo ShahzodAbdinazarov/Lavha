@@ -18,6 +18,7 @@ import android.view.View;
 import android.widget.FrameLayout;
 
 import androidx.core.graphics.ColorUtils;
+import androidx.core.math.MathUtils;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -35,6 +36,7 @@ import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.ProfileActionsView;
+import org.telegram.ui.Components.ProfileGooeyView;
 import org.telegram.ui.Components.RecyclerListView;
 
 import java.util.ArrayList;
@@ -75,6 +77,7 @@ public abstract class ProfileStyleActivity extends BaseFragment {
     private CoverBlurView coverBlurView;
     private FrameLayout avatarContainer2;
     private FrameLayout avatarContainer;
+    private ProfileGooeyView avatarGooey;
 
     protected ProfileActivity.AvatarImageView avatarImage;
     protected final AvatarDrawable avatarDrawable = new AvatarDrawable();
@@ -85,6 +88,8 @@ public abstract class ProfileStyleActivity extends BaseFragment {
     /** Top of adapter item 0: equals getHeaderExtraHeight() at rest, 0 when scrolled past the header. */
     private float extraHeight;
     private float avatarScale, avatarX, avatarY, nameX, onlineX, nameY, onlineY;
+    /** 0 while the header is open, 1 once the avatar has been swallowed. Drives the gooey. */
+    private float pullUpProgress;
     private int btnColor;
 
     // Pull-down-to-expand state, mirroring ProfileActivity's fields of the same names.
@@ -478,10 +483,26 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         avatarContainer2 = new FrameLayout(context);
         frameLayout.addView(avatarContainer2, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.START));
 
-        avatarContainer = new FrameLayout(context);
+        // Wrapped in the gooey view exactly as ProfileActivity does — it is what melts the avatar away
+        // as the header collapses. It drives itself off avatarContainer's scale, hence the overrides.
+        avatarContainer = new FrameLayout(context) {
+            @Override
+            public void setScaleX(float scaleX) {
+                super.setScaleX(scaleX);
+                updateGooey();
+            }
+
+            @Override
+            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+                updateGooey();
+            }
+        };
         avatarContainer.setPivotX(0);
         avatarContainer.setPivotY(0);
-        avatarContainer2.addView(avatarContainer, LayoutHelper.createFrame(100, 100, Gravity.TOP | Gravity.LEFT));
+        avatarGooey = new ProfileGooeyView(context);
+        avatarGooey.addView(avatarContainer, LayoutHelper.createFrame(100, 100, Gravity.TOP | Gravity.LEFT));
+        avatarContainer2.addView(avatarGooey, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         avatarImage = new ProfileActivity.AvatarImageView(context);
         avatarImage.getImageReceiver().setAllowDecodeSingleFrame(true);
@@ -657,6 +678,23 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         return Math.max(0, extra + newTop() - getActionsExtraHeight());
     }
 
+    /**
+     * ProfileActivity#updateGooey. The collapse effect Telegram ran a contest for: the avatar does not
+     * just shrink away, it is drawn through a metaball filter so that on the way up it stretches, thins
+     * and merges into the bar at the top of the screen (into the punch-hole itself, on a phone that has
+     * one). ProfileGooeyView does all of it and needs nothing from a peer — it even finds the notch
+     * itself via NotchInfoUtils — so it is used as-is; this only feeds it the progress.
+     */
+    private void updateGooey() {
+        if (avatarGooey == null) {
+            return;
+        }
+        avatarGooey.setPullProgress(pullUpProgress);
+        avatarGooey.setBlurIntensity(Math.min((MathUtils.clamp(pullUpProgress, 0.2f, 0.7f) - 0.2f) / 0.5f, 0.75f));
+        avatarGooey.setGooeyEnabled(pullUpProgress > 0 && pullUpProgress < 1);
+        avatarGooey.setVisibility(pullUpProgress >= 1.0f ? View.GONE : View.VISIBLE);
+    }
+
     /** ProfileActivity#fixAvatarImageInCenter */
     private void fixAvatarImageInCenter() {
         final FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) avatarContainer.getLayoutParams();
@@ -683,8 +721,14 @@ public abstract class ProfileStyleActivity extends BaseFragment {
                 && extraHeight < listView.getMeasuredWidth() + getActionsExtraHeight() - newTop
                 ? View.OVER_SCROLL_NEVER : View.OVER_SCROLL_ALWAYS);
 
+        // Where the avatar ends up once collapsed: the punch-hole's centre when there is one, so the
+        // gooey can merge it into the hole; otherwise just off the top. ProfileActivity#needLayout.
+        float endY = -dp(29);
+        if (avatarGooey != null && avatarGooey.notchInfo != null && avatarGooey.notchInfo.isLikelyCircle) {
+            endY = avatarGooey.notchInfo.bounds.centerY();
+        }
         avatarY = AndroidUtilities.lerp(
-                -dp(29),
+                endY,
                 (actionBar.getOccupyStatusBar() ? AndroidUtilities.statusBarHeight : 0)
                         + ActionBar.getCurrentActionBarHeight()
                         - dp(21)
@@ -697,6 +741,7 @@ public abstract class ProfileStyleActivity extends BaseFragment {
             expandProgress = Math.max(0f, Math.min(1f,
                     (h - headerExtraHeight) / (listView.getMeasuredWidth() - newTop - getHeaderOnlyExtraHeight())));
             avatarScale = AndroidUtilities.lerp(96 / 42f, 138 / 42f, Math.min(1f, expandProgress * 3f)) / 100f * 42f;
+            pullUpProgress = 0.0f;
 
             if (allowPullingDown && expandProgress >= 0.33f) {
                 if (!isPulledDown) {
@@ -774,7 +819,13 @@ public abstract class ProfileStyleActivity extends BaseFragment {
             }
         } else {
             // ---- normal: collapse into the action bar as the list scrolls up ----
-            avatarScale = AndroidUtilities.lerp(24f, 96f, diff) / 100f;
+            // Shrink into the punch-hole's own size when there is one, so the two actually meet.
+            float intoSize = 24f;
+            if (avatarGooey != null && avatarGooey.notchInfo != null && avatarGooey.notchInfo.isLikelyCircle) {
+                intoSize = 0.5f * avatarGooey.notchInfo.bounds.width() / AndroidUtilities.density;
+            }
+            avatarScale = AndroidUtilities.lerp(intoSize, 96f, diff) / 100f;
+            pullUpProgress = 1.0f - diff;
             if (!expandAnimator.isRunning()) {
                 final FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) avatarContainer.getLayoutParams();
                 if (params.width != dp(100) || params.height != dp(100)) {
