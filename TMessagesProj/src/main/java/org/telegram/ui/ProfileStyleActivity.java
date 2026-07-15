@@ -335,7 +335,15 @@ public abstract class ProfileStyleActivity extends BaseFragment {
                 // rests at getHeaderExtraHeight(). Straight out of ProfileActivity#onMeasure.
                 ignoreLayout = true;
                 final int paddingTop = listView.getMeasuredWidth() + getActionsExtraHeight();
-                final int paddingBottom = Math.max(0, getMeasuredHeight() - (listContentHeight + getHeaderExtraHeight() + actionBarHeight));
+                // Enough empty room under the rows that row 0 can always be scrolled to the very top,
+                // i.e. extraHeight can reach 0 and the collapse (and its gooey) can finish. Without it
+                // the list simply runs out of scroll and the avatar freezes half-swallowed.
+                //
+                // ProfileActivity computes this as height - (content + headerExtra + actionBar), which
+                // only works there because a profile always carries SharedMediaLayout and that counts as
+                // a whole viewport of content (see its listContentHeight loop) — so its content alone
+                // already covers the scroll. Ours is a handful of rows, so the padding has to cover it.
+                final int paddingBottom = Math.max(0, listView.getMeasuredHeight() - listContentHeight);
                 final int currentPaddingTop = listView.getPaddingTop();
 
                 View child = null;
