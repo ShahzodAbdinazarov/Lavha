@@ -19,7 +19,6 @@ import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.svipe.SvipeMusicResolver;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.SharedAudioCell;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.ProfileActionsView;
@@ -226,7 +225,7 @@ public class MusicArtistActivity extends ProfileStyleActivity {
             Context context = parent.getContext();
             View view;
             if (viewType == ROW_SECTION) {
-                view = new HeaderCell(context, getResourceProvider());
+                view = createTabPillRow(context, getString(R.string.SvipeMusicSongs));
             } else {
                 view = new SharedAudioCell(context, getResourceProvider());
             }
@@ -237,7 +236,7 @@ public class MusicArtistActivity extends ProfileStyleActivity {
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
             if (holder.getItemViewType() == ROW_SECTION) {
-                ((HeaderCell) holder.itemView).setText(getString(R.string.SvipeMusicSongs) + " (" + songs.size() + ")");
+                // the tab pill is static
             } else {
                 SvipeMusic.Song s = songs.get(position - 1);
                 MessageObject mo = moBySongId.get(s.id);

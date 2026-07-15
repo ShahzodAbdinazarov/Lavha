@@ -37,6 +37,11 @@ import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.ProfileActionsView;
 import org.telegram.ui.Components.ProfileGooeyView;
+import org.telegram.ui.Components.ScrollSlidingTextTabStrip;
+import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
+import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
+import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
+import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceColor;
 import org.telegram.ui.Components.RecyclerListView;
 
 import java.util.ArrayList;
@@ -160,6 +165,48 @@ public abstract class ProfileStyleActivity extends BaseFragment {
     /** Call after swapping the avatar image in, so the pull-down expand can enable itself. */
     protected void onAvatarChanged() {
         needLayout(false);
+    }
+
+    /**
+     * The profile's own tab pill, for a list that has a single section — the same widget and the same
+     * settings SharedMediaLayout gives its Media/Links/Music strip, so the row reads identically.
+     *
+     * <p>SharedMediaLayout's own ScrollSlidingTextTabStripInner is a non-static inner class, so it
+     * cannot be built without a SharedMediaLayout (which wants a real dialog). All it adds over the
+     * public base is a background, and the base already draws the tabs and the rounded selector — so
+     * the base is used with SharedMediaLayout's colours, and the pill behind it comes from the same
+     * blur3 factory, fed by a plain colour source. That is SharedMediaLayout's own fallback for when
+     * no liquid-glass factory is handed to it, minus the render-node pipeline.
+     */
+    protected View createTabPillRow(Context context, CharSequence title) {
+        final ScrollSlidingTextTabStrip strip = new ScrollSlidingTextTabStrip(context, getResourceProvider());
+        strip.setColors(Theme.key_profile_tabSelectedLine, Theme.key_profile_tabSelectedText, Theme.key_profile_tabText, Theme.key_profile_tabSelector);
+        strip.setUseMinimalWidth(true);
+        strip.addTextTab(0, title);
+        strip.finishAddingTabs();
+        strip.setInitialTabId(0);
+
+        try {
+            final BlurredBackgroundSourceColor source = new BlurredBackgroundSourceColor();
+            source.setColor(getThemedColor(Theme.key_windowBackgroundWhite));
+            final BlurredBackgroundDrawableViewFactory factory = new BlurredBackgroundDrawableViewFactory(source);
+            final BlurredBackgroundDrawable pill = factory.create(strip, BlurredBackgroundProviderImpl.topPanel(getResourceProvider()));
+            pill.setRadius(dp(18));
+            pill.setPadding(dp(6.666f));
+            strip.setPadding(0, dp(7), 0, dp(7));
+            strip.setClipToPadding(false);
+            strip.setBackground(null);
+            strip.setBlurredBackground(pill);
+            strip.setOpen(false);
+        } catch (Throwable ignore) {
+            // No pill is better than no tab.
+        }
+
+        final FrameLayout row = new FrameLayout(context);
+        row.addView(strip, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 50, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 8, 0, 8));
+        // Sits on the grey background above the card, like the real one — keep it out of the section.
+        row.setTag(RecyclerListView.TAG_NOT_SECTION);
+        return row;
     }
 
     /**
