@@ -640,6 +640,20 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         onlineY = avatarBottom + dp(24) + (float) Math.floor(11 * AndroidUtilities.density) * diff;
     }
 
+    /**
+     * On-screen height of the expanded cover: the whole header, so it re-crops on every scrolled pixel.
+     *
+     * <p>Not squared. The {@code Math.min(thisHeight, thisWidth)} in AvatarImageView#onDraw only applies
+     * while the expand animation is still running: the moment it ends ProfileActivity hides
+     * avatarContainer entirely and hands over to avatarsViewPager, sized {@code h + newTop} with no
+     * clamp — so the settled cover fills the header, and the blur is an overlay on its bottom rather
+     * than filler under a square. Clamping here instead leaves the photo motionless for the ~74dp of
+     * scrolling that only eats the strip, which is the dead zone this replaces.
+     */
+    private float coverHeightPx(float extra) {
+        return extra + newTop();
+    }
+
     /** ProfileActivity#fixAvatarImageInCenter */
     private void fixAvatarImageInCenter() {
         final FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) avatarContainer.getLayoutParams();
@@ -725,12 +739,9 @@ public abstract class ProfileStyleActivity extends BaseFragment {
                     nameTextView.setTranslationY(newTop + h - getActionsExtraHeight() - dpf2(30f) - nameTextView.getBottom());
                     onlineTextView.setTranslationX(dpf2(16f) - onlineTextView.getLeft());
                     onlineTextView.setTranslationY(newTop + h - getActionsExtraHeight() - dpf2(10f) - onlineTextView.getBottom());
-                    // Square, not the full header height: ProfileActivity keeps the photo square too
-                    // (AvatarImageView#onDraw clamps it with Math.min(thisHeight, thisWidth) once pulled
-                    // down) and fills what is left below with the mirrored blur.
                     final FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) avatarContainer.getLayoutParams();
                     params.width = (int) (listView.getMeasuredWidth() / avatarScale);
-                    params.height = params.width;
+                    params.height = (int) (coverHeightPx(h) / avatarScale);
                     avatarContainer.requestLayout();
                 }
             } else if (isPulledDown) {
@@ -868,7 +879,7 @@ public abstract class ProfileStyleActivity extends BaseFragment {
 
         final FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) avatarContainer.getLayoutParams();
         params.width = (int) AndroidUtilities.lerp(dpf2(100), listView.getMeasuredWidth() / avatarScale, value);
-        params.height = params.width; // stays square all the way; the blur strip covers the rest
+        params.height = (int) AndroidUtilities.lerp(dpf2(100), coverHeightPx(extraHeight) / avatarScale, value);
         fixAvatarImageInCenter();
         avatarContainer.requestLayout();
 
@@ -965,9 +976,11 @@ public abstract class ProfileStyleActivity extends BaseFragment {
             }
             final float coverTop = avatarContainer.getY();
             final float coverHeight = avatarContainer.getHeight() * avatarContainer.getScaleY();
-            final float coverBottom = coverTop + coverHeight;
             final float headerBottom = newTop() + extraHeight;
-            if (headerBottom <= coverBottom + 1 || coverHeight <= 0) {
+            // An overlay on the bottom of the cover, the height of the actions row — not a filler below
+            // it. MIRROR still matters: it keeps the strip fed once the cover is shorter than the header.
+            final float stripTop = headerBottom - getActionsExtraHeight();
+            if (coverHeight <= 0 || headerBottom <= stripTop + 1) {
                 return;
             }
             final Bitmap source = avatarImage.getImageReceiver().getBitmap();
@@ -989,7 +1002,7 @@ public abstract class ProfileStyleActivity extends BaseFragment {
             matrix.postTranslate(0, coverTop);
             shader.setLocalMatrix(matrix);
             paint.setAlpha((int) (0xFF * Math.min(1f, currentExpandAnimatorValue)));
-            canvas.drawRect(0, coverBottom, getWidth(), headerBottom, paint);
+            canvas.drawRect(0, stripTop, getWidth(), headerBottom, paint);
         }
     }
 
