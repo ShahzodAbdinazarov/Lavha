@@ -641,17 +641,22 @@ public abstract class ProfileStyleActivity extends BaseFragment {
     }
 
     /**
-     * On-screen height of the expanded cover: the whole header, so it re-crops on every scrolled pixel.
+     * On-screen height of the expanded cover: the header, but never taller than it is wide.
      *
-     * <p>Not squared. The {@code Math.min(thisHeight, thisWidth)} in AvatarImageView#onDraw only applies
-     * while the expand animation is still running: the moment it ends ProfileActivity hides
-     * avatarContainer entirely and hands over to avatarsViewPager, sized {@code h + newTop} with no
-     * clamp — so the settled cover fills the header, and the blur is an overlay on its bottom rather
-     * than filler under a square. Clamping here instead leaves the photo motionless for the ~74dp of
-     * scrolling that only eats the strip, which is the dead zone this replaces.
+     * <p>This is ProfileActivity's {@code Math.min(thisHeight, thisWidth)} from AvatarImageView#onDraw,
+     * moved to layout — there the container is the whole header and the photo is squared while drawing,
+     * here the container *is* the photo and {@link CoverBlurView} fills what is left below it.
+     *
+     * <p>Measured off a real expanded channel profile, which settles this: the avatar spans the full
+     * width uncropped (its ring runs x=3..1077) and stays circular, i.e. the photo is drawn square and
+     * the rest of the header is the blur — it is not scaled to cover the header.
+     *
+     * <p>Both halves matter. The clamp keeps the photo whole; tracking the header keeps it moving —
+     * pinning the height square instead (params.height = params.width) freezes the photo, and overflows
+     * it onto the list, the moment the header gets shorter than it is wide.
      */
     private float coverHeightPx(float extra) {
-        return extra + newTop();
+        return Math.min(extra + newTop(), listView.getMeasuredWidth());
     }
 
     /** ProfileActivity#fixAvatarImageInCenter */
@@ -976,12 +981,10 @@ public abstract class ProfileStyleActivity extends BaseFragment {
             }
             final float coverTop = avatarContainer.getY();
             final float coverHeight = avatarContainer.getHeight() * avatarContainer.getScaleY();
+            final float stripTop = coverTop + coverHeight;
             final float headerBottom = newTop() + extraHeight;
-            // An overlay on the bottom of the cover, the height of the actions row — not a filler below
-            // it. MIRROR still matters: it keeps the strip fed once the cover is shorter than the header.
-            final float stripTop = headerBottom - getActionsExtraHeight();
             if (coverHeight <= 0 || headerBottom <= stripTop + 1) {
-                return;
+                return; // header no taller than the photo: nothing left to fill
             }
             final Bitmap source = avatarImage.getImageReceiver().getBitmap();
             if (source == null || source.isRecycled()) {
