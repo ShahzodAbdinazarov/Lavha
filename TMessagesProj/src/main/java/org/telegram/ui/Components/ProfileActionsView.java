@@ -108,6 +108,8 @@ public class ProfileActionsView extends View {
     public static final int KEY_EDIT_INFO = 16;
     public static final int KEY_SETTINGS = 17;
     public static final int KEY_CONTACTS = 18;
+    public static final int KEY_PLAY = 19;
+    public static final int KEY_SHUFFLE = 20;
 
     private boolean isApplying;
     private boolean isNotificationsEnabled;
@@ -651,6 +653,19 @@ public class ProfileActionsView extends View {
         final Action action = new Action(ActionButton.CONTACTS);
         action.key = KEY_CONTACTS;
         actions.add(action);
+    }
+
+    /**
+     * Adds an action directly, for MODE_MY_PROFILE-style screens whose button row is fixed rather than
+     * derived from a peer. applyVisibleActions() short-circuits in that mode, so the list added here is
+     * exactly what gets drawn.
+     */
+    public void addAction(ActionButton button, int key) {
+        final Action action = new Action(button);
+        action.key = key;
+        actions.add(action);
+        activeCount = actions.size();
+        invalidate();
     }
 
     public void startAnimatedActions() {
@@ -1240,7 +1255,9 @@ public class ProfileActionsView extends View {
         EDIT_USERNAME(R.string.ProfileActionsEditUsername, R.drawable.filled_profile_edit_24, R.drawable.outline_profile_edit_24),
         EDIT_INFO(R.string.ProfileActionsEditInfo, R.drawable.filled_profile_edit_24, R.drawable.outline_profile_edit_24),
         SETTINGS(R.string.Settings, R.drawable.filled_profile_settings, R.drawable.outline_profile_settings),
-        CONTACTS(R.string.Contacts, R.drawable.filled_profile_member_24, R.drawable.outline_profile_member_24),;
+        CONTACTS(R.string.Contacts, R.drawable.filled_profile_member_24, R.drawable.outline_profile_member_24),
+        PLAY(R.string.SvipeMusicPlay, R.drawable.filled_gift_play_24, R.drawable.filled_gift_play_24),
+        SHUFFLE(R.string.SvipeMusicShuffle, R.drawable.filled_poll_shuffle_24, R.drawable.filled_poll_shuffle_24),;
 
         final @StringRes int title;
         final @DrawableRes int filledIcon;

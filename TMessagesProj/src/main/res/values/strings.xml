@@ -10927,6 +10927,12 @@
     <string name="SvipeCommentsDisabled">Izohlar o\'chirilgan</string>
     <string name="SvipeCommentsDisabledSub">Bu post uchun izohlar yoqilmagan</string>
 
+    <!-- Svipe music profile actions -->
+    <string name="SvipeMusicPlay">Ijro</string>
+    <string name="SvipeMusicShuffle">Aralash</string>
+    <string name="SvipeMusicVersions">Versiyalar</string>
+    <string name="SvipeMusicSongs">Qo\'shiqlar</string>
+
     <string name="WearAuthTitle">Use Telegram with WearOS</string>
     <string name="WearAuthText">Connect your account to WatchOS device\nto use it separately from your watch.</string>
     <string name="WearAuthEmojis">Compare emojis on your watch</string>
