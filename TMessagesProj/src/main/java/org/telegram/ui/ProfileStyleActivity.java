@@ -581,8 +581,8 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         listView.setPadding(0, initialPaddingTop, 0, 0);
         listView.setAdapter(outerAdapter = new OuterAdapter());
         listView.setOnItemClickListener((view, position) -> {
-            if (position < getHeaderRowCount()) {
-                onHeaderRowClick(position);
+            if (position >= 1 && position <= getHeaderRowCount()) {
+                onHeaderRowClick(position - 1);
             }
         });
         layoutManager.scrollToPositionWithOffset(0, getHeaderExtraHeight() - initialPaddingTop);
@@ -928,7 +928,7 @@ public abstract class ProfileStyleActivity extends BaseFragment {
 
     /** The outer list is one row: the section. ProfileActivity's list is the same shape, with more rows. */
     private class OuterAdapter extends RecyclerListView.SelectionAdapter {
-        static final int VIEW_HEADER_ROW = 0, VIEW_SECTION = 1;
+        static final int VIEW_SPACER = 0, VIEW_HEADER_ROW = 1, VIEW_SECTION = 2;
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
@@ -937,17 +937,35 @@ public abstract class ProfileStyleActivity extends BaseFragment {
 
         @Override
         public int getItemCount() {
-            return getHeaderRowCount() + 1;
+            return 1 + getHeaderRowCount() + 1; // spacer + header rows + section
         }
 
         @Override
         public int getItemViewType(int position) {
-            return position < getHeaderRowCount() ? VIEW_HEADER_ROW : VIEW_SECTION;
+            if (position == 0) {
+                return VIEW_SPACER;
+            }
+            return position <= getHeaderRowCount() ? VIEW_HEADER_ROW : VIEW_SECTION;
         }
 
         @NonNull
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull android.view.ViewGroup parent, int viewType) {
+            if (viewType == VIEW_SPACER) {
+                // ProfileActivity#VIEW_TYPE_EMPTY: its list starts with one of these, which is what
+                // keeps the first card off the bottom edge of the header. dp(6) is the size it picks
+                // for our case (an actions row, no peer colour, no saved music).
+                final View spacer = new View(parent.getContext()) {
+                    @Override
+                    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                        super.onMeasure(
+                                View.MeasureSpec.makeMeasureSpec(View.MeasureSpec.getSize(widthMeasureSpec), View.MeasureSpec.EXACTLY),
+                                View.MeasureSpec.makeMeasureSpec(dp(6), View.MeasureSpec.EXACTLY));
+                    }
+                };
+                spacer.setTag(RecyclerListView.TAG_NOT_SECTION);
+                return new RecyclerListView.Holder(spacer);
+            }
             if (viewType == VIEW_HEADER_ROW) {
                 View row = createHeaderRow(parent.getContext());
                 row.setLayoutParams(new RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT, RecyclerView.LayoutParams.WRAP_CONTENT));
@@ -967,7 +985,7 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
             if (holder.getItemViewType() == VIEW_HEADER_ROW) {
-                bindHeaderRow(holder.itemView, position);
+                bindHeaderRow(holder.itemView, position - 1);
             }
         }
 
