@@ -641,22 +641,20 @@ public abstract class ProfileStyleActivity extends BaseFragment {
     }
 
     /**
-     * On-screen height of the expanded cover: the header, but never taller than it is wide.
+     * On-screen height of the expanded cover: the header minus the strip the buttons sit on.
      *
-     * <p>This is ProfileActivity's {@code Math.min(thisHeight, thisWidth)} from AvatarImageView#onDraw,
-     * moved to layout — there the container is the whole header and the photo is squared while drawing,
-     * here the container *is* the photo and {@link CoverBlurView} fills what is left below it.
+     * <p>Square at rest falls out of this rather than being imposed: the list's top padding is
+     * {@code width + actionsExtraHeight}, so at full expansion the header is exactly that and the photo
+     * is left exactly {@code width} tall. Scroll up and the box shortens into a rectangle while the
+     * strip keeps its height — the photo is centre-cropped inside it, which is why the picture rises by
+     * half of what the finger moves.
      *
-     * <p>Measured off a real expanded channel profile, which settles this: the avatar spans the full
-     * width uncropped (its ring runs x=3..1077) and stays circular, i.e. the photo is drawn square and
-     * the rest of the header is the blur — it is not scaled to cover the header.
-     *
-     * <p>Both halves matter. The clamp keeps the photo whole; tracking the header keeps it moving —
-     * pinning the height square instead (params.height = params.width) freezes the photo, and overflows
-     * it onto the list, the moment the header gets shorter than it is wide.
+     * <p>Clamping to a square instead (either pinned, or via min(header, width)) is wrong in both
+     * directions: pinned it freezes and overflows the list, and min() keeps the strip only while the
+     * header is taller than wide, so the reflection vanishes the moment you start scrolling.
      */
     private float coverHeightPx(float extra) {
-        return Math.min(extra + newTop(), listView.getMeasuredWidth());
+        return Math.max(0, extra + newTop() - getActionsExtraHeight());
     }
 
     /** ProfileActivity#fixAvatarImageInCenter */
@@ -965,8 +963,8 @@ public abstract class ProfileStyleActivity extends BaseFragment {
     private class CoverBlurView extends View {
         private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
         private final Matrix matrix = new Matrix();
-        private Bitmap blurred;
-        private Bitmap blurredFrom;
+        private final Canvas frameCanvas = new Canvas();
+        private Bitmap frame;
         private BitmapShader shader;
 
         CoverBlurView(Context context) {
@@ -983,25 +981,41 @@ public abstract class ProfileStyleActivity extends BaseFragment {
             final float coverHeight = avatarContainer.getHeight() * avatarContainer.getScaleY();
             final float stripTop = coverTop + coverHeight;
             final float headerBottom = newTop() + extraHeight;
-            if (coverHeight <= 0 || headerBottom <= stripTop + 1) {
-                return; // header no taller than the photo: nothing left to fill
-            }
-            final Bitmap source = avatarImage.getImageReceiver().getBitmap();
-            if (source == null || source.isRecycled()) {
+            final int srcW = avatarImage.getMeasuredWidth();
+            final int srcH = avatarImage.getMeasuredHeight();
+            if (coverHeight <= 0 || headerBottom <= stripTop + 1 || srcW <= 0 || srcH <= 0 || getWidth() <= 0) {
                 return;
             }
-            if (blurred == null || blurredFrom != source || blurred.isRecycled()) {
-                try {
-                    blurred = Utilities.stackBlurBitmapMax(source);
-                } catch (Throwable ignore) {
-                    return;
+
+            // Re-shot every frame off avatarImage itself, so the reflection is of what is on screen right
+            // now — the photo is centre-cropped as the box shortens, and a blur of the original bitmap
+            // would reflect rows that are no longer visible. ProfileGalleryBlurView does the same thing
+            // with the gallery pager, and these are its numbers: viewport/6 wide, stack blur radius 10.
+            final int fw = Math.max(1, (int) (getWidth() / 6f));
+            final int fh = Math.max(1, Math.round(fw * (coverHeight / (float) getWidth())));
+            try {
+                if (frame == null || frame.getWidth() != fw || frame.getHeight() != fh) {
+                    if (frame != null) {
+                        frame.recycle();
+                    }
+                    frame = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888);
+                    frameCanvas.setBitmap(frame);
+                    shader = new BitmapShader(frame, Shader.TileMode.MIRROR, Shader.TileMode.MIRROR);
+                    paint.setShader(shader);
                 }
-                blurredFrom = source;
-                shader = new BitmapShader(blurred, Shader.TileMode.MIRROR, Shader.TileMode.MIRROR);
-                paint.setShader(shader);
+                frame.eraseColor(0);
+                frameCanvas.save();
+                frameCanvas.scale(fw / (float) srcW, fh / (float) srcH);
+                avatarImage.draw(frameCanvas);
+                frameCanvas.restore();
+                Utilities.stackBlurBitmap(frame, Math.max(10, fw / 180));
+            } catch (Throwable ignore) {
+                return;
             }
+
+            // Map the shot onto exactly the visible photo, so MIRROR reflects it about its bottom edge.
             matrix.reset();
-            matrix.setScale(getWidth() / (float) blurred.getWidth(), coverHeight / blurred.getHeight());
+            matrix.setScale(getWidth() / (float) fw, coverHeight / fh);
             matrix.postTranslate(0, coverTop);
             shader.setLocalMatrix(matrix);
             paint.setAlpha((int) (0xFF * Math.min(1f, currentExpandAnimatorValue)));
