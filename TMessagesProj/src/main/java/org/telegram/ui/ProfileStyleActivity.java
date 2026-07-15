@@ -2,6 +2,8 @@ package org.telegram.ui;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
+import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -17,6 +19,10 @@ import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.widget.FrameLayout;
 
+import androidx.annotation.NonNull;
+import androidx.core.view.NestedScrollingParent3;
+import androidx.core.view.NestedScrollingParentHelper;
+import androidx.core.view.ViewCompat;
 import androidx.core.graphics.ColorUtils;
 import androidx.core.math.MathUtils;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -83,6 +89,11 @@ public abstract class ProfileStyleActivity extends BaseFragment {
     private FrameLayout avatarContainer2;
     private FrameLayout avatarContainer;
     private ProfileGooeyView avatarGooey;
+    private MediaSectionView mediaSection;
+    private boolean mediaSectionAttached;
+    private boolean mediaHeaderVisible;
+    private float mediaHeaderAnimationProgress;
+    private AnimatorSet headerAnimatorSet;
 
     protected ProfileActivity.AvatarImageView avatarImage;
     protected final AvatarDrawable avatarDrawable = new AvatarDrawable();
@@ -167,46 +178,74 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         needLayout(false);
     }
 
-    /**
-     * The profile's own tab pill, for a list that has a single section — the same widget and the same
-     * settings SharedMediaLayout gives its Media/Links/Music strip, so the row reads identically.
-     *
-     * <p>SharedMediaLayout's own ScrollSlidingTextTabStripInner is a non-static inner class, so it
-     * cannot be built without a SharedMediaLayout (which wants a real dialog). All it adds over the
-     * public base is a background, and the base already draws the tabs and the rounded selector — so
-     * the base is used with SharedMediaLayout's colours, and the pill behind it comes from the same
-     * blur3 factory, fed by a plain colour source. That is SharedMediaLayout's own fallback for when
-     * no liquid-glass factory is handed to it, minus the render-node pipeline.
-     */
-    protected View createTabPillRow(Context context, CharSequence title) {
-        final ScrollSlidingTextTabStrip strip = new ScrollSlidingTextTabStrip(context, getResourceProvider());
-        strip.setColors(Theme.key_profile_tabSelectedLine, Theme.key_profile_tabSelectedText, Theme.key_profile_tabText, Theme.key_profile_tabSelector);
-        strip.setUseMinimalWidth(true);
-        strip.addTextTab(0, title);
-        strip.finishAddingTabs();
-        strip.setInitialTabId(0);
+    /** Title for the single tab in the pinned strip. */
+    protected abstract CharSequence getTabTitle();
 
-        try {
-            final BlurredBackgroundSourceColor source = new BlurredBackgroundSourceColor();
-            source.setColor(getThemedColor(Theme.key_windowBackgroundWhite));
-            final BlurredBackgroundDrawableViewFactory factory = new BlurredBackgroundDrawableViewFactory(source);
-            final BlurredBackgroundDrawable pill = factory.create(strip, BlurredBackgroundProviderImpl.topPanel(getResourceProvider()));
-            pill.setRadius(dp(18));
-            pill.setPadding(dp(6.666f));
-            strip.setPadding(0, dp(7), 0, dp(7));
-            strip.setClipToPadding(false);
-            strip.setBackground(null);
-            strip.setBlurredBackground(pill);
-            strip.setOpen(false);
-        } catch (Throwable ignore) {
-            // No pill is better than no tab.
+    /**
+     * SharedMediaLayout's shape, reduced to one tab.
+     *
+     * <p>This is what makes the strip pin: it is not the strip that sticks, it is that the whole
+     * section is a single row of the outer list, as tall as the viewport, with the strip at its top
+     * and its own list underneath. Scroll the outer list and the row reaches the top and stops; from
+     * then on the inner list scrolls under a strip that simply never moved. SharedMediaLayout itself
+     * (12k lines, wants a dialogId + SharedMediaPreloader + chatInfo) can't be reused, so this
+     * rebuilds only that skeleton — the strip is still the same widget with its colours.
+     */
+    protected class MediaSectionView extends FrameLayout {
+        final ScrollSlidingTextTabStrip tabStrip;
+        final RecyclerListView innerListView;
+
+        MediaSectionView(Context context) {
+            super(context);
+
+            innerListView = new RecyclerListView(context);
+            innerListView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
+            innerListView.setGlowColor(0);
+            innerListView.setClipToPadding(false);
+            // Rows pass under the strip rather than starting below it, as in the original.
+            innerListView.setPadding(0, dp(66), 0, 0);
+            innerListView.setSections();
+            innerListView.applyPaddingToSections = false;
+            innerListView.setAdapter(createListAdapter());
+            innerListView.setOnItemClickListener(ProfileStyleActivity.this::onListItemClick);
+            innerListView.setOnItemLongClickListener(ProfileStyleActivity.this::onListItemLongClick);
+            addView(innerListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+            tabStrip = new ScrollSlidingTextTabStrip(context, getResourceProvider());
+            tabStrip.setColors(Theme.key_profile_tabSelectedLine, Theme.key_profile_tabSelectedText, Theme.key_profile_tabText, Theme.key_profile_tabSelector);
+            tabStrip.setUseMinimalWidth(true);
+            tabStrip.addTextTab(0, getTabTitle());
+            tabStrip.finishAddingTabs();
+            tabStrip.setInitialTabId(0);
+            try {
+                // SharedMediaLayout's own fallback for when it is handed no liquid-glass factory:
+                // the same drawable off a plain colour source, without the render-node pipeline.
+                final BlurredBackgroundSourceColor source = new BlurredBackgroundSourceColor();
+                source.setColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                final BlurredBackgroundDrawable pill = new BlurredBackgroundDrawableViewFactory(source)
+                        .create(tabStrip, BlurredBackgroundProviderImpl.topPanel(getResourceProvider()));
+                pill.setRadius(dp(18));
+                pill.setPadding(dp(6.666f));
+                tabStrip.setPadding(0, dp(7), 0, dp(7));
+                tabStrip.setClipToPadding(false);
+                tabStrip.setBackground(null);
+                tabStrip.setBlurredBackground(pill);
+                tabStrip.setOpen(false);
+            } catch (Throwable ignore) {
+                // No pill is better than no tab.
+            }
+            addView(tabStrip, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 50, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 8, 0, 8));
         }
 
-        final FrameLayout row = new FrameLayout(context);
-        row.addView(strip, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 50, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 8, 0, 8));
-        // Sits on the grey background above the card, like the real one — keep it out of the section.
-        row.setTag(RecyclerListView.TAG_NOT_SECTION);
-        return row;
+        /** A viewport tall, whatever the rows say — SharedMediaLayout#onMeasure does the same. */
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            int h = listView != null ? listView.getHeight() : 0;
+            if (h == 0) {
+                h = View.MeasureSpec.getSize(heightMeasureSpec);
+            }
+            super.onMeasure(widthMeasureSpec, View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+        }
     }
 
     /**
@@ -350,7 +389,7 @@ public abstract class ProfileStyleActivity extends BaseFragment {
             }
         });
 
-        frameLayout = new FrameLayout(context) {
+        frameLayout = new NestedFrameLayout(context) {
             private boolean ignoreLayout;
             private int lastMeasuredWidth, lastMeasuredHeight;
             private int listContentHeight;
@@ -390,7 +429,7 @@ public abstract class ProfileStyleActivity extends BaseFragment {
                 // only works there because a profile always carries SharedMediaLayout and that counts as
                 // a whole viewport of content (see its listContentHeight loop) — so its content alone
                 // already covers the scroll. Ours is a handful of rows, so the padding has to cover it.
-                final int paddingBottom = Math.max(0, listView.getMeasuredHeight() - listContentHeight);
+                final int paddingBottom = 0; // the section row is already a viewport tall
                 final int currentPaddingTop = listView.getPaddingTop();
 
                 View child = null;
@@ -518,10 +557,8 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         // Corrected against the real measured width in onMeasure; this keeps the very first frame right.
         final int initialPaddingTop = AndroidUtilities.displaySize.x + getActionsExtraHeight();
         listView.setPadding(0, initialPaddingTop, 0, 0);
-        listView.setAdapter(createListAdapter());
+        listView.setAdapter(new OuterAdapter());
         layoutManager.scrollToPositionWithOffset(0, getHeaderExtraHeight() - initialPaddingTop);
-        listView.setOnItemClickListener(this::onListItemClick);
-        listView.setOnItemLongClickListener(this::onListItemLongClick);
         listView.setOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
@@ -748,6 +785,160 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         avatarGooey.setBlurIntensity(Math.min((MathUtils.clamp(pullUpProgress, 0.2f, 0.7f) - 0.2f) / 0.5f, 0.75f));
         avatarGooey.setGooeyEnabled(pullUpProgress > 0 && pullUpProgress < 1);
         avatarGooey.setVisibility(pullUpProgress >= 1.0f ? View.GONE : View.VISIBLE);
+    }
+
+    /**
+     * ProfileActivity#setMediaHeaderVisible, minus its menu plumbing (it spends most of its length on
+     * callItem/videoCallItem/editItem/otherItem and SharedMediaLayout's search+options items, none of
+     * which exist here). What is left is the part that is actually visible: the big name/status fade
+     * out, the action bar's own title/subtitle fade in, and mediaHeaderAnimationProgress — which is
+     * what repaints the bar, since TopView draws windowBackgroundWhite from y1 up once it is 1.
+     */
+    private void setMediaHeaderVisible(boolean visible) {
+        if (mediaHeaderVisible == visible) {
+            return;
+        }
+        mediaHeaderVisible = visible;
+        if (headerAnimatorSet != null) {
+            headerAnimatorSet.cancel();
+        }
+        actionBar.setTitle(visible && nameTextView != null ? nameTextView.getText() : "");
+        actionBar.setSubtitle(visible && onlineTextView != null ? onlineTextView.getText() : "");
+
+        final ValueAnimator progress = ValueAnimator.ofFloat(mediaHeaderAnimationProgress, visible ? 1f : 0f);
+        progress.addUpdateListener(a -> {
+            mediaHeaderAnimationProgress = (float) a.getAnimatedValue();
+            topView.invalidate();
+            if (scrimView != null) {
+                scrimView.invalidate();
+            }
+        });
+        final ArrayList<Animator> animators = new ArrayList<>();
+        animators.add(progress);
+        animators.add(ObjectAnimator.ofFloat(nameTextView, View.ALPHA, visible ? 0f : 1f));
+        animators.add(ObjectAnimator.ofFloat(onlineTextView, View.ALPHA, visible ? 0f : 1f));
+        if (actionsView != null) {
+            animators.add(ObjectAnimator.ofFloat(actionsView, View.ALPHA, visible ? 0f : 1f));
+        }
+        headerAnimatorSet = new AnimatorSet();
+        headerAnimatorSet.playTogether(animators);
+        headerAnimatorSet.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+        headerAnimatorSet.setDuration(150);
+        headerAnimatorSet.start();
+    }
+
+    /**
+     * ProfileActivity#NestedFrameLayout. The outer list scrolls until the section row reaches the top;
+     * from there every remaining pixel is handed to the inner list, which is what lets the strip stay
+     * put while its rows keep moving. Copied as-is with sharedMediaLayout -> mediaSection.
+     */
+    private class NestedFrameLayout extends FrameLayout implements NestedScrollingParent3 {
+        private final NestedScrollingParentHelper helper;
+
+        public NestedFrameLayout(Context context) {
+            super(context);
+            helper = new NestedScrollingParentHelper(this);
+        }
+
+        @Override
+        public void onNestedScroll(View target, int dxConsumed, int dyConsumed, int dxUnconsumed, int dyUnconsumed, int type, int[] consumed) {
+            if (target == listView && mediaSectionAttached && mediaSection != null) {
+                if (mediaSection.getTop() == 0) {
+                    consumed[1] = dyUnconsumed;
+                    mediaSection.innerListView.scrollBy(0, dyUnconsumed);
+                }
+            }
+        }
+
+        @Override
+        public void onNestedScroll(View target, int dxConsumed, int dyConsumed, int dxUnconsumed, int dyUnconsumed, int type) {
+        }
+
+        @Override
+        public void onNestedPreScroll(View target, int dx, int dy, int[] consumed, int type) {
+            if (target == listView && mediaSectionAttached && mediaSection != null && dy < 0) {
+                if (mediaSection.getTop() <= 0) {
+                    final RecyclerListView inner = mediaSection.innerListView;
+                    final LinearLayoutManager lm = (LinearLayoutManager) inner.getLayoutManager();
+                    if (lm != null) {
+                        final int pos = lm.findFirstVisibleItemPosition();
+                        if (pos != RecyclerView.NO_POSITION) {
+                            RecyclerView.ViewHolder holder = inner.findViewHolderForAdapterPosition(pos);
+                            final int top = holder != null ? holder.itemView.getTop() : -1;
+                            final int paddingTop = inner.getPaddingTop();
+                            if (top != paddingTop || pos != 0) {
+                                consumed[1] = pos != 0 ? dy : Math.max(dy, (top - paddingTop));
+                                inner.scrollBy(0, dy);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        @Override
+        public boolean onStartNestedScroll(View child, View target, int axes, int type) {
+            return axes == ViewCompat.SCROLL_AXIS_VERTICAL;
+        }
+
+        @Override
+        public void onNestedScrollAccepted(View child, View target, int axes, int type) {
+            helper.onNestedScrollAccepted(child, target, axes);
+        }
+
+        @Override
+        public void onStopNestedScroll(View target, int type) {
+            helper.onStopNestedScroll(target);
+        }
+
+        @Override
+        public void onStopNestedScroll(View child) {
+        }
+    }
+
+    /** The outer list is one row: the section. ProfileActivity's list is the same shape, with more rows. */
+    private class OuterAdapter extends RecyclerListView.SelectionAdapter {
+        @Override
+        public boolean isEnabled(RecyclerView.ViewHolder holder) {
+            return false;
+        }
+
+        @Override
+        public int getItemCount() {
+            return 1;
+        }
+
+        @NonNull
+        @Override
+        public RecyclerView.ViewHolder onCreateViewHolder(@NonNull android.view.ViewGroup parent, int viewType) {
+            if (mediaSection == null) {
+                mediaSection = new MediaSectionView(parent.getContext());
+            }
+            if (mediaSection.getParent() != null) {
+                ((android.view.ViewGroup) mediaSection.getParent()).removeView(mediaSection);
+            }
+            mediaSection.setTag(RecyclerListView.TAG_NOT_SECTION);
+            mediaSection.setLayoutParams(new RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT, RecyclerView.LayoutParams.MATCH_PARENT));
+            return new RecyclerListView.Holder(mediaSection);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
+        }
+
+        @Override
+        public void onViewAttachedToWindow(@NonNull RecyclerView.ViewHolder holder) {
+            if (holder.itemView == mediaSection) {
+                mediaSectionAttached = true;
+            }
+        }
+
+        @Override
+        public void onViewDetachedFromWindow(@NonNull RecyclerView.ViewHolder holder) {
+            if (holder.itemView == mediaSection) {
+                mediaSectionAttached = false;
+            }
+        }
     }
 
     /** ProfileActivity#fixAvatarImageInCenter */

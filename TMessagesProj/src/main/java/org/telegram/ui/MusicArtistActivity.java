@@ -37,9 +37,6 @@ import java.util.HashMap;
  */
 public class MusicArtistActivity extends ProfileStyleActivity {
 
-    private static final int ROW_SECTION = 0;
-    private static final int ROW_SONG = 1;
-
     private final long artistId;
     private final String initialName;
 
@@ -84,6 +81,11 @@ public class MusicArtistActivity extends ProfileStyleActivity {
     }
 
     @Override
+    protected CharSequence getTabTitle() {
+        return getString(R.string.SvipeMusicSongs);
+    }
+
+    @Override
     protected void onCreateActions(ProfileActionsView view) {
         view.addAction(ProfileActionsView.ActionButton.PLAY, ProfileActionsView.KEY_PLAY);
         view.addAction(ProfileActionsView.ActionButton.SHUFFLE, ProfileActionsView.KEY_SHUFFLE);
@@ -114,7 +116,7 @@ public class MusicArtistActivity extends ProfileStyleActivity {
 
     @Override
     protected void onListItemClick(View view, int position) {
-        int idx = position - 1; // ROW_SECTION precedes the song rows
+        int idx = position;
         if (idx >= 0 && idx < songs.size()) {
             SvipeMusic.Song s = songs.get(idx);
             presentFragment(new MusicSongActivity(s.id, s.title));
@@ -206,45 +208,30 @@ public class MusicArtistActivity extends ProfileStyleActivity {
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return holder.getItemViewType() == ROW_SONG;
+            return true;
         }
 
         @Override
         public int getItemCount() {
-            return songs.isEmpty() ? 0 : 1 + songs.size(); // section + songs
-        }
-
-        @Override
-        public int getItemViewType(int position) {
-            return position == 0 ? ROW_SECTION : ROW_SONG;
+            return songs.size();
         }
 
         @NonNull
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull android.view.ViewGroup parent, int viewType) {
-            Context context = parent.getContext();
-            View view;
-            if (viewType == ROW_SECTION) {
-                view = createTabPillRow(context, getString(R.string.SvipeMusicSongs));
-            } else {
-                view = new SharedAudioCell(context, getResourceProvider());
-            }
+            View view = new SharedAudioCell(parent.getContext(), getResourceProvider());
             view.setLayoutParams(new RecyclerView.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
             return new RecyclerListView.Holder(view);
         }
 
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
-            if (holder.getItemViewType() == ROW_SECTION) {
-                // the tab pill is static
-            } else {
-                SvipeMusic.Song s = songs.get(position - 1);
+            SvipeMusic.Song s = songs.get(position);
                 MessageObject mo = moBySongId.get(s.id);
                 SharedAudioCell cell = (SharedAudioCell) holder.itemView;
                 if (mo != null) {
                     cell.setMessageObject(mo, position != getItemCount() - 1);
                 }
-            }
         }
     }
 }
