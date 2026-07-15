@@ -10920,22 +10920,58 @@
     <string name="SvipeIntroStart">Start Sviping</string>
 
     <!-- Svipe reels comments sheet -->
-    <string name="SvipeComments">Izohlar</string>
-    <string name="SvipeCommentHint">Izoh qo\'shing…</string>
-    <string name="SvipeNoComments">Hozircha izohlar yo\'q</string>
-    <string name="SvipeNoCommentsSub">Birinchi bo\'lib fikr bildiring</string>
-    <string name="SvipeCommentsDisabled">Izohlar o\'chirilgan</string>
-    <string name="SvipeCommentsDisabledSub">Bu post uchun izohlar yoqilmagan</string>
+    <string name="SvipeComments">Comments</string>
+    <string name="SvipeCommentHint">Add a comment…</string>
+    <string name="SvipeNoComments">No comments yet</string>
+    <string name="SvipeNoCommentsSub">Be the first to comment</string>
+    <string name="SvipeCommentsDisabled">Comments are off</string>
+    <string name="SvipeCommentsDisabledSub">Comments aren\'t enabled for this post</string>
 
     <!-- Svipe music profile actions -->
-    <string name="SvipeMusicPlay">Ijro</string>
-    <string name="SvipeMusicShuffle">Aralash</string>
-    <string name="SvipeMusicVersions">Versiyalar</string>
-    <string name="SvipeMusicSongs">Qo\'shiqlar</string>
-    <string name="SvipeMusicArtist">Ijrochi</string>
-    <string name="SvipeMusicFeatured">Ishtirokchi</string>
-    <string name="SvipeMusicSongCount_one">%1$d qo\'shiq</string>
-    <string name="SvipeMusicSongCount_other">%1$d qo\'shiq</string>
+    <string name="SvipeMusicPlay">Play</string>
+    <string name="SvipeMusicShuffle">Shuffle</string>
+    <string name="SvipeMusicVersions">Versions</string>
+    <string name="SvipeMusicSongs">Songs</string>
+    <string name="SvipeMusicArtist">Artist</string>
+    <string name="SvipeMusicFeatured">Featured</string>
+    <string name="SvipeMusicSongCount_one">%1$d song</string>
+    <string name="SvipeMusicSongCount_other">%1$d songs</string>
+
+    <!-- Svipe music version picker -->
+    <string name="SvipeMusicVoteCount_one">Chosen by %1$d person</string>
+    <string name="SvipeMusicVoteCount_other">Chosen by %1$d people</string>
+    <string name="SvipeMusicYourDefault">This is your default version.</string>
+    <string name="SvipeMusicMakeDefault">Make this my default</string>
+
+    <!-- Svipe reels -->
+    <string name="SvipeReelsLoadingFeed">Loading feed…</string>
+    <string name="SvipeReelsConnectFailed">Couldn\'t reach Svipe. It will retry once you\'re back online.</string>
+    <string name="SvipeReelsNoInternet">No internet. The feed will load as soon as you\'re back online…</string>
+    <string name="SvipeReelsLoadFailed">Feed failed to load (%1$s)</string>
+    <string name="SvipeReelsEmpty">No videos yet</string>
+    <string name="SvipeReelsGoToChannel">Go to channel</string>
+    <string name="SvipeReelsNotInterested">Not interested</string>
+    <string name="SvipeReelsLessLikeThis">You\'ll see fewer videos like this</string>
+    <string name="SvipeReelsBlockChannel">Block channel</string>
+    <string name="SvipeReelsChannelBlocked">Channel blocked</string>
+    <string name="SvipeReelsShare">Share</string>
+    <string name="SvipeReelsLike">Like</string>
+    <string name="SvipeReelsComment">Comment</string>
+    <string name="SvipeReelsSubscribe">Subscribe</string>
+    <string name="SvipeReelsSubscribed">Subscribed ✓</string>
+
+    <!-- Svipe self-update -->
+    <string name="SvipeUpdateDownloading">Downloading update…</string>
+    <string name="SvipeUpdateDownloadingProgress">Downloading… %1$d%%</string>
+    <string name="SvipeUpdateFailedTitle">Download failed</string>
+    <string name="SvipeUpdateFailedMessage">Couldn\'t download the update%1$s. Try again later, or download it from the website.</string>
+    <string name="SvipeUpdateReadyTitle">Update ready</string>
+    <string name="SvipeUpdateReadyMessage">The new version has been downloaded. Install it now?</string>
+    <string name="SvipeUpdateInstall">Install</string>
+    <string name="SvipeUpdateLater">Later</string>
+    <string name="SvipeUpdatePermissionTitle">Permission needed</string>
+    <string name="SvipeUpdatePermissionMessage">To install the update, allow Svipe to \"install unknown apps\", then tap again.</string>
+    <string name="SvipeUpdateInstallFailed">Couldn\'t install%1$s. Try downloading it from the website.</string>
 
     <string name="WearAuthTitle">Use Telegram with WearOS</string>
     <string name="WearAuthText">Connect your account to WatchOS device\nto use it separately from your watch.</string>

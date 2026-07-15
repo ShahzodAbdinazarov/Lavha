@@ -129,7 +129,7 @@ public class MusicArtistActivity extends ProfileStyleActivity {
         SvipeMusic.artist(currentAccount, artistId, 0, 50, (result, error) -> {
             if (result == null) {
                 showProgress(false);
-                showMessage("Yuklashda xatolik");
+                showMessage(getString(R.string.MusicLoadFailed));
                 return;
             }
             page = result;

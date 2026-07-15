@@ -268,6 +268,15 @@
     <string name="SvipeIntroMessage">Самые интересные короткие видео из Telegram-каналов в одной ленте.</string>
     <string name="SvipeIntroStart">Начать свайпинг</string>
 
+    <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"
+         via Telegram's cloud langpack, so the title uses this custom key the langpack cannot override). -->
+    <string name="SvipeUpdateTitle">Обновить Svipe</string>
+
+    <!-- Bottom tabs -->
+    <string name="MainTabsMusic">Музыка</string>
+    <string name="MainTabsReels">Reels</string>
+    <string name="MainTabsSearch">Поиск</string>
+
     <!-- Music tab -->
     <string name="MusicTabTitle">Музыка</string>
     <string name="MusicMyVibe">Мой вайб</string>
@@ -278,4 +287,63 @@
     <string name="MusicSearchHint">Поиск треков и исполнителей</string>
     <string name="MusicSearchEmpty">Ничего не найдено</string>
     <string name="MusicLoadFailed">Не загрузилось — нажмите, чтобы повторить</string>
+    <string name="MusicAboutSong">О песне</string>
+
+    <!-- Svipe reels comments sheet -->
+    <string name="SvipeComments">Комментарии</string>
+    <string name="SvipeCommentHint">Добавить комментарий…</string>
+    <string name="SvipeNoComments">Пока нет комментариев</string>
+    <string name="SvipeNoCommentsSub">Оставьте комментарий первым</string>
+    <string name="SvipeCommentsDisabled">Комментарии отключены</string>
+    <string name="SvipeCommentsDisabledSub">Для этого поста комментарии не включены</string>
+
+    <!-- Svipe music profile actions -->
+    <string name="SvipeMusicPlay">Слушать</string>
+    <string name="SvipeMusicShuffle">Вперемешку</string>
+    <string name="SvipeMusicVersions">Версии</string>
+    <string name="SvipeMusicSongs">Песни</string>
+    <string name="SvipeMusicArtist">Исполнитель</string>
+    <string name="SvipeMusicFeatured">При участии</string>
+    <string name="SvipeMusicSongCount_one">%1$d песня</string>
+    <string name="SvipeMusicSongCount_few">%1$d песни</string>
+    <string name="SvipeMusicSongCount_many">%1$d песен</string>
+    <string name="SvipeMusicSongCount_other">%1$d песни</string>
+
+    <!-- Svipe music version picker -->
+    <string name="SvipeMusicVoteCount_one">Выбрал %1$d человек</string>
+    <string name="SvipeMusicVoteCount_few">Выбрали %1$d человека</string>
+    <string name="SvipeMusicVoteCount_many">Выбрали %1$d человек</string>
+    <string name="SvipeMusicVoteCount_other">Выбрали %1$d человек</string>
+    <string name="SvipeMusicYourDefault">Это ваша версия по умолчанию.</string>
+    <string name="SvipeMusicMakeDefault">Сделать моей по умолчанию</string>
+
+    <!-- Svipe reels -->
+    <string name="SvipeReelsLoadingFeed">Лента загружается…</string>
+    <string name="SvipeReelsConnectFailed">Не удалось связаться со Svipe. Повторим, когда вернётся интернет.</string>
+    <string name="SvipeReelsNoInternet">Нет интернета. Лента загрузится, как только появится связь…</string>
+    <string name="SvipeReelsLoadFailed">Не удалось загрузить ленту (%1$s)</string>
+    <string name="SvipeReelsEmpty">Пока нет видео</string>
+    <string name="SvipeReelsGoToChannel">Перейти на канал</string>
+    <string name="SvipeReelsNotInterested">Не интересно</string>
+    <string name="SvipeReelsLessLikeThis">Таких видео станет меньше</string>
+    <string name="SvipeReelsBlockChannel">Заблокировать канал</string>
+    <string name="SvipeReelsChannelBlocked">Канал заблокирован</string>
+    <string name="SvipeReelsShare">Поделиться</string>
+    <string name="SvipeReelsLike">Нравится</string>
+    <string name="SvipeReelsComment">Комментарий</string>
+    <string name="SvipeReelsSubscribe">Подписаться</string>
+    <string name="SvipeReelsSubscribed">Вы подписаны ✓</string>
+
+    <!-- Svipe self-update -->
+    <string name="SvipeUpdateDownloading">Загрузка обновления…</string>
+    <string name="SvipeUpdateDownloadingProgress">Загрузка… %1$d%%</string>
+    <string name="SvipeUpdateFailedTitle">Ошибка загрузки</string>
+    <string name="SvipeUpdateFailedMessage">Не удалось загрузить обновление%1$s. Попробуйте позже или скачайте его с сайта.</string>
+    <string name="SvipeUpdateReadyTitle">Обновление готово</string>
+    <string name="SvipeUpdateReadyMessage">Новая версия загружена. Установить сейчас?</string>
+    <string name="SvipeUpdateInstall">Установить</string>
+    <string name="SvipeUpdateLater">Позже</string>
+    <string name="SvipeUpdatePermissionTitle">Нужно разрешение</string>
+    <string name="SvipeUpdatePermissionMessage">Чтобы установить обновление, разрешите Svipe \"установку неизвестных приложений\", затем нажмите снова.</string>
+    <string name="SvipeUpdateInstallFailed">Не удалось установить%1$s. Попробуйте скачать с сайта.</string>
 </resources>

@@ -1,5 +1,7 @@
 package org.telegram.svipe;
 
+import static org.telegram.messenger.LocaleController.getString;
+
 import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
@@ -21,7 +23,9 @@ import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.NotificationCenter;
+import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.AlertDialog;
 
 import java.io.File;
@@ -222,7 +226,7 @@ public class SvipeUpdater {
         if (!hasBanner()) {
             modalProgress = new AlertDialog(activity, AlertDialog.ALERT_TYPE_LOADING);
             modalProgress.setCanCancel(false);
-            modalProgress.setMessage("Yangilanish yuklab olinmoqda…");
+            modalProgress.setMessage(getString(R.string.SvipeUpdateDownloading));
             modalProgress.show();
         }
 
@@ -269,7 +273,7 @@ public class SvipeUpdater {
                                 AndroidUtilities.runOnUIThread(() -> {
                                     if (modalProgress != null) {
                                         modalProgress.setProgress(pct);
-                                        modalProgress.setMessage("Yuklab olinmoqda… " + pct + "%");
+                                        modalProgress.setMessage(LocaleController.formatString(R.string.SvipeUpdateDownloadingProgress, pct));
                                     }
                                 });
                                 refreshBannerOnly(); // banner only — no global broadcast per percent
@@ -314,9 +318,9 @@ public class SvipeUpdater {
                 if (apk == null) {
                     if (!cancelled) {
                         new AlertDialog.Builder(act)
-                                .setTitle("Yuklab olishda xatolik")
-                                .setMessage("Yangilanishni yuklab bo'lmadi" + (ferr != null ? " (" + ferr + ")" : "") + ". Keyinroq qayta urinib ko'ring yoki saytdan qo'lda yuklab oling.")
-                                .setPositiveButton("OK", null)
+                                .setTitle(getString(R.string.SvipeUpdateFailedTitle))
+                                .setMessage(LocaleController.formatString(R.string.SvipeUpdateFailedMessage, ferr != null ? " (" + ferr + ")" : ""))
+                                .setPositiveButton(getString(R.string.OK), null)
                                 .show();
                     }
                     return;
@@ -326,10 +330,10 @@ public class SvipeUpdater {
                 // when there is no banner to tap, ask with a dialog instead of installing silently.
                 if (!hasBanner()) {
                     new AlertDialog.Builder(act)
-                            .setTitle("Yangilanish tayyor")
-                            .setMessage("Yangi versiya yuklab olindi. Hozir o'rnatasizmi?")
-                            .setPositiveButton("O'rnatish", (d, w) -> installApk(act, apk))
-                            .setNegativeButton("Keyinroq", null)
+                            .setTitle(getString(R.string.SvipeUpdateReadyTitle))
+                            .setMessage(getString(R.string.SvipeUpdateReadyMessage))
+                            .setPositiveButton(getString(R.string.SvipeUpdateInstall), (d, w) -> installApk(act, apk))
+                            .setNegativeButton(getString(R.string.SvipeUpdateLater), null)
                             .show();
                 }
             });
@@ -386,9 +390,9 @@ public class SvipeUpdater {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 && !activity.getPackageManager().canRequestPackageInstalls()) {
             new AlertDialog.Builder(activity)
-                    .setTitle("Ruxsat kerak")
-                    .setMessage("Yangilanishni o'rnatish uchun Svipe'ga \"Noma'lum ilovalarni o'rnatish\" ruxsatini bering, so'ng yana bosing.")
-                    .setPositiveButton("Sozlamalar", (d, w) -> {
+                    .setTitle(getString(R.string.SvipeUpdatePermissionTitle))
+                    .setMessage(getString(R.string.SvipeUpdatePermissionMessage))
+                    .setPositiveButton(getString(R.string.Settings), (d, w) -> {
                         awaitingInstallPermission = true; // resume this install when we return from settings
                         try {
                             activity.startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -397,7 +401,7 @@ public class SvipeUpdater {
                             FileLog.e(e);
                         }
                     })
-                    .setNegativeButton("Bekor qilish", null)
+                    .setNegativeButton(getString(R.string.Cancel), null)
                     .show();
             return;
         }
@@ -501,8 +505,7 @@ public class SvipeUpdater {
                 AndroidUtilities.runOnUIThread(() -> {
                     try {
                         Toast.makeText(ApplicationLoader.applicationContext,
-                                "O'rnatib bo'lmadi" + (msg != null ? ": " + msg : "")
-                                        + ". Saytdan qo'lda yuklab ko'ring.",
+                                LocaleController.formatString(R.string.SvipeUpdateInstallFailed, msg != null ? ": " + msg : ""),
                                 Toast.LENGTH_LONG).show();
                     } catch (Exception ignore) {}
                 });

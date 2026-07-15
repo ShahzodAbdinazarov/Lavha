@@ -1,5 +1,7 @@
 package org.telegram.ui;
 
+import static org.telegram.messenger.LocaleController.getString;
+
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
@@ -479,7 +481,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         statusView.setTextColor(0xFFFFFFFF);
         statusView.setTextSize(15);
         statusView.setGravity(Gravity.CENTER);
-        statusView.setText("Yuklanmoqda…");
+        statusView.setText(getString(R.string.Loading));
         root.addView(statusView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
 
         fragmentView = root;
@@ -857,7 +859,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     AndroidUtilities.runOnUIThread(() -> restoreQueueThenPlay(attempt + 1), 200);
                 } else {
                     coldStartDone = true;
-                    setStatus("Yuklanmoqda…"); // genuinely empty queue -> online fallback shows the spinner
+                    setStatus(getString(R.string.Loading)); // genuinely empty queue -> online fallback shows the spinner
                     kickBackgroundFeed();
                 }
             });
@@ -926,16 +928,16 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         // status spinner, no clear, no player restart. The status path is only for the cold,
         // empty-queue online fallback.
         final boolean playing = coldStartDone && !items.isEmpty();
-        if (!append && !playing) setStatus("Kirilmoqda…");
+        if (!append && !playing) setStatus(getString(R.string.Connecting));
         SvipeAuth.ensureToken(account, t -> {
             if (t == null) {
                 loadingFeed = false;
                 feedLoadFailed = true;
-                if (!append && !playing) setStatus("Svipe'ga kirib bo'lmadi. Internet qaytsa o'zi qayta urinadi.");
+                if (!append && !playing) setStatus(getString(R.string.SvipeReelsConnectFailed));
                 return;
             }
             token = t;
-            if (!append && !playing) setStatus("Lenta yuklanmoqda…");
+            if (!append && !playing) setStatus(getString(R.string.SvipeReelsLoadingFeed));
             // First request carries the seed (discover tap); afterwards the cursor carries page+seed.
             String path = "/v1/feed";
             try {
@@ -960,8 +962,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     feedLoadFailed = true;
                     if (!append && !playing) {
                         setStatus(code == 0
-                                ? "Internet yo'q. Ulanish qaytishi bilan lenta yuklanadi…"
-                                : "Lenta yuklanmadi (" + code + ")");
+                                ? getString(R.string.SvipeReelsNoInternet)
+                                : LocaleController.formatString(R.string.SvipeReelsLoadFailed, String.valueOf(code)));
                     }
                     return;
                 }
@@ -1024,7 +1026,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                         }
                     }
                 } else {
-                    setStatus(items.isEmpty() ? "Hozircha video yo'q" : null);
+                    setStatus(items.isEmpty() ? getString(R.string.SvipeReelsEmpty) : null);
                     adapter.notifyDataSetChanged();
                     AndroidUtilities.runOnUIThread(this::checkCurrentPage, 200);
                 }
@@ -2642,13 +2644,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         ItemOptions.makeOptions(this, h.moreIcon)
                 .setGravity(Gravity.RIGHT)
                 .add(R.drawable.msg_share, "Ulashish", () -> share(item))
-                .add(R.drawable.msg_copy, "Havolani nusxalash", () -> copyLink(item))
-                .add(R.drawable.msg_channel, "Kanalga o'tish", () -> openComments(item))
-                .add(R.drawable.msg2_block2, "Qiziq emas", () -> {
+                .add(R.drawable.msg_copy, getString(R.string.CopyLink), () -> copyLink(item))
+                .add(R.drawable.msg_channel, getString(R.string.SvipeReelsGoToChannel), () -> openComments(item))
+                .add(R.drawable.msg2_block2, getString(R.string.SvipeReelsNotInterested), () -> {
                     sendEvent("NOT_INTERESTED", item);
-                    BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, "Bunday videolar kamroq ko'rsatiladi").show();
+                    BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, getString(R.string.SvipeReelsLessLikeThis)).show();
                 })
-                .add(R.drawable.msg_disable, "Kanalni bloklash", () -> blockChannel(item, h))
+                .add(R.drawable.msg_disable, getString(R.string.SvipeReelsBlockChannel), () -> blockChannel(item, h))
                 .add(R.drawable.msg_report, "Shikoyat", true, () -> reportMessage(item))
                 .show();
     }
@@ -2695,7 +2697,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         adapter.notifyDataSetChanged();
         if (items.isEmpty()) {
             releaseCurrentPlayer();
-            setStatus("Hozircha video yo'q");
+            setStatus(getString(R.string.SvipeReelsEmpty));
             loadMore();
         } else {
             final int newPos = Math.min(Math.max(currentPosition, 0), items.size() - 1);
@@ -2705,7 +2707,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         }
 
         BulletinFactory.of(this).createUndoBulletin(
-                "Kanal bloklandi",
+                getString(R.string.SvipeReelsChannelBlocked),
                 () -> { // undo — restore the feed exactly as it was
                     blockedChannels.remove(channelId);
                     items.clear();
@@ -3145,7 +3147,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             this.title = title;
         }
 
-        void setShareCount(int n) { shareCount.setText(n > 0 ? String.valueOf(n) : "Ulashish"); }
+        void setShareCount(int n) { shareCount.setText(n > 0 ? String.valueOf(n) : getString(R.string.SvipeReelsShare)); }
 
         void setVerified(boolean verified) {
             verifiedBadge.setVisibility(verified ? View.VISIBLE : View.GONE);
@@ -3176,18 +3178,18 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
 
         void showLoading(boolean show) { loading.setVisibility(show ? View.VISIBLE : View.GONE); }
         void setPaused(boolean paused) { pausedIcon.setVisibility(paused ? View.VISIBLE : View.GONE); }
-        void setLikeCount(int n) { likeCount.setText(n > 0 ? String.valueOf(n) : "Like"); }
+        void setLikeCount(int n) { likeCount.setText(n > 0 ? String.valueOf(n) : getString(R.string.SvipeReelsLike)); }
         void setLiked(boolean liked) {
             likeIcon.setImageResource(liked ? R.drawable.media_like_active : R.drawable.media_like);
             likeIcon.setColorFilter(liked ? 0xFFFF2E38 : 0xFFFFFFFF);
         }
         void setCommentCount(int n) {
-            commentCount.setText(n > 0 ? String.valueOf(n) : "Izoh");
+            commentCount.setText(n > 0 ? String.valueOf(n) : getString(R.string.SvipeReelsComment));
             commentIcon.setAlpha(n > 0 ? 1f : 0.4f);
             commentCount.setAlpha(n > 0 ? 1f : 0.4f);
         }
         void setFollowing(boolean following) {
-            followBtn.setText(following ? "Obuna ✓" : "Obuna");
+            followBtn.setText(getString(following ? R.string.SvipeReelsSubscribed : R.string.SvipeReelsSubscribe));
             followBtn.setVisibility(following ? View.GONE : View.VISIBLE);
         }
     }
@@ -3322,7 +3324,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             channelBar.addView(verifiedBadge, LayoutHelper.createLinear(17, 17, Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
 
             TextView followBtn = new TextView(ctx);
-            followBtn.setText("Obuna");
+            followBtn.setText(getString(R.string.SvipeReelsSubscribe));
             followBtn.setTextColor(0xFFFFFFFF);
             followBtn.setTextSize(13);
             followBtn.setSingleLine(true); // never wrap to a 2nd line

@@ -334,12 +334,12 @@ public class MusicSongActivity extends ProfileStyleActivity {
         }
         String perf = v.performer != null && !v.performer.isEmpty()
                 ? v.performer : (v.username != null ? "@" + v.username : getString(R.string.AudioUnknownArtist));
-        String votes = v.voteCount == 1 ? "1 kishi tanlagan" : v.voteCount + " kishi tanlagan";
+        String votes = LocaleController.formatPluralString("SvipeMusicVoteCount", v.voteCount);
         AlertDialog.Builder b = new AlertDialog.Builder(getParentActivity(), getResourceProvider());
         b.setTitle(quality(v) + "  ·  " + perf);
-        b.setMessage(votes + (v.isMyDefault ? "\n\nBu sizning standart versiyangiz." : ""));
+        b.setMessage(votes + (v.isMyDefault ? "\n\n" + getString(R.string.SvipeMusicYourDefault) : ""));
         if (!v.isMyDefault) {
-            b.setPositiveButton("Menga standart qil", (dialog, which) -> setMyDefault(v));
+            b.setPositiveButton(getString(R.string.SvipeMusicMakeDefault), (dialog, which) -> setMyDefault(v));
         }
         b.setNegativeButton(getString(R.string.Cancel), null);
         showDialog(b.create());

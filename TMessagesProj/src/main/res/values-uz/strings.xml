@@ -10,6 +10,11 @@
          The other update strings keep their native keys and are localized by the cloud langpack. -->
     <string name="SvipeUpdateTitle">Svipe’ni yangilash</string>
 
+    <!-- Bottom tabs -->
+    <string name="MainTabsMusic">Musiqa</string>
+    <string name="MainTabsReels">Reels</string>
+    <string name="MainTabsSearch">Qidiruv</string>
+
     <!-- Music tab -->
     <string name="MusicTabTitle">Musiqa</string>
     <string name="MusicMyVibe">Mening vibem</string>
@@ -20,4 +25,60 @@
     <string name="MusicSearchHint">Qo\'shiq yoki ijrochini qidiring</string>
     <string name="MusicSearchEmpty">Hech narsa topilmadi</string>
     <string name="MusicLoadFailed">Yuklab bo\'lmadi — qayta urinish uchun bosing</string>
+    <string name="MusicAboutSong">Qo\'shiq haqida</string>
+
+    <!-- Svipe reels comments sheet -->
+    <string name="SvipeComments">Izohlar</string>
+    <string name="SvipeCommentHint">Izoh qo\'shing…</string>
+    <string name="SvipeNoComments">Hozircha izohlar yo\'q</string>
+    <string name="SvipeNoCommentsSub">Birinchi bo\'lib fikr bildiring</string>
+    <string name="SvipeCommentsDisabled">Izohlar o\'chirilgan</string>
+    <string name="SvipeCommentsDisabledSub">Bu post uchun izohlar yoqilmagan</string>
+
+    <!-- Svipe music profile actions -->
+    <string name="SvipeMusicPlay">Ijro</string>
+    <string name="SvipeMusicShuffle">Aralash</string>
+    <string name="SvipeMusicVersions">Versiyalar</string>
+    <string name="SvipeMusicSongs">Qo\'shiqlar</string>
+    <string name="SvipeMusicArtist">Ijrochi</string>
+    <string name="SvipeMusicFeatured">Ishtirokchi</string>
+    <!-- Uzbek counts take the counter word "ta" and do not inflect the noun. -->
+    <string name="SvipeMusicSongCount_one">%1$d ta qo\'shiq</string>
+    <string name="SvipeMusicSongCount_other">%1$d ta qo\'shiq</string>
+
+    <!-- Svipe music version picker -->
+    <string name="SvipeMusicVoteCount_one">%1$d kishi tanlagan</string>
+    <string name="SvipeMusicVoteCount_other">%1$d kishi tanlagan</string>
+    <string name="SvipeMusicYourDefault">Bu sizning standart versiyangiz.</string>
+    <string name="SvipeMusicMakeDefault">Menga standart qil</string>
+
+    <!-- Svipe reels -->
+    <string name="SvipeReelsLoadingFeed">Lenta yuklanmoqda…</string>
+    <string name="SvipeReelsConnectFailed">Svipe\'ga kirib bo\'lmadi. Internet qaytsa o\'zi qayta urinadi.</string>
+    <string name="SvipeReelsNoInternet">Internet yo\'q. Ulanish qaytishi bilan lenta yuklanadi…</string>
+    <string name="SvipeReelsLoadFailed">Lenta yuklanmadi (%1$s)</string>
+    <string name="SvipeReelsEmpty">Hozircha video yo\'q</string>
+    <string name="SvipeReelsGoToChannel">Kanalga o\'tish</string>
+    <string name="SvipeReelsNotInterested">Qiziq emas</string>
+    <string name="SvipeReelsLessLikeThis">Bunday videolar kamroq ko\'rsatiladi</string>
+    <string name="SvipeReelsBlockChannel">Kanalni bloklash</string>
+    <string name="SvipeReelsChannelBlocked">Kanal bloklandi</string>
+    <string name="SvipeReelsShare">Ulashish</string>
+    <string name="SvipeReelsLike">Like</string>
+    <string name="SvipeReelsComment">Izoh</string>
+    <string name="SvipeReelsSubscribe">Obuna</string>
+    <string name="SvipeReelsSubscribed">Obuna ✓</string>
+
+    <!-- Svipe self-update -->
+    <string name="SvipeUpdateDownloading">Yangilanish yuklab olinmoqda…</string>
+    <string name="SvipeUpdateDownloadingProgress">Yuklab olinmoqda… %1$d%%</string>
+    <string name="SvipeUpdateFailedTitle">Yuklab olishda xatolik</string>
+    <string name="SvipeUpdateFailedMessage">Yangilanishni yuklab bo\'lmadi%1$s. Keyinroq qayta urinib ko\'ring yoki saytdan qo\'lda yuklab oling.</string>
+    <string name="SvipeUpdateReadyTitle">Yangilanish tayyor</string>
+    <string name="SvipeUpdateReadyMessage">Yangi versiya yuklab olindi. Hozir o\'rnatasizmi?</string>
+    <string name="SvipeUpdateInstall">O\'rnatish</string>
+    <string name="SvipeUpdateLater">Keyinroq</string>
+    <string name="SvipeUpdatePermissionTitle">Ruxsat kerak</string>
+    <string name="SvipeUpdatePermissionMessage">Yangilanishni o\'rnatish uchun Svipe\'ga \"Noma\'lum ilovalarni o\'rnatish\" ruxsatini bering, so\'ng yana bosing.</string>
+    <string name="SvipeUpdateInstallFailed">O\'rnatib bo\'lmadi%1$s. Saytdan qo\'lda yuklab ko\'ring.</string>
 </resources>

@@ -283,4 +283,21 @@ task checkVisibility {
     }
 }
 
+// Every string Svipe adds has to follow the user's Telegram language. Nothing else enforces that —
+// a missing values-uz entry or a literal typed straight into Java both build fine and only surface
+// as English (or Uzbek) text in front of the wrong user. So the build is the gate.
+task checkSvipeStrings(type: Exec) {
+    workingDir rootDir
+    commandLine 'python3', "${rootDir}/Tools/check_svipe_strings.py"
+    // Never fail a build over a missing python3 or a detached git checkout — this guards our own
+    // strings, it is not a toolchain requirement.
+    ignoreExitValue = false
+    doFirst {
+        if (!file("${rootDir}/Tools/check_svipe_strings.py").exists()) {
+            throw new StopExecutionException("guard script missing")
+        }
+    }
+}
+
 preBuild.dependsOn checkVisibility
+preBuild.dependsOn checkSvipeStrings
