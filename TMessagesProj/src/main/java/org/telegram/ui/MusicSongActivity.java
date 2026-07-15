@@ -26,6 +26,8 @@ import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.SharedAudioCell;
+import org.telegram.ui.Cells.UserCell;
+import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.ProfileActionsView;
 import org.telegram.ui.Components.RadialProgressView;
@@ -94,6 +96,46 @@ public class MusicSongActivity extends ProfileStyleActivity {
     @Override
     protected CharSequence getTabTitle() {
         return getString(R.string.SvipeMusicVersions);
+    }
+
+    // The artists live in the card above the tabs — the slot a real profile gives Description /
+    // Invite Link — rather than behind a tab of their own: a song almost always has one artist, and a
+    // one-row tab would be both odd and invisible until scrolled to. UserCell is the profile's own
+    // person row, and it takes an explicit name/status, so it does not need a peer.
+
+    @Override
+    protected int getHeaderRowCount() {
+        return detail == null ? 0 : detail.artists.size();
+    }
+
+    @Override
+    protected View createHeaderRow(Context context) {
+        return new UserCell(context, 6, 0, false, getResourceProvider());
+    }
+
+    @Override
+    protected void bindHeaderRow(View view, int position) {
+        if (detail == null || position >= detail.artists.size()) {
+            return;
+        }
+        final SvipeMusic.Artist a = detail.artists.get(position);
+        final UserCell cell = (UserCell) view;
+        final AvatarDrawable avatar = new AvatarDrawable();
+        avatar.setInfo(a.id, a.name, null);
+        cell.setData(null, a.name, artistRole(a), 0, position != detail.artists.size() - 1);
+        cell.avatarImageView.setImageDrawable(avatar);
+    }
+
+    @Override
+    protected void onHeaderRowClick(int position) {
+        if (detail != null && position < detail.artists.size()) {
+            SvipeMusic.Artist a = detail.artists.get(position);
+            presentFragment(new MusicArtistActivity(a.id, a.name));
+        }
+    }
+
+    private String artistRole(SvipeMusic.Artist a) {
+        return "featured".equals(a.role) ? getString(R.string.SvipeMusicFeatured) : getString(R.string.SvipeMusicArtist);
     }
 
     @Override

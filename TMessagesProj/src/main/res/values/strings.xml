@@ -10932,6 +10932,8 @@
     <string name="SvipeMusicShuffle">Aralash</string>
     <string name="SvipeMusicVersions">Versiyalar</string>
     <string name="SvipeMusicSongs">Qo\'shiqlar</string>
+    <string name="SvipeMusicArtist">Ijrochi</string>
+    <string name="SvipeMusicFeatured">Ishtirokchi</string>
 
     <string name="WearAuthTitle">Use Telegram with WearOS</string>
     <string name="WearAuthText">Connect your account to WatchOS device\nto use it separately from your watch.</string>

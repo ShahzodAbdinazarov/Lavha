@@ -90,6 +90,7 @@ public abstract class ProfileStyleActivity extends BaseFragment {
     private FrameLayout avatarContainer;
     private ProfileGooeyView avatarGooey;
     private MediaSectionView mediaSection;
+    private OuterAdapter outerAdapter;
     private boolean mediaSectionAttached;
     private boolean mediaHeaderVisible;
     private float mediaHeaderAnimationProgress;
@@ -176,6 +177,24 @@ public abstract class ProfileStyleActivity extends BaseFragment {
     /** Call after swapping the avatar image in, so the pull-down expand can enable itself. */
     protected void onAvatarChanged() {
         needLayout(false);
+    }
+
+    /**
+     * Rows shown in a card above the tabs — the slot a real profile fills with Description / Invite
+     * Link / Add Members. Default none.
+     */
+    protected int getHeaderRowCount() {
+        return 0;
+    }
+
+    protected View createHeaderRow(Context context) {
+        return null;
+    }
+
+    protected void bindHeaderRow(View view, int position) {
+    }
+
+    protected void onHeaderRowClick(int position) {
     }
 
     /** Title for the single tab in the pinned strip. */
@@ -341,6 +360,9 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         invalidateScroll = true;
         allowPullingDown = false;
         isPulledDown = false;
+        if (outerAdapter != null) {
+            outerAdapter.notifyDataSetChanged();
+        }
         fragmentView.requestLayout();
     }
 
@@ -557,7 +579,12 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         // Corrected against the real measured width in onMeasure; this keeps the very first frame right.
         final int initialPaddingTop = AndroidUtilities.displaySize.x + getActionsExtraHeight();
         listView.setPadding(0, initialPaddingTop, 0, 0);
-        listView.setAdapter(new OuterAdapter());
+        listView.setAdapter(outerAdapter = new OuterAdapter());
+        listView.setOnItemClickListener((view, position) -> {
+            if (position < getHeaderRowCount()) {
+                onHeaderRowClick(position);
+            }
+        });
         layoutManager.scrollToPositionWithOffset(0, getHeaderExtraHeight() - initialPaddingTop);
         listView.setOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
@@ -716,6 +743,9 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         if (top >= 0 && adapterPosition == 0) {
             newOffset = top;
         }
+        // ProfileActivity#checkListViewScroll: the bar flips once the media row reaches the top.
+        setMediaHeaderVisible(mediaSectionAttached && mediaSection != null && mediaSection.getTop() <= 0);
+
         if (extraHeight != newOffset) {
             extraHeight = newOffset;
             topView.invalidate();
@@ -898,19 +928,31 @@ public abstract class ProfileStyleActivity extends BaseFragment {
 
     /** The outer list is one row: the section. ProfileActivity's list is the same shape, with more rows. */
     private class OuterAdapter extends RecyclerListView.SelectionAdapter {
+        static final int VIEW_HEADER_ROW = 0, VIEW_SECTION = 1;
+
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return false;
+            return holder.getItemViewType() == VIEW_HEADER_ROW;
         }
 
         @Override
         public int getItemCount() {
-            return 1;
+            return getHeaderRowCount() + 1;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            return position < getHeaderRowCount() ? VIEW_HEADER_ROW : VIEW_SECTION;
         }
 
         @NonNull
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull android.view.ViewGroup parent, int viewType) {
+            if (viewType == VIEW_HEADER_ROW) {
+                View row = createHeaderRow(parent.getContext());
+                row.setLayoutParams(new RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT, RecyclerView.LayoutParams.WRAP_CONTENT));
+                return new RecyclerListView.Holder(row);
+            }
             if (mediaSection == null) {
                 mediaSection = new MediaSectionView(parent.getContext());
             }
@@ -924,6 +966,9 @@ public abstract class ProfileStyleActivity extends BaseFragment {
 
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
+            if (holder.getItemViewType() == VIEW_HEADER_ROW) {
+                bindHeaderRow(holder.itemView, position);
+            }
         }
 
         @Override
@@ -1384,8 +1429,21 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         protected void onDraw(Canvas canvas) {
             final int height = ActionBar.getCurrentActionBarHeight()
                     + (actionBar.getOccupyStatusBar() ? AndroidUtilities.statusBarHeight : 0);
-            canvas.drawRect(0, 0, getMeasuredWidth(), height + extraHeight, paint);
+            final float v = height + extraHeight;
+            // ProfileActivity#TopView.onDraw. The band shrinks to nothing as the media header comes in,
+            // and windowBackgroundWhite takes over from there down — that is the whole colour change:
+            // there is no separate "media" bar, the header band just stops being drawn.
+            final int y1 = (int) (v * (1.0f - mediaHeaderAnimationProgress));
+            if (y1 != 0) {
+                canvas.drawRect(0, 0, getMeasuredWidth(), y1, paint);
+            }
+            if (y1 != v) {
+                whitePaint.setColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                canvas.drawRect(0, y1, getMeasuredWidth(), v, whitePaint);
+            }
         }
+
+        private final Paint whitePaint = new Paint();
     }
 
     // No isSwipeBackEnabled override on purpose. ProfileActivity only blocks swipe-back where a
