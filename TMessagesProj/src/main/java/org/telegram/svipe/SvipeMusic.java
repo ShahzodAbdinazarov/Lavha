@@ -44,6 +44,7 @@ public class SvipeMusic {
         public long id;
         public String name;
         public String role = "primary";     // "primary" | "featured"
+        public int songCount;               // how many canonical songs this artist has
         public long artChannelId;
         public int artMessageId;
     }
@@ -449,6 +450,7 @@ public class SvipeMusic {
         a.id = o.optLong("id");
         a.name = o.optString("name", "");
         a.role = o.optString("role", "primary");
+        a.songCount = o.optInt("song_count");
         a.artChannelId = o.optLong("art_channel_id");
         a.artMessageId = o.optInt("art_message_id");
         return a;

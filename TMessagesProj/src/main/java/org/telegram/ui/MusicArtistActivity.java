@@ -13,6 +13,7 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.R;
 import org.telegram.svipe.SvipeMusic;
@@ -176,7 +177,7 @@ public class MusicArtistActivity extends ProfileStyleActivity {
         setProfileTitle(name);
 
         int n = page.songCount > 0 ? page.songCount : songs.size();
-        setProfileSubtitle(n == 1 ? "1 qo'shiq" : n + " qo'shiq");
+        setProfileSubtitle(LocaleController.formatPluralString("SvipeMusicSongCount", n));
 
         // Artists have no photo, so this is always Telegram's gradient+initials tile — the same
         // fallback a peer without an avatar gets.

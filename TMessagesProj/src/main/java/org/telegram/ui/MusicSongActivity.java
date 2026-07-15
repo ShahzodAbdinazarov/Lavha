@@ -17,6 +17,7 @@ import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.ImageLoader;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.MediaController;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.R;
 import org.telegram.svipe.SvipeMusic;
@@ -122,7 +123,7 @@ public class MusicSongActivity extends ProfileStyleActivity {
         final UserCell cell = (UserCell) view;
         final AvatarDrawable avatar = new AvatarDrawable();
         avatar.setInfo(a.id, a.name, null);
-        cell.setData(null, a.name, artistRole(a), 0, position != detail.artists.size() - 1);
+        cell.setData(null, a.name, artistStatus(a), 0, position != detail.artists.size() - 1);
         cell.avatarImageView.setImageDrawable(avatar);
     }
 
@@ -134,7 +135,16 @@ public class MusicSongActivity extends ProfileStyleActivity {
         }
     }
 
-    private String artistRole(SvipeMusic.Artist a) {
+    /**
+     * A peer row's status line says something about that peer, so an artist's says how much they have
+     * — the way a channel's says its subscriber count. The role label only stands in when the count is
+     * missing (an older backend, or an artist not yet counted), since repeating "Ijrochi" down every
+     * row tells the reader nothing.
+     */
+    private String artistStatus(SvipeMusic.Artist a) {
+        if (a.songCount > 0) {
+            return LocaleController.formatPluralString("SvipeMusicSongCount", a.songCount);
+        }
         return "featured".equals(a.role) ? getString(R.string.SvipeMusicFeatured) : getString(R.string.SvipeMusicArtist);
     }
 
