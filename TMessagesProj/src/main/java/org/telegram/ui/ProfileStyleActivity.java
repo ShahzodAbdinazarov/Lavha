@@ -10,7 +10,10 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ComposeShader;
+import android.graphics.LinearGradient;
 import android.graphics.Matrix;
+import android.graphics.PorterDuff;
 import android.graphics.Shader;
 import android.graphics.Paint;
 import android.text.TextUtils;
@@ -1423,7 +1426,20 @@ public abstract class ProfileStyleActivity extends BaseFragment {
             matrix.reset();
             matrix.setScale(getWidth() / (float) fw, coverHeight / fh);
             matrix.postTranslate(0, coverTop);
-            shader.setLocalMatrix(matrix);
+            // Fade the reflection out over the strip's length instead of ending it in a hard edge —
+            // exactly what ProfileGalleryBlurView#applyShader does, composing the mirror with an alpha
+            // gradient via DST_IN. The gradient lives in the same frame space as the bitmap shader, so
+            // the one localMatrix on the ComposeShader maps both together. Across the visible strip the
+            // sampled frame y runs from fh (canvas stripTop) DOWN to fh + stripFrameLen (canvas
+            // headerBottom) — the MIRROR reflects the bitmap there — so an opaque->transparent ramp over
+            // exactly that span fades the far edge to nothing.
+            final float stripFrameLen = Math.max(1f, (headerBottom - stripTop) / (coverHeight / fh));
+            final LinearGradient fade = new LinearGradient(
+                    0, fh, 0, fh + stripFrameLen,
+                    new int[]{Color.WHITE, Color.TRANSPARENT}, null, Shader.TileMode.CLAMP);
+            final ComposeShader composed = new ComposeShader(shader, fade, PorterDuff.Mode.DST_IN);
+            composed.setLocalMatrix(matrix);
+            paint.setShader(composed);
             paint.setAlpha((int) (0xFF * Math.min(1f, currentExpandAnimatorValue)));
             canvas.drawRect(0, stripTop, getWidth(), headerBottom, paint);
         }
