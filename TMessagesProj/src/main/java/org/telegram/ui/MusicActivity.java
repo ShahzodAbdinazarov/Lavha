@@ -51,6 +51,7 @@ import org.telegram.svipe.SvipeMusicTelemetry;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.SharedAudioCell;
 import org.telegram.ui.Components.AudioPlayerAlert;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.FragmentContextView;
@@ -93,7 +94,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private static final int ROW_LOADING = 3;
     private static final int ROW_EMPTY = 4;
     private static final int ROW_RETRY = 5;
-    private static final int ROW_SONG = 6;      // canonical song card (search results)
+    private static final int ROW_SONG = 6;      // canonical song card — fallback when the default version can't resolve
+    private static final int ROW_SONG_AUDIO = 7; // canonical song as a native SharedAudioCell (default version resolved)
 
     private static final int SEARCH_MIN_CHARS = 2;
     private static final int SEARCH_PAGE = 50;
@@ -140,6 +142,11 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     // Search now returns canonical SONGS (1 card = 1 real song); tapping opens the version picker.
     private final ArrayList<SvipeMusic.Song> songResults = new ArrayList<>();
     private final ArrayList<SvipeMusic.Track> searchResults = new ArrayList<>();
+    // Each result's default version resolved to a real audio MessageObject, so the row renders as a
+    // native SharedAudioCell (album art + play/download + duration) exactly like the chats media search.
+    // The queue only exists to wrap resolved channel messages into MessageObjects — it is never played.
+    private final HashMap<Long, MessageObject> searchMo = new HashMap<>();
+    private SvipeMusicQueue searchQueue;
     private boolean searchLoading;
     private boolean searchFailed;
     private Runnable pendingSearch;
@@ -465,6 +472,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         if (query.length() < SEARCH_MIN_CHARS) {
             searchedQuery = null;
             songResults.clear();
+            searchMo.clear();
             searchLoading = false;
             searchFailed = false;
             updateRows();
@@ -482,15 +490,58 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             if (!q.equals(query)) {
                 return;
             }
-            searchLoading = false;
             searchedQuery = q;
             songResults.clear();
+            searchMo.clear();
             if (items == null) {
                 searchFailed = true;
+                searchLoading = false;
+                updateRows();
             } else {
                 searchFailed = false;
                 songResults.addAll(items);
+                // Stay in the loading state until the default versions resolve, so the results appear
+                // as finished native audio rows rather than flashing letter tiles first.
+                resolveSearchDefaults(q);
             }
+        });
+    }
+
+    /**
+     * Resolves each result's default version to a real audio MessageObject (batched per channel, the
+     * same two round-trips the song page and the reels pipeline use), so search rows render as native
+     * {@link SharedAudioCell}s. Songs that carry no default, or whose channel fails to resolve, fall
+     * back to the lightweight letter cell.
+     */
+    private void resolveSearchDefaults(String q) {
+        final ArrayList<SvipeMusic.Track> defaults = new ArrayList<>();
+        for (SvipeMusic.Song s : songResults) {
+            if (s.defaultTrack != null) {
+                defaults.add(s.defaultTrack);
+            }
+        }
+        if (defaults.isEmpty()) {
+            searchLoading = false;
+            updateRows();
+            return;
+        }
+        final SvipeMusicQueue queue = new SvipeMusicQueue(currentAccount, SvipeMusicQueue.SOURCE_SEARCH, "", false);
+        SvipeMusicResolver.resolve(currentAccount, defaults, resolved -> {
+            if (!q.equals(query)) {
+                return; // a newer query already superseded this one
+            }
+            queue.appendResolved(defaults, resolved);
+            searchQueue = queue;
+            searchMo.clear();
+            for (SvipeMusic.Song s : songResults) {
+                if (s.defaultTrack != null) {
+                    MessageObject mo = queue.messageForKey(s.defaultTrack.key());
+                    if (mo != null) {
+                        searchMo.put(s.id, mo);
+                    }
+                }
+            }
+            searchLoading = false;
             updateRows();
         });
     }
@@ -511,7 +562,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 rows.add(new Row(ROW_EMPTY));
             } else {
                 for (SvipeMusic.Song s : songResults) {
-                    Row r = new Row(ROW_SONG);
+                    // Native audio row once the default version resolved; letter-cell fallback otherwise.
+                    Row r = new Row(searchMo.containsKey(s.id) ? ROW_SONG_AUDIO : ROW_SONG);
                     r.song = s;
                     rows.add(r);
                 }
@@ -557,7 +609,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         Row row = rows.get(position);
         if (row.type == ROW_TRACK) {
             onTrackTap(row);
-        } else if (row.type == ROW_SONG) {
+        } else if (row.type == ROW_SONG || row.type == ROW_SONG_AUDIO) {
             if (row.song != null) {
                 presentFragment(new MusicSongActivity(row.song.id, row.song.title));
             }
@@ -852,7 +904,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int type = holder.getItemViewType();
-            return type == ROW_TRACK || type == ROW_RETRY || type == ROW_SONG;
+            return type == ROW_TRACK || type == ROW_RETRY || type == ROW_SONG || type == ROW_SONG_AUDIO;
         }
 
         @NonNull
@@ -871,6 +923,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 view = new TrackCell(context);
             } else if (viewType == ROW_SONG) {
                 view = new SongCell(context);
+            } else if (viewType == ROW_SONG_AUDIO) {
+                view = new SharedAudioCell(context, getResourceProvider());
             } else if (viewType == ROW_EMPTY || viewType == ROW_RETRY) {
                 TextView tv = new TextView(context);
                 tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
@@ -903,6 +957,12 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 ((TrackCell) holder.itemView).bind(row.track);
             } else if (row.type == ROW_SONG) {
                 ((SongCell) holder.itemView).bind(row.song);
+            } else if (row.type == ROW_SONG_AUDIO) {
+                SharedAudioCell cell = (SharedAudioCell) holder.itemView;
+                MessageObject mo = searchMo.get(row.song.id);
+                if (mo != null) {
+                    cell.setMessageObject(mo, position != getItemCount() - 1);
+                }
             } else if (row.type == ROW_EMPTY) {
                 ((TextView) holder.itemView).setText(getString(R.string.MusicSearchEmpty));
             } else if (row.type == ROW_RETRY) {
