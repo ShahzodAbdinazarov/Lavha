@@ -40,6 +40,7 @@
     <string name="SvipeMusicShuffle">Aralash</string>
     <string name="SvipeMusicVersions">Versiyalar</string>
     <string name="SvipeMusicSongs">Qo\'shiqlar</string>
+    <string name="SvipeMusicShareCaption">telegramda svipe bilan tinglang</string>
     <string name="SvipeMusicArtist">Ijrochi</string>
     <string name="SvipeMusicFeatured">Ishtirokchi</string>
     <!-- Uzbek counts take the counter word "ta" and do not inflect the noun. -->

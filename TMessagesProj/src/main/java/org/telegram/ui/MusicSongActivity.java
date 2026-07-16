@@ -14,12 +14,14 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLoader;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.ImageLoader;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.svipe.SvipeMusicResolver;
@@ -33,6 +35,7 @@ import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.ProfileActionsView;
 import org.telegram.ui.Components.RadialProgressView;
 import org.telegram.ui.Components.RecyclerListView;
+import org.telegram.ui.Components.ShareAlert;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -152,6 +155,7 @@ public class MusicSongActivity extends ProfileStyleActivity {
     protected void onCreateActions(ProfileActionsView view) {
         view.addAction(ProfileActionsView.ActionButton.PLAY, ProfileActionsView.KEY_PLAY);
         view.addAction(ProfileActionsView.ActionButton.SHUFFLE, ProfileActionsView.KEY_SHUFFLE);
+        view.addAction(ProfileActionsView.ActionButton.SHARE, ProfileActionsView.KEY_SHARE);
     }
 
     @Override
@@ -163,6 +167,63 @@ public class MusicSongActivity extends ProfileStyleActivity {
             }
         } else if (key == ProfileActionsView.KEY_SHUFFLE) {
             playShuffled();
+        } else if (key == ProfileActionsView.KEY_SHARE) {
+            share();
+        }
+    }
+
+    /**
+     * Shares the song as the owned {@code svipe.uz/<code>} link, mirroring how a reel is shared: the
+     * ACTUAL audio rides along as a clean document send carrying our caption, so the recipient plays
+     * the track inside Telegram and sees where it came from.
+     *
+     * <p>The link points at the SONG, not at the version playing right now — the song's default moves
+     * with the crowd vote, and the page resolves it at open time.
+     */
+    private void share() {
+        if (detail == null || getParentActivity() == null) return;
+        SvipeMusic.SongVersion v = defaultVersion();
+        String link = detail.shareUrl != null && !detail.shareUrl.isEmpty()
+                ? detail.shareUrl
+                : (v != null && v.username != null && !v.username.isEmpty()
+                        ? "https://t.me/" + v.username + "/" + v.messageId : null);
+        if (link == null) return;
+        // Promo line, blank line, then the bare URL — no scheme, because Telegram auto-links
+        // svipe.uz/<code> anyway and the raw text reads cleaner under the audio.
+        final String caption = getString(R.string.SvipeMusicShareCaption) + "\n\n"
+                + link.replaceFirst("^https?://", "");
+        try {
+            MessageObject mo = defaultMessage();
+            TLRPC.Document d = mo != null ? mo.getDocument() : null;
+            if (d instanceof TLRPC.TL_document) {
+                final TLRPC.TL_document document = (TLRPC.TL_document) d;
+                final MessageObject parent = mo;
+                ArrayList<MessageObject> messages = new ArrayList<>();
+                messages.add(mo);
+                ShareAlert alert = new ShareAlert(getParentActivity(), messages, null, false, null, false) {
+                    @Override
+                    protected void sendInternal(boolean withSound) {
+                        for (int a = 0; a < selectedDialogs.size(); a++) {
+                            long key = selectedDialogs.keyAt(a);
+                            SendMessagesHelper.SendMessageParams params = SendMessagesHelper.SendMessageParams.of(
+                                    document, null, null, key, null, null, caption, null, null, null,
+                                    withSound, 0, 0, 0, parent, null, false);
+                            SendMessagesHelper.getInstance(currentAccount).sendMessage(params);
+                        }
+                        dismiss();
+                    }
+                };
+                showDialog(alert);
+            } else {
+                // Versions resolve asynchronously (see load()), so tapping Share the instant the page
+                // opens legitimately finds no audio yet — share the text and link alone.
+                showDialog(new ShareAlert(getParentActivity(), null, caption, false, link, false));
+            }
+            if (v != null) {
+                SvipeMusic.sendEvent(currentAccount, v, "SHARE", null); // intent, not delivery
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
         }
     }
 
@@ -288,18 +349,22 @@ public class MusicSongActivity extends ProfileStyleActivity {
         return null;
     }
 
-    private MessageObject defaultMessage() {
+    /** The version this song plays by default — the crowd default, else the first listed. */
+    private SvipeMusic.SongVersion defaultVersion() {
         if (detail == null || detail.versions.isEmpty()) {
             return null;
         }
-        SvipeMusic.SongVersion pick = detail.versions.get(0);
         for (SvipeMusic.SongVersion v : detail.versions) {
             if (v.isDefault) {
-                pick = v;
-                break;
+                return v;
             }
         }
-        return moByKey.get(pick.key());
+        return detail.versions.get(0);
+    }
+
+    private MessageObject defaultMessage() {
+        SvipeMusic.SongVersion pick = defaultVersion();
+        return pick == null ? null : moByKey.get(pick.key());
     }
 
     private void play(SvipeMusic.SongVersion v) {

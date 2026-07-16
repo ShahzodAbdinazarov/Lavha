@@ -58,6 +58,9 @@ public class SvipeMusic {
         public long artChannelId;
         public int artMessageId;
         public Track defaultTrack;           // the version to play for this user (may be null)
+        // Owned svipe.uz/<code> link, minted server-side. Only the song DETAIL response carries one
+        // (that is the only screen that shares), so this stays null on shelf/search cards.
+        public String shareUrl;
 
         /** "Artist, Artist2 feat. Artist3" for one-line display. */
         public String artistLine() {
@@ -465,6 +468,7 @@ public class SvipeMusic {
         s.versionCount = o.optInt("version_count", 1);
         s.artChannelId = o.optLong("art_channel_id");
         s.artMessageId = o.optInt("art_message_id");
+        s.shareUrl = o.isNull("share_url") ? null : o.optString("share_url", null);
         JSONArray arts = o.optJSONArray("artists");
         if (arts != null) {
             for (int i = 0; i < arts.length(); i++) {
@@ -492,6 +496,7 @@ public class SvipeMusic {
         d.artChannelId = base.artChannelId;
         d.artMessageId = base.artMessageId;
         d.defaultTrack = base.defaultTrack;
+        d.shareUrl = base.shareUrl;
         JSONArray vers = o.optJSONArray("versions");
         if (vers != null) {
             for (int i = 0; i < vers.length(); i++) {
