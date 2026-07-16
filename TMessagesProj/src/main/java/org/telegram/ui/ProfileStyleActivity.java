@@ -740,8 +740,15 @@ public abstract class ProfileStyleActivity extends BaseFragment {
      * because the expanded avatar is measured as a full-width square.
      */
     private boolean canExpandAvatar() {
+        // Expand whenever there is a cover to show. ProfileActivity gates on hasNotThumb() because a
+        // peer with no full photo has nothing to open; a song, though, always carries cover art, and
+        // many carry ONLY the audio's embedded thumb (hasNotThumb() stays false, only a static thumb is
+        // ever set) — yet the user still expects to pull that cover open. So accept a static thumb too.
+        // Pulling ALL the way to the photo viewer stays gated on a real artwork URL
+        // (getExpandedPhotoObject() returns null otherwise, and openAvatarPhoto() no-ops), so a
+        // thumb-only song opens to the square cover and goes no further.
         return avatarImage != null
-                && avatarImage.getImageReceiver().hasNotThumb()
+                && (avatarImage.getImageReceiver().hasNotThumb() || avatarImage.getImageReceiver().hasStaticThumb())
                 && !AndroidUtilities.isTablet()
                 && !AndroidUtilities.isAccessibilityScreenReaderEnabled()
                 && AndroidUtilities.displaySize.x < AndroidUtilities.displaySize.y;
