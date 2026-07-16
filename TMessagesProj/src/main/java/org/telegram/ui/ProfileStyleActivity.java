@@ -119,6 +119,10 @@ public abstract class ProfileStyleActivity extends BaseFragment {
     private ValueAnimator expandAnimator;
     private float currentExpandAnimatorValue, currentExpandAnimatorFracture;
     private final float[] expandAnimatorValues = new float[]{0f, 1f};
+    // Release velocity of the drag, so a fast flick collapses/expands the header even short of the
+    // mid-point. Mirrors ProfileActivity#listViewVelocityY.
+    private android.view.VelocityTracker velocityTracker;
+    private float listViewVelocityY;
 
     private static int dp(float v) {
         return AndroidUtilities.dp(v);
@@ -507,6 +511,32 @@ public abstract class ProfileStyleActivity extends BaseFragment {
             @Override
             public boolean onTouchEvent(android.view.MotionEvent e) {
                 final int action = e.getAction();
+                // Track the drag velocity so ACTION_UP can tell a fast flick from a slow drag.
+                // Straight out of ProfileActivity#onTouchEvent.
+                if (action == android.view.MotionEvent.ACTION_DOWN) {
+                    if (velocityTracker == null) {
+                        velocityTracker = android.view.VelocityTracker.obtain();
+                    } else {
+                        velocityTracker.clear();
+                    }
+                    velocityTracker.addMovement(e);
+                } else if (action == android.view.MotionEvent.ACTION_MOVE) {
+                    if (velocityTracker != null) {
+                        velocityTracker.addMovement(e);
+                        velocityTracker.computeCurrentVelocity(1000);
+                        listViewVelocityY = velocityTracker.getYVelocity(e.getPointerId(e.getActionIndex()));
+                    }
+                } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
+                    if (velocityTracker != null) {
+                        if (action == android.view.MotionEvent.ACTION_UP) {
+                            velocityTracker.addMovement(e);
+                            velocityTracker.computeCurrentVelocity(1000);
+                            listViewVelocityY = velocityTracker.getYVelocity(e.getPointerId(e.getActionIndex()));
+                        }
+                        velocityTracker.recycle();
+                        velocityTracker = null;
+                    }
+                }
                 boolean result = super.onTouchEvent(e);
                 // Keep pulling once the cover is already square and, the moment the drag reaches the end
                 // of the padding, hand off to the photo viewer. ProfileActivity's listView does exactly
@@ -530,6 +560,22 @@ public abstract class ProfileStyleActivity extends BaseFragment {
                             if (isPulledDown) {
                                 smoothScrollBy(0, view.getTop() - getMeasuredWidth() - getActionsExtraHeight() + newTop(), CubicBezierInterpolator.EASE_OUT_QUINT);
                             } else {
+                                smoothScrollBy(0, view.getTop() - getHeaderExtraHeight(), CubicBezierInterpolator.EASE_OUT_QUINT);
+                            }
+                        } else {
+                            // Not expanding — the header is mid-COLLAPSE (avatar melting up into the
+                            // punch-hole). Snap it to one end so it never rests half-swallowed: past the
+                            // mid-point (or flung up) collapse the avatar down onto the actions strip,
+                            // otherwise spring the header back open. Ported verbatim from
+                            // ProfileActivity#onTouchEvent's else branch (the piece that was missing here).
+                            final boolean hasActions = getActionsExtraHeight() > 0;
+                            if (hasActions && extraHeight > 0 && (extraHeight < getHeaderExtraHeight() * 0.6f || listViewVelocityY < -1000f) && extraHeight > getActionsExtraHeight() * .6f) {
+                                smoothScrollBy(0, (int) (extraHeight - getActionsExtraHeight()), CubicBezierInterpolator.EASE_OUT_QUINT);
+                            } else if (hasActions && extraHeight > 0 && extraHeight < getActionsExtraHeight() * .6f) {
+                                smoothScrollBy(0, (int) (getActionsExtraHeight() - extraHeight), CubicBezierInterpolator.EASE_OUT_QUINT);
+                            } else if (!hasActions && extraHeight > 0 && listViewVelocityY < -1000f) {
+                                smoothScrollBy(0, (int) extraHeight, CubicBezierInterpolator.EASE_OUT_QUINT);
+                            } else if (extraHeight > 0) {
                                 smoothScrollBy(0, view.getTop() - getHeaderExtraHeight(), CubicBezierInterpolator.EASE_OUT_QUINT);
                             }
                         }
