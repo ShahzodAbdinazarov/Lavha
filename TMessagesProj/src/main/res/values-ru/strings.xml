@@ -302,6 +302,7 @@
     <string name="SvipeMusicShuffle">Вперемешку</string>
     <string name="SvipeMusicVersions">Версии</string>
     <string name="SvipeMusicSongs">Песни</string>
+    <string name="SvipeMusicAddingSoon">«%1$s» скоро добавим</string>
     <string name="SvipeMusicShareCaption">слушайте в telegram с svipe</string>
     <string name="SvipeMusicArtist">Исполнитель</string>
     <string name="SvipeMusicFeatured">При участии</string>

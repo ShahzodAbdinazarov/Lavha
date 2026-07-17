@@ -10964,6 +10964,7 @@
     <string name="SvipeMusicShuffle">Shuffle</string>
     <string name="SvipeMusicVersions">Versions</string>
     <string name="SvipeMusicSongs">Songs</string>
+    <string name="SvipeMusicAddingSoon">«%1$s» is being added — coming soon</string>
     <string name="SvipeMusicShareCaption">listen on telegram with svipe</string>
     <string name="SvipeMusicArtist">Artist</string>
     <string name="SvipeMusicFeatured">Featured</string>

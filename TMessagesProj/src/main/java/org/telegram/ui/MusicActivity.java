@@ -36,6 +36,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLoader;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
@@ -55,6 +56,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.SharedAudioCell;
 import org.telegram.ui.Components.AudioPlayerAlert;
 import org.telegram.ui.Components.BackupImageView;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.FragmentContextView;
 import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.CubicBezierInterpolator;
@@ -621,11 +623,17 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             onTrackTap(row);
         } else if (row.type == ROW_SONG || row.type == ROW_SONG_AUDIO) {
             if (row.song != null) {
-                // Search-history: a tapped result means they found what they searched for.
+                // Search-history: a tapped result means they found what they searched for. Tapping a
+                // Deezer placeholder is an even stronger demand signal (kind='deezer').
                 if (inSearchMode() && musicSearchLog != null) {
-                    musicSearchLog.click(searchedQuery, "song", "song:" + row.song.id, row.song.shownTitle());
+                    musicSearchLog.click(searchedQuery, row.song.playable ? "song" : "deezer",
+                            (row.song.playable ? "song:" : "deezer:") + Math.abs(row.song.id), row.song.shownTitle());
                 }
-                presentFragment(new MusicSongActivity(row.song.id, row.song.title));
+                if (!row.song.playable) {
+                    showAddingSoon(row.song);          // catalog-missing -> "Adding…" hint, no version picker
+                } else {
+                    presentFragment(new MusicSongActivity(row.song.id, row.song.title));
+                }
             }
         } else if (row.type == ROW_RETRY) {
             if (inSearchMode()) {
@@ -635,6 +643,21 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             } else {
                 loadHome();
             }
+        }
+    }
+
+    /** Deezer placeholder tapped: we don't host it yet, so hint "Adding…" instead of a version picker. */
+    private void showAddingSoon(SvipeMusic.Song s) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        try {
+            BulletinFactory.of(this).createSimpleBulletin(
+                    R.raw.chats_infotip,
+                    LocaleController.formatString("SvipeMusicAddingSoon", R.string.SvipeMusicAddingSoon, s.shownTitle())
+            ).show();
+        } catch (Exception e) {
+            FileLog.e(e);
         }
     }
 
@@ -1051,7 +1074,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             letterView.setText(title.isEmpty() ? "♪" : title.substring(0, 1).toUpperCase());
             String artistLine = s.shownArtist();
             subtitleView.setText(artistLine.isEmpty() ? getString(R.string.AudioUnknownArtist) : artistLine);
-            badgeView.setText(s.versionCount > 1 ? (s.versionCount + "  ›") : "›");
+            // A Deezer placeholder (catalog-missing) shows "+" (addable) instead of a version count.
+            badgeView.setText(!s.playable ? "+" : (s.versionCount > 1 ? (s.versionCount + "  ›") : "›"));
 
             // Real Deezer cover (small) when enriched; else clear it so the letter tile shows. Clearing is
             // required because cells are recycled — a stale cover must not bleed onto an unenriched song.

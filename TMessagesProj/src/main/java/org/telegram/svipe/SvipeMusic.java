@@ -77,6 +77,11 @@ public class SvipeMusic {
         public String coverUrl;
         public String coverSmallUrl;
         public String artistPhotoUrl;
+        // A5 "missing-song": a Deezer track we don't host yet. playable=false, no versions; the row
+        // shows name+cover+artist and the tap shows an "Adding…" hint instead of the version picker.
+        public boolean playable = true;
+        public long deezerTrackId;
+        public String previewUrl;
 
         /** "Artist, Artist2 feat. Artist3" for one-line display. */
         public String artistLine() {
@@ -502,6 +507,9 @@ public class SvipeMusic {
         s.coverUrl = o.isNull("cover_url") ? null : o.optString("cover_url", null);
         s.coverSmallUrl = o.isNull("cover_small_url") ? null : o.optString("cover_small_url", null);
         s.artistPhotoUrl = o.isNull("artist_photo_url") ? null : o.optString("artist_photo_url", null);
+        s.playable = o.optBoolean("playable", true);
+        s.deezerTrackId = o.optLong("deezer_track_id");
+        s.previewUrl = o.isNull("preview_url") ? null : o.optString("preview_url", null);
         JSONArray arts = o.optJSONArray("artists");
         if (arts != null) {
             for (int i = 0; i < arts.length(); i++) {
