@@ -190,6 +190,16 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         }
 
         iBlur3SourceColor = new BlurredBackgroundSourceColor();
+
+        Bulletin.Delegate delegate = new Bulletin.Delegate() {
+            @Override
+            public int getBottomOffset(int tag) {
+                return navigationBarHeight + dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN);
+            }
+        };
+
+        Bulletin.addDelegate(this, delegate);
+        Bulletin.addDelegate(contentView, delegate);
     }
 
     @Override
@@ -247,24 +257,12 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         checkUnreadCount(true);
         requestFullUnreadRecount();
 
-        Bulletin.Delegate delegate = new Bulletin.Delegate() {
-            @Override
-            public int getBottomOffset(int tag) {
-                return navigationBarHeight + dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN);
-            }
-        };
-
-        Bulletin.addDelegate(this, delegate);
-        Bulletin.addDelegate(contentView, delegate);
-
         showAccountChangeHint();
     }
 
     @Override
     public void onPause() {
         super.onPause();
-        Bulletin.removeDelegate(this);
-        Bulletin.removeDelegate(contentView);
         if (accountSwitchHint != null) {
             accountSwitchHint.hide();
         }
@@ -901,6 +899,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     @Override
     public void onFragmentDestroy() {
+        Bulletin.removeDelegate(this);
+        Bulletin.removeDelegate(contentView);
+
         if (observersGroup != null) {
             observersGroup.removeAllObservers();
             observersGroup = null;
