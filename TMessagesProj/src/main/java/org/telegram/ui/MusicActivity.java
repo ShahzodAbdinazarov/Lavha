@@ -48,6 +48,7 @@ import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.svipe.SvipeMusicResolver;
 import org.telegram.svipe.SvipeMusicTelemetry;
+import org.telegram.svipe.SvipeSearchLog;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
@@ -150,6 +151,9 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private boolean searchLoading;
     private boolean searchFailed;
     private Runnable pendingSearch;
+    // One per search visit: accumulates the query variants + the tapped result, reported to the backend
+    // (search-history). Minted lazily on the first query, cleared when the field empties (visit over).
+    private SvipeSearchLog musicSearchLog;
 
     private final HashSet<String> likedKeys = new HashSet<>();
     // Track.key() -> resolved real channel message; shared between thumbnail loading and playback
@@ -475,6 +479,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             searchMo.clear();
             searchLoading = false;
             searchFailed = false;
+            musicSearchLog = null;   // field cleared -> this search visit is over; next one is fresh
             updateRows();
             return;
         }
@@ -490,6 +495,11 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             if (!q.equals(query)) {
                 return;
             }
+            // Search-history: record this settled query + its result count against the visit.
+            if (musicSearchLog == null) {
+                musicSearchLog = new SvipeSearchLog(currentAccount, "music");
+            }
+            musicSearchLog.query(q, items != null ? items.size() : -1);
             searchedQuery = q;
             songResults.clear();
             searchMo.clear();
@@ -611,6 +621,10 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             onTrackTap(row);
         } else if (row.type == ROW_SONG || row.type == ROW_SONG_AUDIO) {
             if (row.song != null) {
+                // Search-history: a tapped result means they found what they searched for.
+                if (inSearchMode() && musicSearchLog != null) {
+                    musicSearchLog.click(searchedQuery, "song", "song:" + row.song.id, row.song.shownTitle());
+                }
                 presentFragment(new MusicSongActivity(row.song.id, row.song.title));
             }
         } else if (row.type == ROW_RETRY) {

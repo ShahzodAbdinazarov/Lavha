@@ -489,6 +489,12 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
     private FragmentSearchField fragmentSearchField;
     private SearchTextWatcher fragmentSearchFieldWatcher;
+    // Search-history (Svipe Search tab only): one visit's query variants + the tapped result, reported
+    // to the backend. Everything is gated on isSvipeSearchSection() so the normal Chats search is never
+    // touched. Fully-qualified type to avoid an import edit in this core file.
+    private org.telegram.svipe.SvipeSearchLog svipeSearchLog;
+    private Runnable svipeSearchLogPending;
+    private String svipeLastSearchText;
 
     private SearchTabsAndFiltersLayout searchTabsAndFiltersLayout;
     private ViewPagerFixed.TabsView searchTabsView;
@@ -3429,6 +3435,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                     searchViewPager.onTextChanged(text);
                 }
                 svipeUpdateExploreGridVisibility();
+                if (isSvipeSearchSection()) {
+                    svipeLogSearchQuery(text);
+                }
             }
 
             @Override
@@ -7598,6 +7607,29 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
      * the results. The grid only comes back when the user BACKs out of the search session (see
      * {@link #svipeSearchEngaged}) — never on a transient blur such as opening a media viewer.
      */
+    /** Search-history query logging for the Svipe Search tab (debounced; call from onTextChanged). The
+     *  session collapses variants; clearing the field ends the visit. Never runs on the Chats search. */
+    private void svipeLogSearchQuery(String text) {
+        if (svipeSearchLogPending != null) {
+            AndroidUtilities.cancelRunOnUIThread(svipeSearchLogPending);
+            svipeSearchLogPending = null;
+        }
+        final String q = text == null ? "" : text.trim();
+        if (q.length() < 2) {
+            svipeSearchLog = null;          // field emptied -> this search visit is over
+            svipeLastSearchText = null;
+            return;
+        }
+        svipeSearchLogPending = () -> {
+            svipeLastSearchText = q;
+            if (svipeSearchLog == null) {
+                svipeSearchLog = new org.telegram.svipe.SvipeSearchLog(currentAccount, "explore");
+            }
+            svipeSearchLog.query(q, -1);    // Telegram's native search gives no easy result count
+        };
+        AndroidUtilities.runOnUIThread(svipeSearchLogPending, 500);
+    }
+
     private void svipeUpdateExploreGridVisibility() {
         if (!isSvipeSearchSection() || svipeExploreGrid == null || fragmentSearchField == null) {
             return;
@@ -13396,6 +13428,11 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             if (initialDialogsType == DIALOGS_TYPE_WIDGET) {
                 onItemLongClick(searchViewPager.searchListView, view, position, x, y, -1, searchViewPager.dialogsSearchAdapter);
                 return;
+            }
+            // Search-history: tapping a result on the Svipe Search tab means they found something for
+            // the query — stamp it on the visit (only here, never the normal Chats search).
+            if (isSvipeSearchSection() && svipeSearchLog != null) {
+                svipeSearchLog.click(svipeLastSearchText, "result", null, null);
             }
             onItemClick(view, position, searchViewPager.dialogsSearchAdapter, x, y);
         });
