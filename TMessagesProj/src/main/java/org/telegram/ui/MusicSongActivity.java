@@ -280,19 +280,19 @@ public class MusicSongActivity extends ProfileStyleActivity {
 
     /** Fills the profile header: album art -> avatar, title -> name, artists -> status. */
     private void bindHeader() {
-        String t = detail.title != null && !detail.title.isEmpty() ? detail.title : getString(R.string.AudioUnknownTitle);
+        String t = detail.shownTitle() != null && !detail.shownTitle().isEmpty() ? detail.shownTitle() : getString(R.string.AudioUnknownTitle);
         if (detail.variantLabel != null && !detail.variantLabel.isEmpty()) {
             t = t + " (" + detail.variantLabel + ")";
         }
         setProfileTitle(t);
 
-        String line = detail.artistLine();
+        String line = detail.shownArtist();
         setProfileSubtitle(line.isEmpty() ? getString(R.string.AudioUnknownArtist) : line);
         onlineTextView.setOnClickListener(detail.artists.isEmpty() ? null :
                 v -> presentFragment(new MusicArtistActivity(detail.artists.get(0).id, detail.artists.get(0).name)));
 
-        // Telegram's gradient+initials tile from the song title, replaced by the default version's real
-        // album art when it has one — exactly how a profile falls back when a peer has no photo.
+        // Telegram's gradient+initials tile from the song title, replaced by real album art when we have
+        // one — exactly how a profile falls back when a peer has no photo.
         avatarDrawable.setInfo(songId, t, null);
         MessageObject mo = defaultMessage();
         TLRPC.Document doc = mo != null ? mo.getDocument() : null;
@@ -301,10 +301,13 @@ public class MusicSongActivity extends ProfileStyleActivity {
             thumbSize = null;
         }
         ImageLocation thumbLocation = thumbSize != null ? ImageLocation.getForDocument(thumbSize, doc) : null;
-        // The document thumb is only ~360px, which goes to mush once the header is pulled open to full
-        // width. AudioPlayerAlert has the same problem and solves it the same way: load the full-size
-        // cover art off the audio's artwork URL and keep the thumb as the placeholder behind it.
-        String artworkUrl = mo != null ? mo.getArtworkUrl(false) : null;
+        // Prefer the backend's Deezer album cover (the real, enriched art) when the song was enriched;
+        // else fall back to the audio file's own artwork URL (an iTunes lookup off the embedded tags).
+        // Both are full-size, so the embedded ~360px doc thumb stays only as the placeholder behind them
+        // (it goes to mush once the header is pulled open to full width — same trick AudioPlayerAlert uses).
+        String artworkUrl = detail.coverUrl != null && !detail.coverUrl.isEmpty()
+                ? detail.coverUrl
+                : (mo != null ? mo.getArtworkUrl(false) : null);
         if (artworkUrl != null && !artworkUrl.isEmpty()) {
             coverArtworkUrl = artworkUrl;
             avatarImage.setImage(ImageLocation.getForPath(artworkUrl), null, thumbLocation, null, avatarDrawable, null, 0, 1, mo);

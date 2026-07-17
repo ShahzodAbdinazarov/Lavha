@@ -13,7 +13,10 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.ImageLoader;
+import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.R;
 import org.telegram.svipe.SvipeMusic;
@@ -26,6 +29,7 @@ import org.telegram.ui.Components.ProfileActionsView;
 import org.telegram.ui.Components.RadialProgressView;
 import org.telegram.ui.Components.RecyclerListView;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -49,6 +53,7 @@ public class MusicArtistActivity extends ProfileStyleActivity {
     /** Songs whose default track resolved to a real audio message — the only ones that can be drawn/played. */
     private final ArrayList<SvipeMusic.Song> songs = new ArrayList<>();
     private final HashMap<Long, MessageObject> moBySongId = new HashMap<>();
+    private String artistPhotoUrl;   // Deezer artist photo shown as the avatar (null -> initials tile)
 
     public MusicArtistActivity(long artistId, String initialName) {
         this.artistId = artistId;
@@ -171,18 +176,43 @@ public class MusicArtistActivity extends ProfileStyleActivity {
     }
 
     private void bindHeader() {
-        String name = page.artist != null && page.artist.name != null && !page.artist.name.isEmpty()
-                ? page.artist.name
+        SvipeMusic.Artist artist = page.artist;
+        String name = artist != null && artist.shownName() != null && !artist.shownName().isEmpty()
+                ? artist.shownName()
                 : (initialName != null ? initialName : getString(R.string.AudioUnknownArtist));
         setProfileTitle(name);
 
         int n = page.songCount > 0 ? page.songCount : songs.size();
         setProfileSubtitle(LocaleController.formatPluralString("SvipeMusicSongCount", n));
 
-        // Artists have no photo, so this is always Telegram's gradient+initials tile — the same
-        // fallback a peer without an avatar gets.
+        // Real Deezer artist photo when the artist has been enriched; else Telegram's gradient+initials
+        // tile — the same fallback a peer without an avatar gets.
         avatarDrawable.setInfo(artistId, name, null);
-        avatarImage.getImageReceiver().setImageBitmap(avatarDrawable);
+        String photo = artist != null ? artist.photoUrl : null;
+        if (photo != null && !photo.isEmpty()) {
+            artistPhotoUrl = photo;
+            avatarImage.setImage(ImageLocation.getForPath(photo), null, avatarDrawable, null);
+        } else {
+            artistPhotoUrl = null;
+            avatarImage.getImageReceiver().setImageBitmap(avatarDrawable);
+        }
+        onAvatarChanged();
+    }
+
+    /**
+     * Pulling the expanded avatar open shows the artist photo full-screen — handed over as a PhotoEntry
+     * pointing at the already-cached file, exactly as {@link MusicSongActivity} does for cover art.
+     */
+    @Override
+    protected Object getExpandedPhotoObject() {
+        if (artistPhotoUrl == null) {
+            return null;
+        }
+        File file = ImageLoader.getHttpFilePath(artistPhotoUrl, "jpg");
+        if (file == null || !file.exists()) {
+            return null;
+        }
+        return new MediaController.PhotoEntry(0, 0, 0, file.getAbsolutePath(), 0, false, 0, 0, 0);
     }
 
     private void showProgress(boolean show) {

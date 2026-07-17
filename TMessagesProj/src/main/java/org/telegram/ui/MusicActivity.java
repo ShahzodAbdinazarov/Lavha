@@ -977,6 +977,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     // version-count badge. Tapping opens the version picker (MusicSongActivity).
     private class SongCell extends FrameLayout {
         private final TextView letterView;
+        private final BackupImageView coverImage;
         private final TextView titleView;
         private final TextView subtitleView;
         private final TextView badgeView;
@@ -995,6 +996,12 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             letterView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
             letterView.setGravity(Gravity.CENTER);
             cover.addView(letterView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+            // The real Deezer album cover, drawn over the letter tile once a song is enriched; while it
+            // is transparent (unset / loading) the letter shows through, so an unenriched row is unchanged.
+            coverImage = new BackupImageView(context);
+            coverImage.setRoundRadius(dp(10));
+            cover.addView(coverImage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
             LinearLayout texts = new LinearLayout(context);
             texts.setOrientation(LinearLayout.VERTICAL);
@@ -1022,15 +1029,27 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         }
 
         void bind(SvipeMusic.Song s) {
-            String title = s.title != null && !s.title.isEmpty() ? s.title : getString(R.string.AudioUnknownTitle);
+            String title = s.shownTitle() != null && !s.shownTitle().isEmpty() ? s.shownTitle() : getString(R.string.AudioUnknownTitle);
             if (s.variantLabel != null && !s.variantLabel.isEmpty()) {
                 title = title + " (" + s.variantLabel + ")";
             }
             titleView.setText(title);
             letterView.setText(title.isEmpty() ? "♪" : title.substring(0, 1).toUpperCase());
-            String artistLine = s.artistLine();
+            String artistLine = s.shownArtist();
             subtitleView.setText(artistLine.isEmpty() ? getString(R.string.AudioUnknownArtist) : artistLine);
             badgeView.setText(s.versionCount > 1 ? (s.versionCount + "  ›") : "›");
+
+            // Real Deezer cover (small) when enriched; else clear it so the letter tile shows. Clearing is
+            // required because cells are recycled — a stale cover must not bleed onto an unenriched song.
+            String cover = s.coverSmallUrl != null && !s.coverSmallUrl.isEmpty() ? s.coverSmallUrl
+                    : (s.coverUrl != null && !s.coverUrl.isEmpty() ? s.coverUrl : null);
+            if (cover != null) {
+                coverImage.setVisibility(VISIBLE);
+                coverImage.setImage(ImageLocation.getForPath(cover), "48_48", (Drawable) null, null);
+            } else {
+                coverImage.setImageDrawable(null);
+                coverImage.setVisibility(GONE);
+            }
         }
     }
 

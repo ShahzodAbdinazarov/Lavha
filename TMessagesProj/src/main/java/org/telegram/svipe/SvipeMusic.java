@@ -47,6 +47,15 @@ public class SvipeMusic {
         public int songCount;               // how many canonical songs this artist has
         public long artChannelId;
         public int artMessageId;
+        // Deezer enrichment overlay — carried on the artist PAGE only (a chip on a song does not have
+        // it). null/empty -> fall back to the canonical name and the initials tile.
+        public String displayName;          // real name from one of the artist's enriched songs
+        public String photoUrl;             // Deezer artist photo (xl) hotlink
+
+        /** Real name when the artist was enriched, else the canonical (tag-derived) name. */
+        public String shownName() {
+            return displayName != null && !displayName.isEmpty() ? displayName : name;
+        }
     }
 
     public static class Song {
@@ -61,6 +70,13 @@ public class SvipeMusic {
         // Owned svipe.uz/<code> link, minted server-side. Only the song DETAIL response carries one
         // (that is the only screen that shares), so this stays null on shelf/search cards.
         public String shareUrl;
+        // Deezer enrichment overlay — real name + cover/photo URLs (hotlink; never downloaded to us).
+        // null/empty -> fall back to the raw Telegram tag (title / artistLine()) and the letter/thumb art.
+        public String displayTitle;
+        public String displayArtist;
+        public String coverUrl;
+        public String coverSmallUrl;
+        public String artistPhotoUrl;
 
         /** "Artist, Artist2 feat. Artist3" for one-line display. */
         public String artistLine() {
@@ -74,6 +90,16 @@ public class SvipeMusic {
                 prevRole = a.role;
             }
             return sb.toString();
+        }
+
+        /** Real title when the song was Deezer-enriched, else the raw Telegram tag. */
+        public String shownTitle() {
+            return displayTitle != null && !displayTitle.isEmpty() ? displayTitle : title;
+        }
+
+        /** Enriched one-line artist when present, else the tag-based {@link #artistLine()}. */
+        public String shownArtist() {
+            return displayArtist != null && !displayArtist.isEmpty() ? displayArtist : artistLine();
         }
     }
 
@@ -336,6 +362,8 @@ public class SvipeMusic {
             a.name = res.optString("name", "");
             a.artChannelId = res.optLong("art_channel_id");
             a.artMessageId = res.optInt("art_message_id");
+            a.displayName = res.isNull("display_name") ? null : res.optString("display_name", null);
+            a.photoUrl = res.isNull("photo_url") ? null : res.optString("photo_url", null);
             p.artist = a;
             p.songCount = res.optInt("song_count");
             parseSongs(res.optJSONArray("songs"), p.songs);
@@ -469,6 +497,11 @@ public class SvipeMusic {
         s.artChannelId = o.optLong("art_channel_id");
         s.artMessageId = o.optInt("art_message_id");
         s.shareUrl = o.isNull("share_url") ? null : o.optString("share_url", null);
+        s.displayTitle = o.isNull("display_title") ? null : o.optString("display_title", null);
+        s.displayArtist = o.isNull("display_artist") ? null : o.optString("display_artist", null);
+        s.coverUrl = o.isNull("cover_url") ? null : o.optString("cover_url", null);
+        s.coverSmallUrl = o.isNull("cover_small_url") ? null : o.optString("cover_small_url", null);
+        s.artistPhotoUrl = o.isNull("artist_photo_url") ? null : o.optString("artist_photo_url", null);
         JSONArray arts = o.optJSONArray("artists");
         if (arts != null) {
             for (int i = 0; i < arts.length(); i++) {
@@ -497,6 +530,11 @@ public class SvipeMusic {
         d.artMessageId = base.artMessageId;
         d.defaultTrack = base.defaultTrack;
         d.shareUrl = base.shareUrl;
+        d.displayTitle = base.displayTitle;
+        d.displayArtist = base.displayArtist;
+        d.coverUrl = base.coverUrl;
+        d.coverSmallUrl = base.coverSmallUrl;
+        d.artistPhotoUrl = base.artistPhotoUrl;
         JSONArray vers = o.optJSONArray("versions");
         if (vers != null) {
             for (int i = 0; i < vers.length(); i++) {
