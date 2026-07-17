@@ -83,7 +83,7 @@ ALLOWED = re.compile(r"^(%[\d.]*[sdf]|\s|[.,:()\[\]/·—–›‹«»✓@#-])*$
 def hardcoded():
     bad = []
     for rel in our_java():
-        for n, line in enumerate((ROOT / rel).read_text(errors="ignore").splitlines(), 1):
+        for n, line in enumerate((ROOT / rel).read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
             s = line.strip()
             if s.startswith(("//", "*", "/*")):
                 continue
