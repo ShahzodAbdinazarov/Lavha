@@ -310,12 +310,15 @@ public class MusicSongActivity extends ProfileStyleActivity {
                 : (mo != null ? mo.getArtworkUrl(false) : null);
         if (artworkUrl != null && !artworkUrl.isEmpty()) {
             coverArtworkUrl = artworkUrl;
+            avatarKeepsRound = false;          // a real (square) cover -> square off when expanded
             avatarImage.setImage(ImageLocation.getForPath(artworkUrl), null, thumbLocation, null, avatarDrawable, null, 0, 1, mo);
         } else if (thumbLocation != null) {
             coverArtworkUrl = null;
+            avatarKeepsRound = false;
             avatarImage.setImage(thumbLocation, null, avatarDrawable, mo);
         } else {
             coverArtworkUrl = null;
+            avatarKeepsRound = true;           // no image -> initials tile stays a circle, even expanded
             avatarImage.getImageReceiver().setImageBitmap(avatarDrawable);
         }
         onAvatarChanged();

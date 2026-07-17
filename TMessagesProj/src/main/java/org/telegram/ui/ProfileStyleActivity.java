@@ -101,6 +101,10 @@ public abstract class ProfileStyleActivity extends BaseFragment {
 
     protected ProfileActivity.AvatarImageView avatarImage;
     protected final AvatarDrawable avatarDrawable = new AvatarDrawable();
+    // When true, the avatar stays a CIRCLE even as the header is pulled open (instead of squaring off for
+    // a full-bleed cover). Set for the letter/initials tile of a song/artist with no real image — a
+    // square letter tile reads as a bug. The subclass toggles it when it (re)binds the avatar.
+    protected boolean avatarKeepsRound = false;
     protected SimpleTextView nameTextView;
     protected SimpleTextView onlineTextView;
     protected ProfileActionsView actionsView;
@@ -1246,7 +1250,7 @@ public abstract class ProfileStyleActivity extends BaseFragment {
         avatarContainer.setScaleX(avatarScale);
         avatarContainer.setScaleY(avatarScale);
         avatarContainer.setTranslationY(AndroidUtilities.lerp((float) Math.ceil(avatarY), 0f, value));
-        avatarImage.setRoundRadiusForExpand((int) AndroidUtilities.lerp(dp(50), 0f, value));
+        avatarImage.setRoundRadiusForExpand(avatarKeepsRound ? dp(50) : (int) AndroidUtilities.lerp(dp(50), 0f, value));
         if (actionsView != null) {
             actionsView.setParentExpanded(value);
         }

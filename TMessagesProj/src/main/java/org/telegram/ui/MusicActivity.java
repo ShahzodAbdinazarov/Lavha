@@ -56,7 +56,6 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.SharedAudioCell;
 import org.telegram.ui.Components.AudioPlayerAlert;
 import org.telegram.ui.Components.BackupImageView;
-import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.FragmentContextView;
 import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.CubicBezierInterpolator;
@@ -629,11 +628,10 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                     musicSearchLog.click(searchedQuery, row.song.playable ? "song" : "deezer",
                             (row.song.playable ? "song:" : "deezer:") + Math.abs(row.song.id), row.song.shownTitle());
                 }
-                if (!row.song.playable) {
-                    showAddingSoon(row.song);          // catalog-missing -> "Adding…" hint, no version picker
-                } else {
-                    presentFragment(new MusicSongActivity(row.song.id, row.song.title));
-                }
+                // Open the song page for both. A Deezer placeholder (negative id) opens too: the backend
+                // serves a Deezer-only detail with an EMPTY version list, so the page shows its name +
+                // cover + artist and simply has no versions yet.
+                presentFragment(new MusicSongActivity(row.song.id, row.song.shownTitle()));
             }
         } else if (row.type == ROW_RETRY) {
             if (inSearchMode()) {
@@ -643,21 +641,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             } else {
                 loadHome();
             }
-        }
-    }
-
-    /** Deezer placeholder tapped: we don't host it yet, so hint "Adding…" instead of a version picker. */
-    private void showAddingSoon(SvipeMusic.Song s) {
-        if (getParentActivity() == null) {
-            return;
-        }
-        try {
-            BulletinFactory.of(this).createSimpleBulletin(
-                    R.raw.chats_infotip,
-                    LocaleController.formatString("SvipeMusicAddingSoon", R.string.SvipeMusicAddingSoon, s.shownTitle())
-            ).show();
-        } catch (Exception e) {
-            FileLog.e(e);
         }
     }
 

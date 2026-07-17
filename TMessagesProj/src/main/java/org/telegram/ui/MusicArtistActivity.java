@@ -191,9 +191,11 @@ public class MusicArtistActivity extends ProfileStyleActivity {
         String photo = artist != null ? artist.photoUrl : null;
         if (photo != null && !photo.isEmpty()) {
             artistPhotoUrl = photo;
+            avatarKeepsRound = false;          // a real photo -> square off when expanded
             avatarImage.setImage(ImageLocation.getForPath(photo), null, avatarDrawable, null);
         } else {
             artistPhotoUrl = null;
+            avatarKeepsRound = true;           // no photo -> initials tile stays a circle, even expanded
             avatarImage.getImageReceiver().setImageBitmap(avatarDrawable);
         }
         onAvatarChanged();
