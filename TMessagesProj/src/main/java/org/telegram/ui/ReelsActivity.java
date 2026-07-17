@@ -2656,12 +2656,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void reportMessage(FeedItem item) {
-        if (item == null || getParentActivity() == null) return;
-        ArrayList<Integer> ids = new ArrayList<>();
-        ids.add(item.messageId);
+        if (item == null || item.mo == null || getParentActivity() == null) return;
         try {
-            ReportBottomSheet.open(account, getParentActivity(), -item.channelId, false, ids,
-                    BulletinFactory.of(this), getResourceProvider(), new byte[0], null, status -> {});
+            // Telegram 12.9.0 made ReportBottomSheet.open(...) private and routes reporting through
+            // the public openMessage(...) entry point; feed the reel's already-resolved MessageObject.
+            ReportBottomSheet.openMessage(this, item.mo);
         } catch (Exception e) { FileLog.e(e); }
     }
 
