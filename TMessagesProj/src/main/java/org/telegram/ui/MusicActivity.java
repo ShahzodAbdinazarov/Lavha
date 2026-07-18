@@ -13,6 +13,7 @@ import android.graphics.PorterDuffColorFilter;
 import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
@@ -22,8 +23,11 @@ import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -44,7 +48,10 @@ import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.SharedConfig;
+import org.telegram.svipe.SvipeFavourite;
+import org.telegram.svipe.SvipeFavouritesSet;
 import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.svipe.SvipeMusicResolver;
@@ -64,6 +71,7 @@ import org.telegram.ui.Components.FragmentSearchField;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.PlayPauseDrawable;
 import org.telegram.ui.Components.RecyclerListView;
+import org.telegram.ui.Components.ScrollSlidingTextTabStrip;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.DownscaleScrollableNoiseSuppressor;
 import org.telegram.ui.Components.blur3.RenderNodeWithHash;
@@ -98,6 +106,10 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private static final int ROW_RETRY = 5;
     private static final int ROW_SONG = 6;      // canonical song card — fallback when the default version can't resolve
     private static final int ROW_SONG_AUDIO = 7; // canonical song as a native SharedAudioCell (default version resolved)
+    // Rows of the pinned "Favourite songs" section (its own inner list, never mixed with search rows).
+    private static final int ROW_FAV_AUDIO = 8;  // resolved to a real message -> native SharedAudioCell
+    private static final int ROW_FAV_CARD = 9;   // not resolvable here (private source) -> lightweight card
+    private static final int ROW_FAV_EMPTY = 10;
 
     private static final int SEARCH_MIN_CHARS = 2;
     private static final int SEARCH_PAGE = 50;
@@ -116,6 +128,20 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private FragmentContextView fragmentContextView;
     private FrameLayout contextWrap;
 
+    /* "Home" is the vibe hero with the "Favourite songs" panel pulled up over it. The panel rests
+     * peeking above the bottom tabs and is dragged (or tapped) up until its tab strip meets the
+     * now-playing bar; releasing past a threshold snaps it the rest of the way. Its travel drives
+     * everything else: the hero recedes (scales down + fades) instead of scrolling away, and the
+     * favourites list fades in from nothing. */
+    private FavouritesPanel favPanel;
+    private final ArrayList<SvipeFavourite> favourites = new ArrayList<>();
+    // Favourite key -> its entry in the CURRENT favQueue, so rows render as native audio cells.
+    private final HashMap<String, MessageObject> favMo = new HashMap<>();
+    // Track.key() -> resolved channel message, kept across rebuilds so re-forming the queue is free.
+    private final HashMap<String, TLRPC.Message> favResolvedMsgs = new HashMap<>();
+    private SvipeMusicQueue favQueue;
+    private boolean favResolving;
+
     /* Liquid glass (iBlur3) — the same pipeline DialogsActivity uses to frost its search pill and top
      * panel. When LiteMode liquid glass is enabled (S+), the search pill and the now-playing island
      * render real frosted glass over whatever is scrolling behind them; otherwise they keep the plain
@@ -125,8 +151,9 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private BlurredBackgroundSourceRenderNode iBlur3SourceGlass;
     private BlurredBackgroundSourceColor iBlur3SourceColor;
     private BlurredBackgroundDrawableViewFactory iBlur3FactoryLiquidGlass;
-    private IBlur3Capture iBlur3Capture;
     private IBlur3Capture iBlur3VibeCapture;
+    private IBlur3Capture iBlur3PanelCapture;
+    private IBlur3Capture iBlur3Capture;
     private boolean iBlur3Active;
     private final ArrayList<RectF> iBlur3Positions = new ArrayList<>();
     private final RectF iBlur3PositionTop = new RectF();
@@ -194,6 +221,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         nc.addObserver(this, NotificationCenter.messagePlayingDidStart);
         nc.addObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
         nc.addObserver(this, NotificationCenter.messagePlayingDidReset);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeFavouritesChanged);
         SvipeMusicTelemetry.getInstance(currentAccount).attach();
         return super.onFragmentCreate();
     }
@@ -204,6 +232,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         nc.removeObserver(this, NotificationCenter.messagePlayingDidStart);
         nc.removeObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
         nc.removeObserver(this, NotificationCenter.messagePlayingDidReset);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeFavouritesChanged);
         super.onFragmentDestroy();
     }
 
@@ -220,12 +249,84 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         // ContentView.dispatchDraw. Recapturing the scrolling content here (before children draw) keeps
         // the frosted pill/island in sync with whatever is behind them.
         root = new FrameLayout(context) {
+            private float dragDownY, dragDownX;
+            private boolean draggingPanel;
+            private VelocityTracker heroVelocity;
+
             @Override
             protected void dispatchDraw(Canvas canvas) {
                 if (iBlur3Active && Build.VERSION.SDK_INT >= 31 && scrollableViewNoiseSuppressor != null) {
                     blur3_InvalidateBlur();
                 }
                 super.dispatchDraw(canvas);
+            }
+
+            @Override
+            protected void onLayout(boolean changed, int l, int t, int r, int b) {
+                super.onLayout(changed, l, t, r, b);
+                if (favPanel != null) {
+                    favPanel.onRootLaidOut();
+                }
+            }
+
+            /**
+             * The favourites panel can also be pulled up from the My Vibe card itself, not just by its
+             * own strip — so the drag is caught here, above the hero. Only an upward drag past the touch
+             * slop is taken: anything shorter stays a tap and still toggles playback.
+             */
+            @Override
+            public boolean onInterceptTouchEvent(MotionEvent ev) {
+                if (inSearchMode() || favPanel == null) {
+                    return super.onInterceptTouchEvent(ev);
+                }
+                int action = ev.getAction();
+                if (action == MotionEvent.ACTION_DOWN) {
+                    dragDownY = ev.getRawY();
+                    dragDownX = ev.getRawX();
+                    draggingPanel = false;
+                } else if (action == MotionEvent.ACTION_MOVE && !draggingPanel && !favPanel.isOpen()) {
+                    float dy = ev.getRawY() - dragDownY;
+                    // Below the search pill only, so dragging over the field never moves the panel.
+                    boolean belowChrome = ev.getY() > AndroidUtilities.statusBarHeight + dp(58);
+                    if (belowChrome && dy < -ViewConfiguration.get(getContext()).getScaledTouchSlop()
+                            && Math.abs(dy) > Math.abs(ev.getRawX() - dragDownX)) {
+                        draggingPanel = true;
+                        dragDownY = ev.getRawY();
+                        favPanel.externalDragBegin();
+                        heroVelocity = VelocityTracker.obtain();
+                        return true;
+                    }
+                }
+                return super.onInterceptTouchEvent(ev);
+            }
+
+            @SuppressLint("ClickableViewAccessibility")
+            @Override
+            public boolean onTouchEvent(MotionEvent ev) {
+                if (!draggingPanel || favPanel == null) {
+                    return super.onTouchEvent(ev);
+                }
+                if (heroVelocity != null) {
+                    heroVelocity.addMovement(ev);
+                }
+                int action = ev.getAction();
+                if (action == MotionEvent.ACTION_MOVE) {
+                    favPanel.externalDragMove(ev.getRawY() - dragDownY);
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    float vy = 0;
+                    if (heroVelocity != null) {
+                        heroVelocity.computeCurrentVelocity(1000);
+                        vy = heroVelocity.getYVelocity();
+                        heroVelocity.recycle();
+                        heroVelocity = null;
+                    }
+                    favPanel.externalDragEnd(vy);
+                    draggingPanel = false;
+                    return true;
+                }
+                return super.onTouchEvent(ev);
             }
         };
         root.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
@@ -241,9 +342,18 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                     vibeScreen.draw(canvas);
                 }
             };
+            iBlur3PanelCapture = (canvas, position) -> {
+                if (favPanel != null) {
+                    favPanel.draw(canvas);
+                }
+            };
             iBlur3Capture = (canvas, position) -> {
                 if (vibeScreen != null && vibeScreen.getVisibility() == View.VISIBLE) {
                     Blur3Utils.captureRelativeParent(iBlur3VibeCapture, canvas, position, vibeScreen, root, 255);
+                }
+                // The panel slides over the hero, so the frosted pill and island must sample it too.
+                if (favPanel != null && favPanel.getVisibility() == View.VISIBLE) {
+                    Blur3Utils.captureRelativeParent(iBlur3PanelCapture, canvas, position, favPanel, root, 255);
                 }
                 if (listView != null && listView.getVisibility() == View.VISIBLE) {
                     Blur3Utils.captureRelativeParent(listView, canvas, position, listView, root, 255);
@@ -253,7 +363,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         }
 
         // Full-screen music-reactive backdrop + centered hero button (the "home" screen). It sits at
-        // the very back and spans under the status bar, so the gradient reaches the top edge.
+        // the very back and spans under the status bar, so the gradient reaches the top edge. The
+        // favourites panel is pulled up OVER it rather than pushing it off screen.
         vibeScreen = new VibeScreen(context);
         root.addView(vibeScreen, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
@@ -284,6 +395,10 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             }
         });
         root.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+        // The favourites panel rides above the hero and below the floating chrome.
+        favPanel = new FavouritesPanel(context);
+        root.addView(favPanel, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         // Floating search bar over everything — no title, just the pill. Container is transparent so
         // the backdrop shows through around it (Yandex-Music style).
@@ -355,8 +470,633 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         fragmentView = root;
         updateRows();
         ensureHomeLoaded();
+        // Local store first (instant, offline), then reconcile with the backend once per process.
+        rebuildFavourites();
+        SvipeFavouritesSet.getInstance(currentAccount).syncFromServer();
         return root;
     }
+
+    /* home: the vibe hero with the favourites panel pulled up over it */
+
+    /** The strip's own slot inside the panel: an 8dp margin above a 50dp strip. */
+    private static final int STRIP_MARGIN_DP = 8;
+    private static final int STRIP_HEIGHT_DP = 50;
+    /**
+     * Breathing room the strip keeps from the chrome above and below it. The bottom gap is the larger
+     * of the two on purpose: the collapsed pill and the main tab bar are both dark rounded surfaces, and
+     * at the same 2dp they read as one glued-together blob rather than two separate controls.
+     */
+    private static final int STRIP_GAP_TOP_DP = 2;
+    private static final int STRIP_GAP_BOTTOM_DP = 8;
+    /**
+     * Slack between the strip's 50dp box and the pill it actually draws inside it (its own 7dp padding
+     * plus the blurred pill drawable's inset). Measured on device — the pill is drawn by
+     * ScrollSlidingTextTabStrip's background, so there is no child view to read it off.
+     */
+    private static final int STRIP_PILL_INSET_DP = 11;
+
+    /** Height of the panel's own header — the tab strip plus the margin above and below it. */
+    private int panelHeaderHeight() {
+        return dp(STRIP_MARGIN_DP + STRIP_HEIGHT_DP + STRIP_MARGIN_DP);
+    }
+
+    /** Where the pill the strip draws sits inside the panel, top and bottom. */
+    private int stripPillTopInPanel() {
+        return dp(STRIP_MARGIN_DP + STRIP_PILL_INSET_DP);
+    }
+
+    private int stripPillBottomInPanel() {
+        return dp(STRIP_MARGIN_DP + STRIP_HEIGHT_DP - STRIP_PILL_INSET_DP);
+    }
+
+    /** Top edge of the visible main tab bar (it belongs to the host activity, so this is by constant). */
+    private int bottomChromeTop() {
+        int h = root != null && root.getHeight() > 0 ? root.getHeight() : AndroidUtilities.displaySize.y;
+        int tabs = hasMainTabs
+                ? dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN) : 0;
+        return h - AndroidUtilities.navigationBarHeight - tabs;
+    }
+
+    /**
+     * Bottom edge of the chrome the open panel tucks under: the now-playing bar when one is showing,
+     * otherwise the floating search pill. Read off the real views so it stays correct whatever their
+     * paddings are, with the layout formula only as a pre-layout fallback.
+     */
+    private int topChromeBottom() {
+        if (contextWrap != null && contextWrap.getVisibility() == View.VISIBLE && contextWrap.getHeight() > 0) {
+            return contextWrap.getBottom();
+        }
+        if (fragmentSearchField != null && fragmentSearchField.getHeight() > 0) {
+            return ((View) fragmentSearchField.getParent()).getTop() + fragmentSearchField.getBottom();
+        }
+        return AndroidUtilities.statusBarHeight + dp(8) + dp(48);
+    }
+
+    /**
+     * "Favourite songs" — a panel that rides over the vibe hero.
+     *
+     * <p>Collapsed it peeks above the bottom tabs showing only its strip; open, the strip rests under
+     * the now-playing bar with the list below. It is dragged directly (or tapped open), and released
+     * past a threshold — or with enough flick — it snaps the rest of the way rather than stopping where
+     * the finger left it. Its travel is published as {@link #progress}, which the hero uses to recede
+     * and the list uses to fade in.
+     */
+    private class FavouritesPanel extends FrameLayout {
+
+        /** The list is fully opaque well before the panel is, so it never fades in at the last moment. */
+        private static final float ALPHA_FULL_AT = 0.4f;
+        /** Past this much travel a release opens rather than falls back. */
+        private static final float SNAP_AT = 0.35f;
+
+        final ScrollSlidingTextTabStrip tabStrip;
+        final RecyclerListView innerListView;
+        private final FavAdapter favAdapter;
+
+        private final Drawable panelBackground;
+        private final int touchSlop;
+        private VelocityTracker velocityTracker;
+        private ValueAnimator settleAnimator;
+
+        private float collapsedY = -1, expandedY;
+        private float progress;                 // 0 = peeking, 1 = fully open
+        private boolean dragging;
+        private float downY, downX, dragStartTranslation;
+
+        FavouritesPanel(Context context) {
+            super(context);
+            touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
+
+            // Transparent while collapsed so the aura shows through around the peeking pill; it fades to
+            // the solid window background as the panel opens.
+            panelBackground = new ColorDrawable(getThemedColor(Theme.key_windowBackgroundWhite));
+            panelBackground.setAlpha(0);
+            setBackground(panelBackground);
+
+            innerListView = new RecyclerListView(context);
+            innerListView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
+            innerListView.setGlowColor(0);
+            innerListView.setClipToPadding(false);
+            innerListView.setVerticalScrollBarEnabled(false);
+            innerListView.setAlpha(0f);
+            innerListView.setAdapter(favAdapter = new FavAdapter());
+            innerListView.setOnItemClickListener((view, position) -> onFavouriteClick(position));
+            innerListView.setOnScrollListener(new RecyclerView.OnScrollListener() {
+                @Override
+                public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+                    if (iBlur3Active && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && scrollableViewNoiseSuppressor != null) {
+                        scrollableViewNoiseSuppressor.onScrolled(dx, dy);
+                    }
+                }
+            });
+            addView(innerListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+            tabStrip = new ScrollSlidingTextTabStrip(context, getResourceProvider());
+            tabStrip.setColors(Theme.key_profile_tabSelectedLine, Theme.key_profile_tabSelectedText, Theme.key_profile_tabText, Theme.key_profile_tabSelector);
+            tabStrip.setUseMinimalWidth(true);
+            tabStrip.addTextTab(0, getString(R.string.SvipeFavouriteSongs));
+            tabStrip.finishAddingTabs();
+            tabStrip.setInitialTabId(0);
+            try {
+                // SharedMediaLayout's own fallback when it is handed no liquid-glass factory: the same
+                // pill drawable off a plain colour source, minus the render-node pipeline.
+                final BlurredBackgroundSourceColor source = new BlurredBackgroundSourceColor();
+                source.setColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                final BlurredBackgroundDrawable pill = new BlurredBackgroundDrawableViewFactory(source)
+                        .create(tabStrip, BlurredBackgroundProviderImpl.topPanel(getResourceProvider()));
+                pill.setRadius(dp(18));
+                pill.setPadding(dp(6.666f));
+                tabStrip.setPadding(0, dp(7), 0, dp(7));
+                tabStrip.setClipToPadding(false);
+                tabStrip.setBackground(null);
+                tabStrip.setBlurredBackground(pill);
+                tabStrip.setOpen(false);
+            } catch (Throwable ignore) {
+                // No pill is better than no tab.
+            }
+            addView(tabStrip, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 50, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 8, 0, 8));
+
+            applyInsets();
+        }
+
+        /** Rows start below the strip and clear the bottom tabs. */
+        void applyInsets() {
+            innerListView.setPadding(0, panelHeaderHeight(), 0, listBottomPadding());
+        }
+
+        void notifyChanged() {
+            favAdapter.notifyDataSetChanged();
+        }
+
+        boolean isOpen() {
+            return progress > 0.5f;
+        }
+
+        /**
+         * Recompute the travel, keeping the current state.
+         *
+         * <p>Collapsed, the strip's bottom edge sits {@link #STRIP_GAP_DP} above the main tab bar; open,
+         * its top edge sits the same distance below the now-playing bar (or the search pill when nothing
+         * is playing). When the now-playing bar appears or disappears under an open panel that second
+         * number moves, so the panel glides to the new resting place instead of jumping.
+         */
+        void applyGeometry(boolean animate) {
+            if (root == null || root.getHeight() == 0) {
+                return;
+            }
+            // Both ends are expressed against the pill the strip DRAWS, not its 50dp box, so the 2dp
+            // reads as 2dp on screen.
+            float newCollapsed = bottomChromeTop() - dp(STRIP_GAP_BOTTOM_DP) - stripPillBottomInPanel();
+            float newExpanded = topChromeBottom() + dp(STRIP_GAP_TOP_DP) - stripPillTopInPanel();
+            if (newCollapsed == collapsedY && newExpanded == expandedY) {
+                return;
+            }
+            collapsedY = newCollapsed;
+            expandedY = newExpanded;
+            if (animate && settleAnimator == null && !dragging) {
+                float target = collapsedY + (expandedY - collapsedY) * progress;
+                animate().translationY(target).setDuration(220)
+                        .setInterpolator(CubicBezierInterpolator.DEFAULT).start();
+            } else {
+                setProgress(progress);
+            }
+        }
+
+        void onRootLaidOut() {
+            applyGeometry(false);
+        }
+
+        void setProgress(float p) {
+            progress = Math.max(0f, Math.min(1f, p));
+            if (collapsedY < 0) {
+                return;     // not measured yet; onRootLaidOut re-applies
+            }
+            setTranslationY(collapsedY + (expandedY - collapsedY) * progress);
+
+            // The list is fully there at 40% of the travel, so a partial drag already reads as content
+            // rather than as a mostly-blank sheet.
+            float contentAlpha = Math.min(1f, progress / ALPHA_FULL_AT);
+            innerListView.setAlpha(contentAlpha);
+            panelBackground.setAlpha((int) (contentAlpha * 255));
+            invalidate();
+
+            // The hero recedes instead of scrolling away: it shrinks and dims as the panel covers it.
+            if (vibeScreen != null) {
+                vibeScreen.setRecede(progress);
+            }
+        }
+
+        void animateTo(boolean open) {
+            if (settleAnimator != null) {
+                settleAnimator.cancel();
+            }
+            float target = open ? 1f : 0f;
+            settleAnimator = ValueAnimator.ofFloat(progress, target);
+            // Slow enough to read as a movement rather than a cut, still short enough to feel direct.
+            settleAnimator.setDuration(Math.max(260, (long) (460 * Math.abs(target - progress))));
+            settleAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+            settleAnimator.addUpdateListener(a -> setProgress((float) a.getAnimatedValue()));
+            settleAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(android.animation.Animator animation) {
+                    settleAnimator = null;
+                }
+            });
+            settleAnimator.start();
+        }
+
+        /** True when the list is scrolled to its very top (so a downward drag closes the panel). */
+        private boolean listAtTop() {
+            return !innerListView.canScrollVertically(-1);
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(MotionEvent ev) {
+            if (ev.getAction() == MotionEvent.ACTION_DOWN) {
+                downY = ev.getRawY();
+                downX = ev.getRawX();
+                dragging = false;
+                dragStartTranslation = progress;
+                if (settleAnimator != null) {
+                    settleAnimator.cancel();
+                    settleAnimator = null;
+                }
+                // While closed the panel owns the whole gesture: the only thing showing is the strip,
+                // and ScrollSlidingTextTabStrip is a HorizontalScrollView that would otherwise swallow
+                // the tap and the drag before either ever reached us.
+                if (!isOpen()) {
+                    return true;
+                }
+            } else if (ev.getAction() == MotionEvent.ACTION_MOVE && !dragging) {
+                float dy = ev.getRawY() - downY;
+                if (Math.abs(dy) > touchSlop && Math.abs(dy) > Math.abs(ev.getRawX() - downX)) {
+                    // Opening: any drag steers the panel. Open: only a downward drag, and only once the
+                    // list has nothing left to give, so the list scrolls before the panel closes.
+                    if (!isOpen() || (dy > 0 && listAtTop())) {
+                        dragging = true;
+                        downY = ev.getRawY();
+                        dragStartTranslation = progress;
+                        return true;
+                    }
+                }
+            }
+            return super.onInterceptTouchEvent(ev);
+        }
+
+        @SuppressLint("ClickableViewAccessibility")
+        @Override
+        public boolean onTouchEvent(MotionEvent ev) {
+            if (velocityTracker == null) {
+                velocityTracker = VelocityTracker.obtain();
+            }
+            // Feed the tracker coordinates in a frame that does NOT move with the panel, or the measured
+            // velocity is the finger's speed minus the panel's and always reads near zero.
+            MotionEvent stable = MotionEvent.obtain(ev);
+            stable.offsetLocation(0, getTranslationY());
+            velocityTracker.addMovement(stable);
+            stable.recycle();
+            final int action = ev.getAction();
+            if (action == MotionEvent.ACTION_DOWN) {
+                downY = ev.getRawY();
+                downX = ev.getRawX();
+                dragging = false;
+                dragStartTranslation = progress;
+                return true;
+            }
+            if (action == MotionEvent.ACTION_MOVE) {
+                // RAW coordinates throughout: this view is what the drag is moving, so ev.getY() shifts
+                // by exactly the amount we translate and the gesture would cancel itself out.
+                float dy = ev.getRawY() - downY;
+                if (!dragging && Math.abs(dy) > touchSlop) {
+                    dragging = true;
+                    downY = ev.getRawY();
+                    dy = 0;
+                }
+                if (dragging && collapsedY > 0) {
+                    // Dragging up (negative dy) opens; the travel is collapsedY -> expandedY.
+                    setProgress(dragStartTranslation + (-dy) / (collapsedY - expandedY));
+                }
+                return true;
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                velocityTracker.computeCurrentVelocity(1000);
+                float vy = velocityTracker.getYVelocity();
+                velocityTracker.recycle();
+                velocityTracker = null;
+                if (!dragging && action == MotionEvent.ACTION_UP) {
+                    // A tap on the peeking strip opens the panel — the whole point of leaving it visible.
+                    animateTo(!isOpen());
+                    return true;
+                }
+                settleFromGesture(vy, dragStartTranslation);
+                dragging = false;
+                return true;
+            }
+            return super.onTouchEvent(ev);
+        }
+
+        /** Released mid-drag: follow a flick, else fall to whichever end the travel is closest to. */
+        void settleFromGesture(float velocityY, float startProgress) {
+            boolean open;
+            if (Math.abs(velocityY) > dp(400)) {
+                open = velocityY < 0;                       // flicked: follow the flick
+            } else {
+                open = progress > (startProgress > 0.5f ? 1f - SNAP_AT : SNAP_AT);
+            }
+            animateTo(open);
+        }
+
+        /* ---- drag started somewhere else on the screen (the My Vibe card) ---- */
+
+        void externalDragBegin() {
+            if (settleAnimator != null) {
+                settleAnimator.cancel();
+                settleAnimator = null;
+            }
+            dragStartTranslation = progress;
+        }
+
+        void externalDragMove(float dyFromStart) {
+            if (collapsedY > 0) {
+                setProgress(dragStartTranslation + (-dyFromStart) / (collapsedY - expandedY));
+            }
+        }
+
+        void externalDragEnd(float velocityY) {
+            settleFromGesture(velocityY, dragStartTranslation);
+        }
+    }
+
+    /** Rows of the favourites section: a resolved audio cell, a plain card, or the empty state. */
+    private class FavAdapter extends RecyclerListView.SelectionAdapter {
+
+        @Override
+        public boolean isEnabled(RecyclerView.ViewHolder holder) {
+            if (holder.getItemViewType() == ROW_FAV_EMPTY) {
+                return false;
+            }
+            // Don't offer a ripple on a row whose tap could not do anything.
+            int pos = holder.getAdapterPosition();
+            return pos >= 0 && pos < favourites.size() && isFavouriteActionable(favourites.get(pos));
+        }
+
+        @Override
+        public int getItemCount() {
+            return favourites.isEmpty() ? 1 : favourites.size();
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            if (favourites.isEmpty()) {
+                return ROW_FAV_EMPTY;
+            }
+            return favMo.containsKey(favourites.get(position).key) ? ROW_FAV_AUDIO : ROW_FAV_CARD;
+        }
+
+        @NonNull
+        @Override
+        public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            Context context = parent.getContext();
+            View view;
+            if (viewType == ROW_FAV_AUDIO) {
+                view = new SharedAudioCell(context, getResourceProvider());
+            } else if (viewType == ROW_FAV_CARD) {
+                view = new FavouriteCell(context);
+            } else {
+                TextView tv = new TextView(context);
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+                tv.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
+                tv.setGravity(Gravity.CENTER);
+                tv.setPadding(dp(20), dp(40), dp(20), dp(28));
+                tv.setText(getString(R.string.SvipeFavouritesEmpty));
+                view = tv;
+            }
+            view.setLayoutParams(new RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT, RecyclerView.LayoutParams.WRAP_CONTENT));
+            return new RecyclerListView.Holder(view);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
+            if (favourites.isEmpty()) {
+                return;
+            }
+            SvipeFavourite f = favourites.get(position);
+            if (holder.getItemViewType() == ROW_FAV_AUDIO) {
+                MessageObject mo = playingCopyOf(f);
+                if (mo != null) {
+                    ((SharedAudioCell) holder.itemView).setMessageObject(mo, position != getItemCount() - 1);
+                }
+            } else if (holder.getItemViewType() == ROW_FAV_CARD) {
+                ((FavouriteCell) holder.itemView).bind(f);
+            }
+        }
+    }
+
+    /** A favourite we cannot render as a native audio row (private source, or not resolved yet). */
+    private class FavouriteCell extends FrameLayout {
+        private final TextView titleView;
+        private final TextView subtitleView;
+
+        FavouriteCell(Context context) {
+            super(context);
+            setPadding(dp(16), dp(8), dp(16), dp(8));
+            setBackground(Theme.getSelectorDrawable(false));
+
+            LinearLayout texts = new LinearLayout(context);
+            texts.setOrientation(LinearLayout.VERTICAL);
+            addView(texts, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+
+            titleView = new TextView(context);
+            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+            titleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
+            titleView.setSingleLine(true);
+            titleView.setEllipsize(TextUtils.TruncateAt.END);
+            texts.addView(titleView);
+
+            subtitleView = new TextView(context);
+            subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            subtitleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
+            subtitleView.setSingleLine(true);
+            subtitleView.setEllipsize(TextUtils.TruncateAt.END);
+            texts.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(dp(56), MeasureSpec.EXACTLY));
+        }
+
+        void bind(SvipeFavourite f) {
+            titleView.setText(f.title != null && !f.title.isEmpty() ? f.title : getString(R.string.AudioUnknownTitle));
+            String artist = f.artist != null && !f.artist.isEmpty() ? f.artist : getString(R.string.AudioUnknownArtist);
+            subtitleView.setText(f.durationS > 0
+                    ? artist + " · " + AndroidUtilities.formatShortDuration(f.durationS)
+                    : artist);
+        }
+    }
+
+    /* favourites data */
+
+    /**
+     * Rebuild the section from the local store, then resolve whatever can be played from a channel into
+     * real audio messages so those rows render as native audio cells. The store is authoritative and
+     * always available, so the list appears instantly and offline.
+     */
+    private void rebuildFavourites() {
+        favourites.clear();
+        favourites.addAll(SvipeFavouritesSet.getInstance(currentAccount).list());
+        if (favPanel != null) {
+            favPanel.notifyChanged();
+        }
+        resolveFavourites();
+    }
+
+    /**
+     * Resolve every playable favourite and rebuild ONE queue holding all of them, in list order.
+     *
+     * <p>The whole queue is rebuilt rather than extended because it has to mirror the list exactly: a
+     * queue containing only the newly-added entries would leave older rows pointing at MessageObjects
+     * from a queue that is no longer installed, and playing one of those makes MediaController throw the
+     * playlist away and fall back to a single track (no next/prev, no auto-advance). Resolved channel
+     * messages are cached in favResolvedMsgs, so a rebuild costs a network round-trip only for entries
+     * that have never been resolved.
+     */
+    private void resolveFavourites() {
+        if (favResolving) {
+            return;
+        }
+        final ArrayList<SvipeMusic.Track> playable = new ArrayList<>();
+        final ArrayList<SvipeFavourite> owners = new ArrayList<>();
+        final ArrayList<SvipeMusic.Track> toResolve = new ArrayList<>();
+        for (SvipeFavourite f : favourites) {
+            if (f.username == null || f.username.isEmpty() || f.channelId == 0 || f.messageId == 0) {
+                continue;   // private/unresolvable entries stay as cards
+            }
+            SvipeMusic.Track t = new SvipeMusic.Track();
+            t.channelId = f.channelId;
+            t.messageId = f.messageId;
+            t.username = f.username;
+            t.title = f.title;
+            t.performer = f.artist;
+            t.durationS = f.durationS;
+            t.songId = f.songId;
+            playable.add(t);
+            owners.add(f);
+            if (!favResolvedMsgs.containsKey(t.key())) {
+                toResolve.add(t);
+            }
+        }
+        if (playable.isEmpty()) {
+            favQueue = null;
+            favMo.clear();
+            return;
+        }
+        if (toResolve.isEmpty()) {
+            buildFavQueue(playable, owners);
+            return;
+        }
+        favResolving = true;
+        SvipeMusicResolver.resolve(currentAccount, toResolve, resolved -> {
+            favResolving = false;
+            favResolvedMsgs.putAll(resolved);
+            buildFavQueue(playable, owners);
+            if (favPanel != null) {
+                favPanel.notifyChanged();
+            }
+        });
+    }
+
+    private void buildFavQueue(List<SvipeMusic.Track> playable, List<SvipeFavourite> owners) {
+        SvipeMusicQueue queue = new SvipeMusicQueue(currentAccount, SvipeMusicQueue.SOURCE_SECTION,
+                getString(R.string.SvipeFavouriteSongs), false);
+        queue.appendResolved(playable, favResolvedMsgs);
+        favQueue = queue;
+        favMo.clear();
+        for (int i = 0; i < playable.size(); i++) {
+            MessageObject mo = queue.messageForKey(playable.get(i).key());
+            if (mo != null) {
+                favMo.put(owners.get(i).key, mo);
+            }
+        }
+    }
+
+    private void onFavouriteClick(int position) {
+        if (position < 0 || position >= favourites.size()) {
+            return;
+        }
+        SvipeFavourite f = favourites.get(position);
+        MessageObject mo = favMo.get(f.key);
+        if (mo != null && favQueue != null) {
+            MediaController mc = MediaController.getInstance();
+            MessageObject playing = mc.getPlayingMessageObject();
+            // Toggle whenever THIS song is the one playing, whatever queue it came from — otherwise
+            // tapping the row of an already-playing vibe track would restart it from our own queue.
+            if (playing != null && isSameTrack(playing, f)) {
+                if (mc.isMessagePaused()) {
+                    mc.playMessage(playing);
+                } else {
+                    mc.pauseMessage(playing);
+                }
+            } else {
+                favQueue.play(mo);
+            }
+            if (favPanel != null) {
+                favPanel.notifyChanged();
+            }
+            return;
+        }
+        // Nothing playable here (a private copy, or the channel would not resolve) — open where it
+        // lives so it can still be played, rather than leaving the tap dead.
+        if (f.messageId == 0) {
+            return;     // no message to open; the row is not enabled either (see FavAdapter.isEnabled)
+        }
+        long dialogId = f.dialogId != 0 ? f.dialogId : (f.channelId != 0 ? -f.channelId : 0);
+        if (dialogId == 0) {
+            return;
+        }
+        android.os.Bundle args = new android.os.Bundle();
+        if (dialogId > 0) {
+            args.putLong("user_id", dialogId);
+        } else {
+            args.putLong("chat_id", -dialogId);
+        }
+        args.putInt("message_id", f.messageId);
+        if (MessagesController.getInstance(currentAccount).checkCanOpenChat(args, MusicActivity.this)) {
+            presentFragment(new ChatActivity(args));
+        }
+    }
+
+    /**
+     * The MessageObject to bind this favourite to.
+     *
+     * <p>When the song is the one playing, this is the PLAYING object rather than our own copy of it.
+     * MediaController identifies a track by (dialogId, {@code getId()}), and every queue mints its own
+     * synthetic id for the same channel post — so binding our copy would leave the row drawn as idle
+     * while the very same song plays. Handing the cell the playing object makes it show, and control,
+     * the real playback state.
+     */
+    private MessageObject playingCopyOf(SvipeFavourite f) {
+        MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+        if (playing != null && isSameTrack(playing, f)) {
+            return playing;
+        }
+        return favMo.get(f.key);
+    }
+
+    /** Same underlying channel post, whichever queue minted the copy. */
+    private boolean isSameTrack(MessageObject mo, SvipeFavourite f) {
+        long dialogId = mo.getDialogId();
+        return dialogId < 0 && f.channelId != 0
+                && -dialogId == f.channelId && mo.getRealId() == f.messageId;
+    }
+
+    /** True when tapping this favourite can actually do something — play it, or open its message. */
+    private boolean isFavouriteActionable(SvipeFavourite f) {
+        if (favMo.containsKey(f.key)) {
+            return true;
+        }
+        return f.messageId != 0 && (f.dialogId != 0 || f.channelId != 0);
+    }
+
 
     /* Liquid glass (iBlur3) */
 
@@ -431,6 +1171,11 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private void refreshListPadding() {
         if (listView != null) {
             listView.setPadding(0, listTopPadding(), 0, listBottomPadding());
+        }
+        // The now-playing bar just appeared or went away, which moves where the strip must rest.
+        if (favPanel != null) {
+            favPanel.applyInsets();
+            favPanel.applyGeometry(true);
         }
     }
 
@@ -586,7 +1331,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         updateMode();
     }
 
-    // Swap between the search list and the immersive vibe screen based on whether a query is active.
+    // Swap between the search list and the home scroller (vibe hero + favourites) based on whether a
+    // query is active. The hero is a row of the home scroller now, so hiding that hides both.
     private void updateMode() {
         boolean search = inSearchMode();
         if (listView != null) {
@@ -594,9 +1340,12 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         }
         if (vibeScreen != null) {
             vibeScreen.setVisibility(search ? View.GONE : View.VISIBLE);
-            if (!search) {
-                vibeScreen.update();
-            }
+        }
+        if (favPanel != null) {
+            favPanel.setVisibility(search ? View.GONE : View.VISIBLE);
+        }
+        if (vibeScreen != null && !search) {
+            vibeScreen.update();
         }
         // Home shows the dark immersive backdrop (light status-bar icons); search shows the opaque
         // white list (dark icons). Re-apply on every switch.
@@ -606,7 +1355,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void refreshVibe() {
-        if (vibeScreen != null && vibeScreen.getVisibility() == View.VISIBLE) {
+        if (vibeScreen != null && vibeScreen.isShown()) {
             vibeScreen.update();
         }
     }
@@ -880,13 +1629,20 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             if (adapter != null) {
                 adapter.notifyDataSetChanged();
             }
+            if (favPanel != null) {
+                favPanel.notifyChanged();
+            }
             refreshVibe();
+        } else if (id == NotificationCenter.svipeFavouritesChanged) {
+            rebuildFavourites();
         }
     }
 
     @Override
     public boolean isLightStatusBar() {
-        // Home = dark immersive aura -> want light (white) status-bar icons -> not a light bar.
+        // Home = dark immersive aura -> want light (white) status-bar icons -> not a light bar. The
+        // favourites panel never reaches the status bar (it rests under the search pill), so opening it
+        // does not change this.
         if (!inSearchMode()) {
             return false;
         }
@@ -902,8 +1658,17 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
     @Override
     public void onParentScrollToTop() {
-        if (listView != null) {
-            listView.smoothScrollToPosition(0);
+        if (inSearchMode()) {
+            if (listView != null) {
+                listView.smoothScrollToPosition(0);
+            }
+            return;
+        }
+        // Home: unwind the favourites list, then close the panel, so a tab re-tap always lands back on
+        // the hero rather than on a half-open panel.
+        if (favPanel != null) {
+            favPanel.innerListView.scrollToPosition(0);
+            favPanel.animateTo(false);
         }
     }
 
@@ -1086,12 +1851,24 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         private final PlayPauseDrawable playPauseDrawable;
         private final org.telegram.ui.Components.RadialProgressView progressView;
 
+        private float recede;
+
         VibeScreen(Context context) {
             super(context);
 
             // Tapping anywhere on the vibe screen toggles play/pause (or starts the vibe). The
             // floating search bar sits on top as a separate view, so it still gets its own taps.
             setOnClickListener(v -> onVibeTap());
+
+            // Corners are square at rest and round out as the card recedes, so pulling the favourites
+            // panel up reads as this card sinking backwards rather than as a torn-off rectangle.
+            setOutlineProvider(new ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, android.graphics.Outline outline) {
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(28) * recede);
+                }
+            });
+            setClipToOutline(true);
 
             aura = new AuraView(context);
             addView(aura, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
@@ -1146,6 +1923,25 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             button.addView(progressView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
 
             update();
+        }
+
+        /**
+         * How far this card has sunk behind the favourites panel, 0..1. It shrinks toward its own
+         * centre, dims, and rounds its corners — the panel then slides up over it.
+         */
+        void setRecede(float progress) {
+            recede = progress;
+            float scale = 1f - 0.10f * progress;
+            setPivotX(getWidth() / 2f);
+            setPivotY(getHeight() / 2f);
+            setScaleX(scale);
+            setScaleY(scale);
+            // Fade right out, and be GONE a little before the end of the travel: the search pill is
+            // translucent, so a card still lingering behind it at the top reads as a smear.
+            float alpha = Math.max(0f, 1f - progress / 0.85f);
+            setAlpha(alpha);
+            setVisibility(alpha <= 0.01f ? INVISIBLE : VISIBLE);
+            invalidateOutline();
         }
 
         void update() {

@@ -71,6 +71,9 @@ import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
+import org.telegram.svipe.SvipeFavKey;
+import org.telegram.svipe.SvipeFavouritesSet;
+import org.telegram.svipe.SvipeMusicFavourites;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.messenger.UserConfig;
@@ -129,6 +132,10 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
     public @interface Style {}
 
     private ImageView playButton;
+    // Svipe: the favourite ("love") toggle, right of playButton. Only ever visible in
+    // STYLE_AUDIO_PLAYER, and only for real music (never a voice message or a round video).
+    private ImageView favouriteButton;
+    private SvipeFavKey favouriteKey;
     private PlayPauseDrawable playPauseDrawable;
     private AudioPlayerAlert.ClippingTextViewSwitcher titleTextView;
     private AudioPlayerAlert.ClippingTextViewSwitcher subtitleTextView;
@@ -422,6 +429,16 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                 }
             }
         });
+
+        // Svipe favourite toggle. Added as a direct child (NOT into frameLayout, which owns a
+        // dispatchTouchEvent override for group calls) so it takes the tap before the bar-wide click
+        // listener that opens AudioPlayerAlert. Position/visibility are set per style in updateStyle().
+        favouriteButton = new ImageView(context);
+        favouriteButton.setScaleType(ImageView.ScaleType.CENTER);
+        favouriteButton.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_inappPlayerClose) & 0x19ffffff, 1, dp(15)));
+        favouriteButton.setVisibility(GONE);
+        addView(favouriteButton, LayoutHelper.createFrame(32, 32, Gravity.TOP | Gravity.LEFT));
+        favouriteButton.setOnClickListener(v -> onFavouriteClick());
 
         importingImageView = new RLottieImageView(context);
         importingImageView.setScaleType(ImageView.ScaleType.CENTER);
@@ -1009,6 +1026,11 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
         if (playButton != null) {
             playButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_inappPlayerPlayPause), PorterDuff.Mode.MULTIPLY));
         }
+        if (favouriteButton != null) {
+            favouriteButton.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_inappPlayerClose) & 0x19ffffff, 1, dp(15)));
+            // Re-applies both the tint and the filled/outline icon for the current track.
+            refreshFavouriteButton(MediaController.getInstance().getPlayingMessageObject());
+        }
         if (closeButton != null) {
             closeButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_inappPlayerClose), PorterDuff.Mode.MULTIPLY));
         }
@@ -1180,6 +1202,15 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
             notifyButtonEnabled = false;
         }
 
+        // Svipe: hide the favourite toggle up front, for EVERY style. Only the audio-player branch
+        // brings it back (via refreshFavouriteButton). Doing it once here rather than in each of the
+        // seven style branches means a new style can never accidentally inherit a stray heart —
+        // STYLE_LIVE_LOCATION in particular shares a branch with the audio player and would otherwise
+        // draw the button straight over its title.
+        if (favouriteButton != null) {
+            favouriteButton.setVisibility(GONE);
+        }
+
         if (avatars != null) {
             avatars.setStyle(currentStyle);
             avatars.setLayoutParams(LayoutHelper.createFrame(108, getStyleHeight(), Gravity.LEFT | Gravity.TOP));
@@ -1279,13 +1310,26 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                 closeButton.setVisibility(GONE);
             } else if (style == STYLE_AUDIO_PLAYER) {
                 playButton.setLayoutParams(LayoutHelper.createFrame(36, 36, Gravity.TOP | Gravity.LEFT, 3, 0, 0, 0));
-                titleTextView.setLayoutParams(LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 36, Gravity.LEFT | Gravity.TOP, 37, 0, (isSideMenued ? 64 : 0) + 36, 0));
+                // Svipe: 8dp of clear space on each side of the heart GLYPH — which is not the same as
+                // spacing the touch boxes, because the play button's glyph is only 16dp inside its 36dp
+                // box and the heart's is 24dp inside a 32dp one. Play glyph ends at 3+10+16 = 29; the
+                // heart glyph spans [33+4, 33+28] = [37,61]; the title starts at 69. The 6dp the heart's
+                // box overlaps the play button's falls entirely in the play button's empty right margin,
+                // leaving it a 30dp-wide target and keeping the two ripples from touching.
+                if (favouriteButton != null) {
+                    favouriteButton.setLayoutParams(LayoutHelper.createFrame(32, 32, Gravity.TOP | Gravity.LEFT, 33, 2, 0, 0));
+                }
+                titleTextView.setLayoutParams(LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 36, Gravity.LEFT | Gravity.TOP, 69, 0, (isSideMenued ? 64 : 0) + 36, 0));
                 createPlaybackSpeedButton();
                 if (playbackSpeedButton != null) {
                     playbackSpeedButton.setVisibility(VISIBLE);
                     playbackSpeedButton.setTag(1);
                 }
                 closeButton.setContentDescription(getString(R.string.AccDescrClosePlayer));
+                // Undo the blanket hide above. Needed here as well as in checkPlayer because a forced
+                // updateStyle() with the SAME track skips checkPlayer's per-track block, which would
+                // otherwise leave the heart hidden until the song changed.
+                refreshFavouriteButton(MediaController.getInstance().getPlayingMessageObject());
             } else {
                 playButton.setLayoutParams(LayoutHelper.createFrame(36, 36, Gravity.TOP | Gravity.LEFT, 8, 0, 0, 0));
                 titleTextView.setLayoutParams(LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 36, Gravity.LEFT | Gravity.TOP, 35 + 16, 0, (isSideMenued ? 64 : 0) + 36, 0));
@@ -1402,6 +1446,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
         visible = false;
         notificationsLocker.unlock();
         topPadding = 0;
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeFavouritesChanged);
         if (isLocation) {
             NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.liveLocationsChanged);
             NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.liveLocationsCacheChanged);
@@ -1437,6 +1482,9 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        // Svipe: several mini players can be alive across fragments; a heart tapped in one must light
+        // up in all of them, so the favourites event is global rather than per-account.
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeFavouritesChanged);
         if (isLocation) {
             NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.liveLocationsChanged);
             NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.liveLocationsCacheChanged);
@@ -1510,7 +1558,9 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
 
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
-        if (id == NotificationCenter.liveLocationsChanged) {
+        if (id == NotificationCenter.svipeFavouritesChanged) {
+            refreshFavouriteButton(MediaController.getInstance().getPlayingMessageObject());
+        } else if (id == NotificationCenter.liveLocationsChanged) {
             checkLiveLocation(false);
         } else if (id == NotificationCenter.liveStoryUpdated) {
             checkLiveStory(false);
@@ -2005,8 +2055,62 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                 TypefaceSpan span = new TypefaceSpan(AndroidUtilities.bold(), 0, getThemedColor(Theme.key_inappPlayerPerformer));
                 stringBuilder.setSpan(span, 0, messageObject.getMusicAuthor().length(), Spanned.SPAN_INCLUSIVE_INCLUSIVE);
                 titleTextView.setText(stringBuilder, !create && wasVisible && isMusic);
+                // Svipe: re-key the heart to the new track. This is the only per-track hook —
+                // updateStyle() returns early once the style is already STYLE_AUDIO_PLAYER, so it does
+                // not run again when playback moves to the next song.
+                refreshFavouriteButton(messageObject);
             }
         }
+    }
+
+    /* ---------------- Svipe: favourite ("love") toggle ---------------- */
+
+    /**
+     * Point the heart at whatever is playing now. Hidden for voice/round video (they are not songs) and
+     * for audio that carries no usable identity at all.
+     */
+    private void refreshFavouriteButton(MessageObject messageObject) {
+        if (favouriteButton == null) {
+            return;     // views are created lazily by checkCreateView()
+        }
+        boolean song = currentStyle == STYLE_AUDIO_PLAYER && messageObject != null
+                && !messageObject.isVoice() && !messageObject.isRoundVideo();
+        // Scope to the account that owns the playing track, not the selected one — playback can outlive
+        // an account switch (see the player.currentAccount check in this class's own click handler).
+        favouriteKey = song ? SvipeMusicFavourites.keyFor(messageObject.currentAccount, messageObject) : null;
+        if (favouriteKey == null) {
+            favouriteButton.setVisibility(GONE);
+            // Voice messages, round videos and unidentifiable audio show no heart, so the title must
+            // reclaim the space or the bar has a 36dp hole where the button would have been.
+            applyFavouriteTitleInset(false);
+            return;
+        }
+        favouriteButton.setVisibility(VISIBLE);
+        applyFavouriteTitleInset(true);
+        boolean favourite = SvipeFavouritesSet.getInstance(messageObject.currentAccount).isFavourite(favouriteKey.key);
+        favouriteButton.setImageResource(favourite ? R.drawable.media_like_active : R.drawable.media_like);
+        favouriteButton.setColorFilter(new PorterDuffColorFilter(
+                getThemedColor(favourite ? Theme.key_text_RedBold : Theme.key_inappPlayerClose), PorterDuff.Mode.MULTIPLY));
+        favouriteButton.setContentDescription(getString(
+                favourite ? R.string.SvipeRemoveFromFavourites : R.string.SvipeAddToFavourites));
+    }
+
+    /** Title starts after the heart when one is shown (73dp), otherwise at the stock 37dp. */
+    private void applyFavouriteTitleInset(boolean heartShown) {
+        if (currentStyle != STYLE_AUDIO_PLAYER || titleTextView == null) {
+            return;
+        }
+        titleTextView.setLayoutParams(LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 36,
+                Gravity.LEFT | Gravity.TOP, heartShown ? 69 : 37, 0, (isSideMenued ? 64 : 0) + 36, 0));
+    }
+
+    private void onFavouriteClick() {
+        MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+        if (playing == null || favouriteKey == null) {
+            return;
+        }
+        SvipeMusicFavourites.toggle(playing.currentAccount, playing, favouriteKey);
+        refreshFavouriteButton(playing);
     }
 
     public void checkImport(boolean create) {
@@ -2847,6 +2951,9 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
         } else {
             if (playButton != null) {
                 playButton.setTranslationX(leftMargin);
+            }
+            if (favouriteButton != null) {
+                favouriteButton.setTranslationX(leftMargin);
             }
             if (importingImageView != null) {
                 importingImageView.setTranslationX(leftMargin);

@@ -48,6 +48,12 @@
     <string name="SvipeMusicSongCount_one">%1$d ta qo\'shiq</string>
     <string name="SvipeMusicSongCount_other">%1$d ta qo\'shiq</string>
 
+    <!-- Svipe favourite songs -->
+    <string name="SvipeFavouriteSongs">Sevimli qo\'shiqlar</string>
+    <string name="SvipeAddToFavourites">Sevimlilarga qo\'shish</string>
+    <string name="SvipeRemoveFromFavourites">Sevimlilardan olib tashlash</string>
+    <string name="SvipeFavouritesEmpty">Yoqtirgan qo\'shiqlaringiz shu yerda ko\'rinadi</string>
+
     <!-- Svipe music version picker -->
     <string name="SvipeMusicVoteCount_one">%1$d kishi tanlagan</string>
     <string name="SvipeMusicVoteCount_other">%1$d kishi tanlagan</string>

@@ -280,6 +280,9 @@ public class SvipeMusic {
     public interface SongDetailCallback { void onResult(SongDetail song, String error); }
     public interface ArtistCallback { void onResult(ArtistPage page, String error); }
     public interface DefaultCallback { void onResult(DefaultAck ack, String error); }
+    /** error==null on success; isFavourite is the state the SERVER now holds. */
+    public interface FavouriteCallback { void onResult(long songId, boolean isFavourite, String error); }
+    public interface TrackSongIdCallback { void onResult(long songId); }
 
     public static void songsHome(int account, SongHomeCallback cb) {
         withToken(account, () -> cb.onResult(null, "auth"),
@@ -331,6 +334,74 @@ public class SvipeMusic {
             String next = res.isNull("next_offset") ? null : String.valueOf(res.optInt("next_offset"));
             cb.onResult(out, next, null);
         });
+    }
+
+    // ---------------- Favourites ----------------
+
+    /** This user's favourite songs, newest first. Same {items, next_offset} shape as search. */
+    public static void favourites(int account, int offset, int limit, SongsCallback cb) {
+        songsListGet(account, "/v1/music/favourites?limit=" + limit + "&offset=" + offset, cb);
+    }
+
+    public static void favourite(int account, long songId, FavouriteCallback cb) {
+        withToken(account, () -> ack(cb, songId, false, "auth"),
+            token -> favouriteRequest(account, songId, true, token, false, cb));
+    }
+
+    public static void unfavourite(int account, long songId, FavouriteCallback cb) {
+        withToken(account, () -> ack(cb, songId, true, "auth"),
+            token -> favouriteRequest(account, songId, false, token, false, cb));
+    }
+
+    private static void favouriteRequest(int account, long songId, boolean add, String token,
+                                         boolean retried, FavouriteCallback cb) {
+        String path = "/v1/music/song/" + songId + "/favourite";
+        SvipeApi.JsonCallback handler = (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> ack(cb, songId, !add, "auth"),
+                    t2 -> favouriteRequest(account, songId, add, t2, true, cb));
+                return;
+            }
+            if (res == null || !res.has("song_id")) {
+                ack(cb, songId, !add, err != null ? err : ("http " + code));
+                return;
+            }
+            ack(cb, res.optLong("song_id"), res.optBoolean("is_favourite", add), null);
+        };
+        if (add) {
+            SvipeApi.post(path, new JSONObject(), token, handler);
+        } else {
+            SvipeApi.delete(path, token, handler);
+        }
+    }
+
+    private static void ack(FavouriteCallback cb, long songId, boolean isFavourite, String error) {
+        if (cb != null) {
+            cb.onResult(songId, isFavourite, error);
+        }
+    }
+
+    /**
+     * Which canonical song a raw channel post belongs to, so a favourite made while listening inside a
+     * Telegram channel can be re-keyed onto the catalog song instead of living as a separate entry.
+     * Reports songId 0 for anything we don't host.
+     */
+    public static void trackSongId(int account, long channelId, int messageId, TrackSongIdCallback cb) {
+        withToken(account, () -> cb.onResult(0),
+            token -> trackSongIdRequest(account, channelId, messageId, token, false, cb));
+    }
+
+    private static void trackSongIdRequest(int account, long channelId, int messageId, String token,
+                                           boolean retried, TrackSongIdCallback cb) {
+        SvipeApi.get("/v1/music/track?channel_id=" + channelId + "&message_id=" + messageId, token,
+            (res, code, err) -> {
+                if (code == 401 && !retried) {
+                    reauth(account, () -> cb.onResult(0),
+                        t2 -> trackSongIdRequest(account, channelId, messageId, t2, true, cb));
+                    return;
+                }
+                cb.onResult(res == null ? 0 : res.optLong("song_id"));
+            });
     }
 
     public static void song(int account, long songId, SongDetailCallback cb) {

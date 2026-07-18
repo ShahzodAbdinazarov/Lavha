@@ -311,6 +311,12 @@
     <string name="SvipeMusicSongCount_many">%1$d песен</string>
     <string name="SvipeMusicSongCount_other">%1$d песни</string>
 
+    <!-- Svipe favourite songs -->
+    <string name="SvipeFavouriteSongs">Любимые песни</string>
+    <string name="SvipeAddToFavourites">В любимые</string>
+    <string name="SvipeRemoveFromFavourites">Убрать из любимых</string>
+    <string name="SvipeFavouritesEmpty">Песни, которые вам нравятся, появятся здесь</string>
+
     <!-- Svipe music version picker -->
     <string name="SvipeMusicVoteCount_one">Выбрал %1$d человек</string>
     <string name="SvipeMusicVoteCount_few">Выбрали %1$d человека</string>

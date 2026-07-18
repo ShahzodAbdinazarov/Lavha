@@ -9,6 +9,7 @@ import org.telegram.tgnet.TLRPC;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -57,6 +58,43 @@ public class SvipeMusicQueue extends MessagesController.SavedMusicList {
 
     private final HashMap<Integer, SvipeMusic.Track> trackBySyntheticId = new HashMap<>();
     private final HashSet<String> queuedKeys = new HashSet<>();
+
+    /**
+     * "channelId:messageId" -> canonical song id, for every catalog track this process has queued.
+     * trackFor() only answers while THIS queue is the installed one, but a favourite must still know a
+     * song's catalog identity after playback moved on to another queue — otherwise the same song would
+     * be favourited once as "song:<id>" and once as "msg:<channel>:<message>". Bounded LRU.
+     */
+    private static final LinkedHashMap<String, Long> SONG_ID_BY_COMPOSITE =
+        new LinkedHashMap<String, Long>(64, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, Long> eldest) {
+                return size() > 512;
+            }
+        };
+
+    /** The catalog song for a resolved (channel, message), or 0 when this process never saw it. */
+    public static synchronized long cachedSongId(long channelId, int messageId) {
+        Long id = SONG_ID_BY_COMPOSITE.get(channelId + ":" + messageId);
+        return id != null ? id : 0;
+    }
+
+    private static synchronized void cacheSongId(SvipeMusic.Track t) {
+        if (t != null && t.songId != 0) {
+            SONG_ID_BY_COMPOSITE.put(t.key(), t.songId);
+        }
+    }
+
+    /**
+     * Record a catalog identity learned somewhere other than a queue — today, the favourites code
+     * looking a channel post up via /v1/music/track. Without this, the next identity lookup for the same
+     * post would still come back empty and the favourite would be keyed twice.
+     */
+    public static synchronized void cacheSongId(long channelId, int messageId, long songId) {
+        if (songId != 0) {
+            SONG_ID_BY_COMPOSITE.put(channelId + ":" + messageId, songId);
+        }
+    }
 
     public SvipeMusicQueue(int account, String source, String title, boolean infinite) {
         super(account, 0);
@@ -127,6 +165,7 @@ public class SvipeMusicQueue extends MessagesController.SavedMusicList {
                 continue;
             }
             trackBySyntheticId.put(mo.getId(), t);
+            cacheSongId(t);
             list.add(mo);
             added.add(mo);
         }

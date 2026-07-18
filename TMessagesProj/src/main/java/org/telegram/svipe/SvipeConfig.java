@@ -31,4 +31,10 @@ public class SvipeConfig {
     /** Persisted offline ready-queue (JSON blob) and the watched-reel ledger (JSON array). */
     public static final String PREF_REEL_QUEUE = "svipe_reel_queue";
     public static final String PREF_REEL_WATCHED = "svipe_reel_watched";
+
+    /** Favourite songs: the local store (JSON blob) + when it last reconciled with the backend. */
+    public static final String PREF_MUSIC_FAVOURITES = "svipe_music_favourites";
+    public static final String PREF_MUSIC_FAV_SYNCED_AT = "svipe_music_favourites_synced_at";
+    /** Song ids un-favourited locally whose DELETE the backend has not acknowledged yet. */
+    public static final String PREF_MUSIC_FAV_PENDING_REMOVALS = "svipe_music_favourites_pending_removals";
 }

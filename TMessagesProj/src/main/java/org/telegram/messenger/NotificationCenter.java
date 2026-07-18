@@ -375,6 +375,9 @@ public class NotificationCenter {
     public static final int webBrowserSettingsUpdate = totalEvents++;
     public static final int communityPendingRequestsUpdate = totalEvents++;
     public static final int communitySwitchedCollapsed = totalEvents++;
+    // Svipe: the favourite-songs set changed. Global (not per-account) because several
+    // FragmentContextView mini players can be alive at once across fragments.
+    public static final int svipeFavouritesChanged = totalEvents++;
 
     public static boolean alreadyLogged;
 

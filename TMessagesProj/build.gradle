@@ -81,6 +81,10 @@ dependencies {
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 
     testImplementation 'junit:junit:4.13.2'
+    // The android.jar the unit tests compile against stubs org.json (every method throws
+    // RuntimeException("Stub!")), so any pure-JVM test over JSON serialization needs the real
+    // implementation on the TEST classpath only. Never reaches the APK — the platform provides it there.
+    testImplementation 'org.json:json:20231013'
 }
 
 def isWindows = String.valueOf(DefaultNativePlatform.currentOperatingSystem.toFamilyName() == OperatingSystemFamily.WINDOWS)

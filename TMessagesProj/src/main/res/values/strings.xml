@@ -10971,6 +10971,12 @@
     <string name="SvipeMusicSongCount_one">%1$d song</string>
     <string name="SvipeMusicSongCount_other">%1$d songs</string>
 
+    <!-- Svipe favourite songs -->
+    <string name="SvipeFavouriteSongs">Favourite songs</string>
+    <string name="SvipeAddToFavourites">Add to favourites</string>
+    <string name="SvipeRemoveFromFavourites">Remove from favourites</string>
+    <string name="SvipeFavouritesEmpty">Songs you love will show up here</string>
+
     <!-- Svipe music version picker -->
     <string name="SvipeMusicVoteCount_one">Chosen by %1$d person</string>
     <string name="SvipeMusicVoteCount_other">Chosen by %1$d people</string>
