@@ -744,15 +744,17 @@ public abstract class ProfileStyleActivity extends BaseFragment {
      * because the expanded avatar is measured as a full-width square.
      */
     private boolean canExpandAvatar() {
-        // Expand whenever there is a cover to show. ProfileActivity gates on hasNotThumb() because a
-        // peer with no full photo has nothing to open; a song, though, always carries cover art, and
-        // many carry ONLY the audio's embedded thumb (hasNotThumb() stays false, only a static thumb is
-        // ever set) — yet the user still expects to pull that cover open. So accept a static thumb too.
-        // Pulling ALL the way to the photo viewer stays gated on a real artwork URL
-        // (getExpandedPhotoObject() returns null otherwise, and openAvatarPhoto() no-ops), so a
-        // thumb-only song opens to the square cover and goes no further.
+        // Only a REAL loaded image may be pulled open, exactly as ProfileActivity gates on hasNotThumb().
+        // The letter/initials tile is an AvatarDrawable set as the static thumb, so hasStaticThumb() is
+        // ALWAYS true here (every branch passes avatarDrawable as the placeholder) — gating on it let a
+        // letter tile be pulled into the full-bleed square. And the expanded square is rounded with a
+        // FIXED dp(50) radius, which is half-width only at the collapsed 100dp size; at full width it is a
+        // rounded-SQUARE, not a circle. So a letter tile (or a cover/photo whose URL has not loaded, e.g.
+        // a slow or region-blocked Deezer hotlink) must NOT be pullable — kept collapsed it stays a true
+        // circle. Real covers and the audio's embedded thumb both load into the main image (hasNotThumb()
+        // becomes true), so they still expand and square off as before.
         return avatarImage != null
-                && (avatarImage.getImageReceiver().hasNotThumb() || avatarImage.getImageReceiver().hasStaticThumb())
+                && avatarImage.getImageReceiver().hasNotThumb()
                 && !AndroidUtilities.isTablet()
                 && !AndroidUtilities.isAccessibilityScreenReaderEnabled()
                 && AndroidUtilities.displaySize.x < AndroidUtilities.displaySize.y;
