@@ -53,6 +53,12 @@
     <string name="SvipeAddToFavourites">Sevimlilarga qo\'shish</string>
     <string name="SvipeRemoveFromFavourites">Sevimlilardan olib tashlash</string>
     <string name="SvipeFavouritesEmpty">Yoqtirgan qo\'shiqlaringiz shu yerda ko\'rinadi</string>
+    <string name="SvipeMusicLike">Sevimli</string>
+    <string name="SvipeMusicLiked">Sevimlida</string>
+
+    <!-- Svipe favourite singers -->
+    <string name="SvipeFavouriteSingers">Sevimli qo\'shiqchilar</string>
+    <string name="SvipeFavouriteSingersEmpty">Hozircha sevimli qo\'shiqchilar yo\'q</string>
 
     <!-- Svipe music version picker -->
     <string name="SvipeMusicVoteCount_one">%1$d kishi tanlagan</string>

@@ -10976,6 +10976,12 @@
     <string name="SvipeAddToFavourites">Add to favourites</string>
     <string name="SvipeRemoveFromFavourites">Remove from favourites</string>
     <string name="SvipeFavouritesEmpty">Songs you love will show up here</string>
+    <string name="SvipeMusicLike">Like</string>
+    <string name="SvipeMusicLiked">Liked</string>
+
+    <!-- Svipe favourite singers -->
+    <string name="SvipeFavouriteSingers">Favourite singers</string>
+    <string name="SvipeFavouriteSingersEmpty">No favourite singers yet</string>
 
     <!-- Svipe music version picker -->
     <string name="SvipeMusicVoteCount_one">Chosen by %1$d person</string>

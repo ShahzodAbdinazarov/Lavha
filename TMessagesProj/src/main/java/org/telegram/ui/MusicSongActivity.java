@@ -20,8 +20,12 @@ import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SendMessagesHelper;
+import org.telegram.svipe.SvipeFavKey;
+import org.telegram.svipe.SvipeFavourite;
+import org.telegram.svipe.SvipeFavouritesSet;
 import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.svipe.SvipeMusicResolver;
@@ -31,6 +35,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.SharedAudioCell;
 import org.telegram.ui.Cells.UserCell;
 import org.telegram.ui.Components.AvatarDrawable;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.ProfileActionsView;
 import org.telegram.ui.Components.RadialProgressView;
@@ -52,7 +57,7 @@ import java.util.HashMap;
  *
  * <p>Tap a version to play it; long-press to make it your own default (a crowd vote).
  */
-public class MusicSongActivity extends ProfileStyleActivity {
+public class MusicSongActivity extends ProfileStyleActivity implements NotificationCenter.NotificationCenterDelegate {
 
     private final long songId;
     private final String initialTitle;
@@ -155,6 +160,9 @@ public class MusicSongActivity extends ProfileStyleActivity {
     protected void onCreateActions(ProfileActionsView view) {
         view.addAction(ProfileActionsView.ActionButton.PLAY, ProfileActionsView.KEY_PLAY);
         view.addAction(ProfileActionsView.ActionButton.SHUFFLE, ProfileActionsView.KEY_SHUFFLE);
+        if (isFavouritable()) {
+            view.addAction(favouriteButton(), ProfileActionsView.KEY_LIKE);
+        }
         view.addAction(ProfileActionsView.ActionButton.SHARE, ProfileActionsView.KEY_SHARE);
     }
 
@@ -167,8 +175,106 @@ public class MusicSongActivity extends ProfileStyleActivity {
             }
         } else if (key == ProfileActionsView.KEY_SHUFFLE) {
             playShuffled();
+        } else if (key == ProfileActionsView.KEY_LIKE) {
+            toggleFavourite();
         } else if (key == ProfileActionsView.KEY_SHARE) {
             share();
+        }
+    }
+
+    /* ---------------- Svipe: favourite ("like") toggle ---------------- */
+
+    /**
+     * A negative song id is an A5 Deezer placeholder — a track we do not host yet, which exists only as
+     * a search result. The backend rejects favouriting one, so the heart is not offered at all rather
+     * than shown and then failing. The id is final, so this never changes while the page is open.
+     */
+    private boolean isFavouritable() {
+        return songId > 0;
+    }
+
+    private ProfileActionsView.ActionButton favouriteButton() {
+        return SvipeFavouritesSet.getInstance(currentAccount).isFavourite(SvipeFavKey.song(songId).key)
+                ? ProfileActionsView.ActionButton.LIKE_ACTIVE
+                : ProfileActionsView.ActionButton.LIKE;
+    }
+
+    /** Repaints the heart from the store. Cheap and idempotent, so callers may fire it unconditionally. */
+    private void refreshFavouriteAction() {
+        if (actionsView != null && isFavouritable()) {
+            actionsView.updateAction(ProfileActionsView.KEY_LIKE, favouriteButton());
+        }
+    }
+
+    /**
+     * Flip the favourite state. The local store is the source of truth and mutates synchronously — it
+     * posts {@code svipeFavouritesChanged}, which repaints the heart — while the backend call it makes
+     * is fire-and-forget.
+     *
+     * <p>Adding waits for the song detail: the stored entry carries the version to play and the post to
+     * fall back to, and {@link SvipeFavouritesSet#merge} only fills those in when it ADOPTS an entry, so
+     * one saved blank would stay a dead row in the Music list forever. Removing needs no metadata at
+     * all (it is keyed by song id), so it is always allowed.
+     */
+    private void toggleFavourite() {
+        if (!isFavouritable()) {
+            return;
+        }
+        final SvipeFavKey key = SvipeFavKey.song(songId);
+        final SvipeFavouritesSet set = SvipeFavouritesSet.getInstance(currentAccount);
+        if (detail == null && !set.isFavourite(key.key)) {
+            // Normally this window is under the page's progress spinner, but a terminal load failure
+            // leaves detail null for the life of the fragment — and nothing retries it. Say so instead of
+            // leaving a heart that swallows every tap in silence.
+            BulletinFactory.of(this).createErrorBulletin(getString(R.string.MusicLoadFailed)).show();
+            return;
+        }
+        set.toggle(favouriteEntry(key));
+    }
+
+    /**
+     * The entry to store, populated exactly as {@link SvipeFavouritesSet#merge} populates one it adopts
+     * from the server — same fields, same meanings — so a row favourited here and one synced down from
+     * another device render and play identically.
+     */
+    private SvipeFavourite favouriteEntry(SvipeFavKey key) {
+        SvipeFavourite f = SvipeFavourite.of(key);
+        f.title = detail != null ? detail.shownTitle() : initialTitle;
+        f.artist = detail != null ? detail.shownArtist() : null;
+        f.isPublic = true;      // a catalog song always lives in a public channel
+        SvipeMusic.Track t = defaultVersion();
+        if (t == null && detail != null) {
+            t = detail.defaultTrack;
+        }
+        if (t != null) {
+            f.channelId = t.channelId;
+            f.messageId = t.messageId;
+            f.username = t.username;
+            f.durationS = t.durationS;
+            // Where to open it if it ever fails to resolve — without this the row would be a dead tap.
+            f.dialogId = -t.channelId;
+        }
+        return f;
+    }
+
+    @Override
+    public boolean onFragmentCreate() {
+        // GLOBAL, not per-account: the heart must also light up when the song is favourited from the
+        // mini player or the Music tab, which post globally (see FragmentContextView).
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeFavouritesChanged);
+        return super.onFragmentCreate();
+    }
+
+    @Override
+    public void onFragmentDestroy() {
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeFavouritesChanged);
+        super.onFragmentDestroy();
+    }
+
+    @Override
+    public void didReceivedNotification(int id, int account, Object... args) {
+        if (id == NotificationCenter.svipeFavouritesChanged) {
+            refreshFavouriteAction();
         }
     }
 
@@ -270,6 +376,7 @@ public class MusicSongActivity extends ProfileStyleActivity {
                 }
                 showProgress(false);
                 bindHeader();
+                refreshFavouriteAction();   // a sync may have landed while the detail was in flight
                 if (adapter != null) {
                     adapter.notifyDataSetChanged();
                     notifyListChanged();

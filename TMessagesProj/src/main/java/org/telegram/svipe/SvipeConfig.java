@@ -37,4 +37,11 @@ public class SvipeConfig {
     public static final String PREF_MUSIC_FAV_SYNCED_AT = "svipe_music_favourites_synced_at";
     /** Song ids un-favourited locally whose DELETE the backend has not acknowledged yet. */
     public static final String PREF_MUSIC_FAV_PENDING_REMOVALS = "svipe_music_favourites_pending_removals";
+
+    /** Favourite singers: same three-part store as the songs above, kept separate so the two lists
+     *  can never collide on a key (song ids and artist ids share a namespace only by accident). */
+    public static final String PREF_MUSIC_ARTIST_FAVOURITES = "svipe_music_artist_favourites";
+    public static final String PREF_MUSIC_ARTIST_FAV_SYNCED_AT = "svipe_music_artist_favourites_synced_at";
+    /** Artist ids un-favourited locally whose DELETE the backend has not acknowledged yet. */
+    public static final String PREF_MUSIC_ARTIST_FAV_PENDING_REMOVALS = "svipe_music_artist_favourites_pending_removals";
 }

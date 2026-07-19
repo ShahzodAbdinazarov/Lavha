@@ -283,6 +283,10 @@ public class SvipeMusic {
     /** error==null on success; isFavourite is the state the SERVER now holds. */
     public interface FavouriteCallback { void onResult(long songId, boolean isFavourite, String error); }
     public interface TrackSongIdCallback { void onResult(long songId); }
+    /** items==null on failure. nextOffset==null when there are no more pages. */
+    public interface ArtistsCallback { void onResult(List<Artist> items, String nextOffset, String error); }
+    /** error==null on success; isFavourite is the state the SERVER now holds. */
+    public interface ArtistFavouriteCallback { void onResult(long artistId, boolean isFavourite, String error); }
 
     public static void songsHome(int account, SongHomeCallback cb) {
         withToken(account, () -> cb.onResult(null, "auth"),
@@ -381,6 +385,72 @@ public class SvipeMusic {
         }
     }
 
+    // ---------------- Favourite singers ----------------
+
+    /** This user's favourite artists, newest first. Same {items, next_offset} shape as the songs. */
+    public static void artistFavourites(int account, int offset, int limit, ArtistsCallback cb) {
+        artistsListGet(account, "/v1/music/artist-favourites?limit=" + limit + "&offset=" + offset, cb);
+    }
+
+    private static void artistsListGet(int account, String path, ArtistsCallback cb) {
+        withToken(account, () -> cb.onResult(null, null, "auth"),
+            token -> artistsListRequest(account, path, token, false, cb));
+    }
+
+    private static void artistsListRequest(int account, String path, String token, boolean retried, ArtistsCallback cb) {
+        SvipeApi.get(path, token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> cb.onResult(null, null, "auth"), t2 -> artistsListRequest(account, path, t2, true, cb));
+                return;
+            }
+            if (res == null || !res.has("items")) { cb.onResult(null, null, err != null ? err : ("http " + code)); return; }
+            ArrayList<Artist> out = new ArrayList<>();
+            parseArtists(res.optJSONArray("items"), out);
+            String next = res.isNull("next_offset") ? null : String.valueOf(res.optInt("next_offset"));
+            cb.onResult(out, next, null);
+        });
+    }
+
+    public static void favouriteArtist(int account, long artistId, ArtistFavouriteCallback cb) {
+        withToken(account, () -> artistAck(cb, artistId, false, "auth"),
+            token -> artistFavouriteRequest(account, artistId, true, token, false, cb));
+    }
+
+    public static void unfavouriteArtist(int account, long artistId, ArtistFavouriteCallback cb) {
+        withToken(account, () -> artistAck(cb, artistId, true, "auth"),
+            token -> artistFavouriteRequest(account, artistId, false, token, false, cb));
+    }
+
+    private static void artistFavouriteRequest(int account, long artistId, boolean add, String token,
+                                               boolean retried, ArtistFavouriteCallback cb) {
+        String path = "/v1/music/artist/" + artistId + "/favourite";
+        SvipeApi.JsonCallback handler = (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> artistAck(cb, artistId, !add, "auth"),
+                    t2 -> artistFavouriteRequest(account, artistId, add, t2, true, cb));
+                return;
+            }
+            // A bodyless response is an error here: the contract always answers with a JSON ack, so a
+            // missing artist_id means the write did not happen and the caller must not settle on it.
+            if (res == null || !res.has("artist_id")) {
+                artistAck(cb, artistId, !add, err != null ? err : ("http " + code));
+                return;
+            }
+            artistAck(cb, res.optLong("artist_id"), res.optBoolean("is_favourite", add), null);
+        };
+        if (add) {
+            SvipeApi.post(path, new JSONObject(), token, handler);
+        } else {
+            SvipeApi.delete(path, token, handler);
+        }
+    }
+
+    private static void artistAck(ArtistFavouriteCallback cb, long artistId, boolean isFavourite, String error) {
+        if (cb != null) {
+            cb.onResult(artistId, isFavourite, error);
+        }
+    }
+
     /**
      * Which canonical song a raw channel post belongs to, so a favourite made while listening inside a
      * Telegram channel can be re-keyed onto the catalog song instead of living as a separate entry.
@@ -440,8 +510,11 @@ public class SvipeMusic {
             a.artMessageId = res.optInt("art_message_id");
             a.displayName = res.isNull("display_name") ? null : res.optString("display_name", null);
             a.photoUrl = res.isNull("photo_url") ? null : res.optString("photo_url", null);
+            // Also on the Artist, not just the page: anything that stores this Artist (a favourite, say)
+            // otherwise keeps a count of 0 while the header right above it renders the real number.
+            a.songCount = res.optInt("song_count");
             p.artist = a;
-            p.songCount = res.optInt("song_count");
+            p.songCount = a.songCount;
             parseSongs(res.optJSONArray("songs"), p.songs);
             p.nextOffset = res.isNull("next_offset") ? null : String.valueOf(res.optInt("next_offset"));
             cb.onResult(p, null);
@@ -560,7 +633,19 @@ public class SvipeMusic {
         a.songCount = o.optInt("song_count");
         a.artChannelId = o.optLong("art_channel_id");
         a.artMessageId = o.optInt("art_message_id");
+        // Present on the artist page and on the favourites list; absent from the artist chips carried
+        // inside a song, where these stay null and shownName() falls back to the canonical name.
+        a.displayName = o.isNull("display_name") ? null : o.optString("display_name", null);
+        a.photoUrl = o.isNull("photo_url") ? null : o.optString("photo_url", null);
         return a;
+    }
+
+    private static void parseArtists(JSONArray arr, List<Artist> out) {
+        if (arr == null) return;
+        for (int i = 0; i < arr.length(); i++) {
+            Artist a = parseArtist(arr.optJSONObject(i));
+            if (a != null) out.add(a);
+        }
     }
 
     private static Song parseSong(JSONObject o) {
@@ -581,13 +666,7 @@ public class SvipeMusic {
         s.playable = o.optBoolean("playable", true);
         s.deezerTrackId = o.optLong("deezer_track_id");
         s.previewUrl = o.isNull("preview_url") ? null : o.optString("preview_url", null);
-        JSONArray arts = o.optJSONArray("artists");
-        if (arts != null) {
-            for (int i = 0; i < arts.length(); i++) {
-                Artist a = parseArtist(arts.optJSONObject(i));
-                if (a != null) s.artists.add(a);
-            }
-        }
+        parseArtists(o.optJSONArray("artists"), s.artists);
         JSONObject dt = o.optJSONObject("default");
         if (dt != null) {
             Track t = new Track();

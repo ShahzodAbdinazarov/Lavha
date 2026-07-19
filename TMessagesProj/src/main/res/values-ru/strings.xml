@@ -316,6 +316,12 @@
     <string name="SvipeAddToFavourites">В любимые</string>
     <string name="SvipeRemoveFromFavourites">Убрать из любимых</string>
     <string name="SvipeFavouritesEmpty">Песни, которые вам нравятся, появятся здесь</string>
+    <string name="SvipeMusicLike">В избранное</string>
+    <string name="SvipeMusicLiked">В избранном</string>
+
+    <!-- Svipe favourite singers -->
+    <string name="SvipeFavouriteSingers">Любимые исполнители</string>
+    <string name="SvipeFavouriteSingersEmpty">Пока нет любимых исполнителей</string>
 
     <!-- Svipe music version picker -->
     <string name="SvipeMusicVoteCount_one">Выбрал %1$d человек</string>

@@ -110,6 +110,7 @@ public class ProfileActionsView extends View {
     public static final int KEY_CONTACTS = 18;
     public static final int KEY_PLAY = 19;
     public static final int KEY_SHUFFLE = 20;
+    public static final int KEY_LIKE = 21;
 
     private boolean isApplying;
     private boolean isNotificationsEnabled;
@@ -665,6 +666,23 @@ public class ProfileActionsView extends View {
         action.key = key;
         actions.add(action);
         activeCount = actions.size();
+        invalidate();
+    }
+
+    /**
+     * Re-render an action that is already in the row. The MODE_MY_PROFILE counterpart to
+     * {@link #updateNotification}, for a button whose icon and label track state the fragment owns —
+     * the music Like heart flipping between {@link ActionButton#LIKE} and {@link ActionButton#LIKE_ACTIVE}.
+     *
+     * <p>No-op when that key was never added, so a caller may refresh unconditionally (the song page
+     * omits the heart entirely for a non-favouritable placeholder).
+     */
+    public void updateAction(int key, ActionButton button) {
+        final Action action = find(key);
+        if (action == null || button == null) {
+            return;
+        }
+        action.update(button);
         invalidate();
     }
 
@@ -1257,7 +1275,15 @@ public class ProfileActionsView extends View {
         SETTINGS(R.string.Settings, R.drawable.filled_profile_settings, R.drawable.outline_profile_settings),
         CONTACTS(R.string.Contacts, R.drawable.filled_profile_member_24, R.drawable.outline_profile_member_24),
         PLAY(R.string.SvipeMusicPlay, R.drawable.filled_gift_play_24, R.drawable.filled_gift_play_24),
-        SHUFFLE(R.string.SvipeMusicShuffle, R.drawable.filled_poll_shuffle_24, R.drawable.filled_poll_shuffle_24),;
+        SHUFFLE(R.string.SvipeMusicShuffle, R.drawable.filled_poll_shuffle_24, R.drawable.filled_poll_shuffle_24),
+        // The app's own heart, reused from the mini player so both places read as the same gesture. It
+        // ships as 24dp-native art at every density (24/36/48/72 px), i.e. exactly the box updateBounds
+        // gives an icon, so it needs no scaling despite being a bitmap rather than a vector. Filled and
+        // outline are deliberately the same drawable per state, as PLAY/SHUFFLE do: the empty-vs-full
+        // heart carries the FAVOURITE state, and letting the expand-crossfade also swap it would make a
+        // pulled-open header look liked.
+        LIKE(R.string.SvipeMusicLike, R.drawable.media_like, R.drawable.media_like),
+        LIKE_ACTIVE(R.string.SvipeMusicLiked, R.drawable.media_like_active, R.drawable.media_like_active),;
 
         final @StringRes int title;
         final @DrawableRes int filledIcon;

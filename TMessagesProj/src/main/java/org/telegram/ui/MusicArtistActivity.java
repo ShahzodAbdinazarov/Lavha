@@ -18,7 +18,10 @@ import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.svipe.SvipeArtistFavourite;
+import org.telegram.svipe.SvipeArtistFavouritesSet;
 import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.svipe.SvipeMusicResolver;
@@ -40,7 +43,7 @@ import java.util.HashMap;
  * action row), and where a channel profile lists shared media this lists the artist's canonical songs
  * as native {@link SharedAudioCell}s. Tap a song to open its version picker.
  */
-public class MusicArtistActivity extends ProfileStyleActivity {
+public class MusicArtistActivity extends ProfileStyleActivity implements NotificationCenter.NotificationCenterDelegate {
 
     private final long artistId;
     private final String initialName;
@@ -95,10 +98,19 @@ public class MusicArtistActivity extends ProfileStyleActivity {
     protected void onCreateActions(ProfileActionsView view) {
         view.addAction(ProfileActionsView.ActionButton.PLAY, ProfileActionsView.KEY_PLAY);
         view.addAction(ProfileActionsView.ActionButton.SHUFFLE, ProfileActionsView.KEY_SHUFFLE);
+        if (isFavouritable()) {
+            view.addAction(favouriteButton(), ProfileActionsView.KEY_LIKE);
+        }
     }
 
     @Override
     protected void onActionClick(int key, float x, float y) {
+        // Liking is answered before the playback guard below: the artist id arrives with the fragment,
+        // so the heart works from the first frame, while Play/Shuffle genuinely need a resolved queue.
+        if (key == ProfileActionsView.KEY_LIKE) {
+            toggleFavourite();
+            return;
+        }
         if (queue == null || songs.isEmpty()) {
             return;
         }
@@ -117,6 +129,79 @@ public class MusicArtistActivity extends ProfileStyleActivity {
                     return;
                 }
             }
+        }
+    }
+
+    /* ---------------- Svipe: favourite ("like") toggle ---------------- */
+
+    /** An artist only ever exists as a catalog row, so a real id is the whole precondition. */
+    private boolean isFavouritable() {
+        return artistId > 0;
+    }
+
+    private ProfileActionsView.ActionButton favouriteButton() {
+        return SvipeArtistFavouritesSet.getInstance(currentAccount).isFavourite(artistId)
+                ? ProfileActionsView.ActionButton.LIKE_ACTIVE
+                : ProfileActionsView.ActionButton.LIKE;
+    }
+
+    /** Repaints the heart from the store. Cheap and idempotent, so callers may fire it unconditionally. */
+    private void refreshFavouriteAction() {
+        if (actionsView != null && isFavouritable()) {
+            actionsView.updateAction(ProfileActionsView.KEY_LIKE, favouriteButton());
+        }
+    }
+
+    /**
+     * Flip the favourite state. Local store first (it posts {@code svipeArtistFavouritesChanged}, which
+     * repaints the heart), backend fire-and-forget.
+     *
+     * <p>Unlike the song page this never has to wait for the load. The artist id IS the identity, and
+     * the cached name/photo are display-only — {@link SvipeArtistFavouritesSet#merge} refreshes them on
+     * every sync, for entries it already has as well as ones it adopts. So liking before the page has
+     * landed stores {@link #initialName} (the name the caller was already showing) and the row is
+     * complete either way.
+     */
+    private void toggleFavourite() {
+        if (!isFavouritable()) {
+            return;
+        }
+        SvipeArtistFavouritesSet.getInstance(currentAccount).toggle(favouriteEntry());
+    }
+
+    private SvipeArtistFavourite favouriteEntry() {
+        SvipeMusic.Artist a = page != null ? page.artist : null;
+        if (a != null && a.id > 0) {
+            return SvipeArtistFavourite.of(a);
+        }
+        // Page not loaded yet (or it carried no artist object): keep what the caller handed us, and let
+        // the next sync fill in the real name, photo and song count.
+        SvipeArtistFavourite f = new SvipeArtistFavourite();
+        f.artistId = artistId;
+        f.name = initialName;
+        f.songCount = page != null ? page.songCount : 0;
+        return f;
+    }
+
+    @Override
+    public boolean onFragmentCreate() {
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeArtistFavouritesChanged);
+        // One-shot per process, so the first artist page opened pulls the favourite singers the user
+        // starred on another device. The song set gets the same treatment from the Music tab.
+        SvipeArtistFavouritesSet.getInstance(currentAccount).syncFromServer();
+        return super.onFragmentCreate();
+    }
+
+    @Override
+    public void onFragmentDestroy() {
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeArtistFavouritesChanged);
+        super.onFragmentDestroy();
+    }
+
+    @Override
+    public void didReceivedNotification(int id, int account, Object... args) {
+        if (id == NotificationCenter.svipeArtistFavouritesChanged) {
+            refreshFavouriteAction();
         }
     }
 
@@ -164,6 +249,7 @@ public class MusicArtistActivity extends ProfileStyleActivity {
                 }
                 showProgress(false);
                 bindHeader();
+                refreshFavouriteAction();   // a sync may have landed while the page was in flight
                 if (songs.isEmpty()) {
                     showMessage(getString(R.string.NoResult));
                 }

@@ -50,6 +50,8 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.SharedConfig;
+import org.telegram.svipe.SvipeArtistFavourite;
+import org.telegram.svipe.SvipeArtistFavouritesSet;
 import org.telegram.svipe.SvipeFavourite;
 import org.telegram.svipe.SvipeFavouritesSet;
 import org.telegram.svipe.SvipeMusic;
@@ -61,7 +63,9 @@ import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.SharedAudioCell;
+import org.telegram.ui.Cells.UserCell;
 import org.telegram.ui.Components.AudioPlayerAlert;
+import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.FragmentContextView;
 import org.telegram.ui.Components.CombinedDrawable;
@@ -106,10 +110,15 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private static final int ROW_RETRY = 5;
     private static final int ROW_SONG = 6;      // canonical song card — fallback when the default version can't resolve
     private static final int ROW_SONG_AUDIO = 7; // canonical song as a native SharedAudioCell (default version resolved)
-    // Rows of the pinned "Favourite songs" section (its own inner list, never mixed with search rows).
+    // Rows of the pinned favourites panel (its own inner list, never mixed with search rows).
     private static final int ROW_FAV_AUDIO = 8;  // resolved to a real message -> native SharedAudioCell
     private static final int ROW_FAV_CARD = 9;   // not resolvable here (private source) -> lightweight card
-    private static final int ROW_FAV_EMPTY = 10;
+    private static final int ROW_FAV_EMPTY = 10; // shared by both tabs; only the sentence differs
+    private static final int ROW_FAV_ARTIST = 11; // a favourite singer -> native UserCell (profile person row)
+
+    /** The panel's two tabs. Songs is index 0 and is what the panel opens on. */
+    private static final int FAV_TAB_SONGS = 0;
+    private static final int FAV_TAB_SINGERS = 1;
 
     private static final int SEARCH_MIN_CHARS = 2;
     private static final int SEARCH_PAGE = 50;
@@ -128,13 +137,19 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private FragmentContextView fragmentContextView;
     private FrameLayout contextWrap;
 
-    /* "Home" is the vibe hero with the "Favourite songs" panel pulled up over it. The panel rests
+    /* "Home" is the vibe hero with the favourites panel pulled up over it. The panel rests
      * peeking above the bottom tabs and is dragged (or tapped) up until its tab strip meets the
      * now-playing bar; releasing past a threshold snaps it the rest of the way. Its travel drives
      * everything else: the hero recedes (scales down + fades) instead of scrolling away, and the
-     * favourites list fades in from nothing. */
+     * favourites list fades in from nothing.
+     *
+     * The panel holds two tabs over ONE list: the strip only chooses which collection the single
+     * adapter reads from. A second RecyclerView would have to be threaded through the blur capture,
+     * the insets, the drag's listAtTop() and the scroll-to-top handler for no gain. */
     private FavouritesPanel favPanel;
+    private int favTab = FAV_TAB_SONGS;
     private final ArrayList<SvipeFavourite> favourites = new ArrayList<>();
+    private final ArrayList<SvipeArtistFavourite> artistFavourites = new ArrayList<>();
     // Favourite key -> its entry in the CURRENT favQueue, so rows render as native audio cells.
     private final HashMap<String, MessageObject> favMo = new HashMap<>();
     // Track.key() -> resolved channel message, kept across rebuilds so re-forming the queue is free.
@@ -222,6 +237,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         nc.addObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
         nc.addObserver(this, NotificationCenter.messagePlayingDidReset);
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeFavouritesChanged);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeArtistFavouritesChanged);
         SvipeMusicTelemetry.getInstance(currentAccount).attach();
         return super.onFragmentCreate();
     }
@@ -233,6 +249,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         nc.removeObserver(this, NotificationCenter.messagePlayingPlayStateChanged);
         nc.removeObserver(this, NotificationCenter.messagePlayingDidReset);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeFavouritesChanged);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeArtistFavouritesChanged);
         super.onFragmentDestroy();
     }
 
@@ -472,7 +489,9 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         ensureHomeLoaded();
         // Local store first (instant, offline), then reconcile with the backend once per process.
         rebuildFavourites();
+        rebuildArtistFavourites();
         SvipeFavouritesSet.getInstance(currentAccount).syncFromServer();
+        SvipeArtistFavouritesSet.getInstance(currentAccount).syncFromServer();
         return root;
     }
 
@@ -561,6 +580,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         private float progress;                 // 0 = peeking, 1 = fully open
         private boolean dragging;
         private float downY, downX, dragStartTranslation;
+        /** Tab the finger landed on while the panel was closed, or -1. See {@link #tabIdAt}. */
+        private int pendingTabId = -1;
 
         FavouritesPanel(Context context) {
             super(context);
@@ -593,9 +614,25 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             tabStrip = new ScrollSlidingTextTabStrip(context, getResourceProvider());
             tabStrip.setColors(Theme.key_profile_tabSelectedLine, Theme.key_profile_tabSelectedText, Theme.key_profile_tabText, Theme.key_profile_tabSelector);
             tabStrip.setUseMinimalWidth(true);
-            tabStrip.addTextTab(0, getString(R.string.SvipeFavouriteSongs));
+            tabStrip.addTextTab(FAV_TAB_SONGS, getString(R.string.SvipeFavouriteSongs));
+            tabStrip.addTextTab(FAV_TAB_SINGERS, getString(R.string.SvipeFavouriteSingers));
             tabStrip.finishAddingTabs();
-            tabStrip.setInitialTabId(0);
+            // Songs is the default: the tab ids ARE the FAV_TAB_* indices, so the strip's id is the
+            // adapter's mode and nothing has to map between them.
+            tabStrip.setInitialTabId(FAV_TAB_SONGS);
+            tabStrip.setDelegate(new ScrollSlidingTextTabStrip.ScrollSlidingTabStripDelegate() {
+                @Override
+                public void onPageSelected(int page, boolean forward) {
+                    // Data source only — the panel's travel, drag state and the hero's recede are
+                    // untouched, so switching tabs never moves the sheet.
+                    setFavTab(page);
+                }
+
+                @Override
+                public void onPageScrolled(float progress) {
+                    // No pager behind the strip; the list swaps outright on selection.
+                }
+            });
             try {
                 // SharedMediaLayout's own fallback when it is handed no liquid-glass factory: the same
                 // pill drawable off a plain colour source, minus the render-node pipeline.
@@ -709,6 +746,40 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             return !innerListView.canScrollVertically(-1);
         }
 
+        /**
+         * Which tab is under this SCREEN point, or -1 for none. Screen coordinates because the caller only
+         * has raw ones — the panel translates, so nothing view-local survives the drag.
+         */
+        private int tabIdAt(float rawX, float rawY) {
+            ViewGroup container = tabStrip.getTabsContainer();
+            ArrayList<Integer> ids = tabStrip.getTabIds();
+            int[] loc = new int[2];
+            for (int i = 0, n = Math.min(container.getChildCount(), ids.size()); i < n; i++) {
+                View child = container.getChildAt(i);
+                if (child == null || child.getVisibility() != View.VISIBLE) {
+                    continue;
+                }
+                child.getLocationOnScreen(loc);
+                if (rawX >= loc[0] && rawX <= loc[0] + child.getWidth()
+                        && rawY >= loc[1] && rawY <= loc[1] + child.getHeight()) {
+                    return ids.get(i);
+                }
+            }
+            return -1;
+        }
+
+        /** Select a tab as if it had been tapped — the strip's delegate drives {@link #setFavTab}. */
+        private void selectTab(int tabId) {
+            ArrayList<Integer> ids = tabStrip.getTabIds();
+            int position = ids.indexOf(tabId);
+            if (position < 0) {
+                return;
+            }
+            // Hand over the child view too: the one-argument scrollTo passes null, which leaves the
+            // indicator animating towards whatever width and x the PREVIOUS selection left behind.
+            tabStrip.scrollTo(tabId, position, tabStrip.getTabsContainer().getChildAt(position));
+        }
+
         @Override
         public boolean onInterceptTouchEvent(MotionEvent ev) {
             if (ev.getAction() == MotionEvent.ACTION_DOWN) {
@@ -720,10 +791,15 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                     settleAnimator.cancel();
                     settleAnimator = null;
                 }
+                pendingTabId = -1;
                 // While closed the panel owns the whole gesture: the only thing showing is the strip,
                 // and ScrollSlidingTextTabStrip is a HorizontalScrollView that would otherwise swallow
                 // the tap and the drag before either ever reached us.
                 if (!isOpen()) {
+                    // Swallowing the tap also swallows the tab it landed on, and with two tabs that is a
+                    // real choice, not noise — remember it so the release can honour it and the panel does
+                    // not open on the list the user did not ask for.
+                    pendingTabId = tabIdAt(ev.getRawX(), ev.getRawY());
                     return true;
                 }
             } else if (ev.getAction() == MotionEvent.ACTION_MOVE && !dragging) {
@@ -733,6 +809,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                     // list has nothing left to give, so the list scrolls before the panel closes.
                     if (!isOpen() || (dy > 0 && listAtTop())) {
                         dragging = true;
+                        pendingTabId = -1;      // a drag is not a tab tap
                         downY = ev.getRawY();
                         dragStartTranslation = progress;
                         return true;
@@ -768,6 +845,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 float dy = ev.getRawY() - downY;
                 if (!dragging && Math.abs(dy) > touchSlop) {
                     dragging = true;
+                    pendingTabId = -1;          // a drag is not a tab tap
                     downY = ev.getRawY();
                     dy = 0;
                 }
@@ -784,9 +862,15 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 velocityTracker = null;
                 if (!dragging && action == MotionEvent.ACTION_UP) {
                     // A tap on the peeking strip opens the panel — the whole point of leaving it visible.
+                    // If it landed on a tab, select that tab first so the panel opens showing it.
+                    if (pendingTabId >= 0) {
+                        selectTab(pendingTabId);
+                        pendingTabId = -1;
+                    }
                     animateTo(!isOpen());
                     return true;
                 }
+                pendingTabId = -1;
                 settleFromGesture(vy, dragStartTranslation);
                 dragging = false;
                 return true;
@@ -826,13 +910,22 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         }
     }
 
-    /** Rows of the favourites section: a resolved audio cell, a plain card, or the empty state. */
+    /**
+     * Rows of the favourites panel for WHICHEVER tab is selected: a resolved audio cell, a plain card,
+     * an artist row, or the empty state. One adapter over two collections rather than two adapters —
+     * everything around the list (blur capture, insets, the drag's listAtTop(), scroll-to-top) is wired
+     * to the single innerListView, and {@link #favTab} is the only thing that varies.
+     */
     private class FavAdapter extends RecyclerListView.SelectionAdapter {
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            if (holder.getItemViewType() == ROW_FAV_EMPTY) {
+            int type = holder.getItemViewType();
+            if (type == ROW_FAV_EMPTY) {
                 return false;
+            }
+            if (type == ROW_FAV_ARTIST) {
+                return true;    // an artist row always has a page to open
             }
             // Don't offer a ripple on a row whose tap could not do anything.
             int pos = holder.getAdapterPosition();
@@ -841,11 +934,17 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
         @Override
         public int getItemCount() {
+            if (favTab == FAV_TAB_SINGERS) {
+                return artistFavourites.isEmpty() ? 1 : artistFavourites.size();
+            }
             return favourites.isEmpty() ? 1 : favourites.size();
         }
 
         @Override
         public int getItemViewType(int position) {
+            if (favTab == FAV_TAB_SINGERS) {
+                return artistFavourites.isEmpty() ? ROW_FAV_EMPTY : ROW_FAV_ARTIST;
+            }
             if (favourites.isEmpty()) {
                 return ROW_FAV_EMPTY;
             }
@@ -861,13 +960,16 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 view = new SharedAudioCell(context, getResourceProvider());
             } else if (viewType == ROW_FAV_CARD) {
                 view = new FavouriteCell(context);
+            } else if (viewType == ROW_FAV_ARTIST) {
+                // The song page's artist row verbatim: UserCell is the profile's own person row and
+                // takes an explicit name/status, so it needs no peer behind it.
+                view = new UserCell(context, 6, 0, false, getResourceProvider());
             } else {
                 TextView tv = new TextView(context);
                 tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
                 tv.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
                 tv.setGravity(Gravity.CENTER);
                 tv.setPadding(dp(20), dp(40), dp(20), dp(28));
-                tv.setText(getString(R.string.SvipeFavouritesEmpty));
                 view = tv;
             }
             view.setLayoutParams(new RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT, RecyclerView.LayoutParams.WRAP_CONTENT));
@@ -876,19 +978,67 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
-            if (favourites.isEmpty()) {
+            final int type = holder.getItemViewType();
+            if (type == ROW_FAV_EMPTY) {
+                // One empty view serves both tabs — only the sentence differs, so it is set here rather
+                // than baked in at create time: the view survives a tab switch by recycling.
+                ((TextView) holder.itemView).setText(getString(favTab == FAV_TAB_SINGERS
+                        ? R.string.SvipeFavouriteSingersEmpty : R.string.SvipeFavouritesEmpty));
+                return;
+            }
+            if (type == ROW_FAV_ARTIST) {
+                if (position < artistFavourites.size()) {
+                    bindArtistRow((UserCell) holder.itemView, artistFavourites.get(position),
+                            position != getItemCount() - 1);
+                }
+                return;
+            }
+            if (position >= favourites.size()) {
                 return;
             }
             SvipeFavourite f = favourites.get(position);
-            if (holder.getItemViewType() == ROW_FAV_AUDIO) {
+            if (type == ROW_FAV_AUDIO) {
                 MessageObject mo = playingCopyOf(f);
                 if (mo != null) {
                     ((SharedAudioCell) holder.itemView).setMessageObject(mo, position != getItemCount() - 1);
                 }
-            } else if (holder.getItemViewType() == ROW_FAV_CARD) {
+            } else if (type == ROW_FAV_CARD) {
                 ((FavouriteCell) holder.itemView).bind(f);
             }
         }
+    }
+
+    /**
+     * An artist row, drawn exactly as {@link MusicSongActivity} draws the artists of a song: the real
+     * (Deezer) photo when the artist has been enriched, and Telegram's gradient+initials tile when not
+     * — the same fallback {@link MusicArtistActivity} shows in its own header.
+     *
+     * <p>The image is re-applied on EVERY bind: {@code UserCell.setData} leaves the avatar alone when it
+     * is handed no peer, so a recycled row would otherwise keep the previous artist's photo.
+     */
+    private void bindArtistRow(UserCell cell, SvipeArtistFavourite f, boolean divider) {
+        String shown = f.shownName();
+        String name = shown != null && !shown.isEmpty() ? shown : getString(R.string.AudioUnknownArtist);
+        cell.setData(null, name, artistStatus(f), 0, divider);
+        AvatarDrawable avatar = new AvatarDrawable();
+        avatar.setInfo(f.artistId, name, null);
+        if (f.photoUrl != null && !f.photoUrl.isEmpty()) {
+            cell.avatarImageView.setImage(ImageLocation.getForPath(f.photoUrl), "50_50", avatar, null);
+        } else {
+            cell.avatarImageView.setImage(null, "50_50", avatar, null);
+        }
+    }
+
+    /**
+     * The status line of an artist row, mirroring the song page's: how much they have, since repeating
+     * "Artist" down every row tells the reader nothing. The label only stands in when the count is
+     * missing (an older backend, or an artist not yet counted).
+     */
+    private String artistStatus(SvipeArtistFavourite f) {
+        if (f.songCount > 0) {
+            return LocaleController.formatPluralString("SvipeMusicSongCount", f.songCount);
+        }
+        return getString(R.string.SvipeMusicArtist);
     }
 
     /** A favourite we cannot render as a native audio row (private source, or not resolved yet). */
@@ -935,6 +1085,38 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     }
 
     /* favourites data */
+
+    /**
+     * Point the panel's one list at the other tab.
+     *
+     * <p>Deliberately touches nothing but the data source: the panel's translation, its drag state and
+     * the hero's recede are all driven by {@code progress}, which this never reads or writes, so a tab
+     * switch cannot move the sheet or interrupt a settle animation in flight.
+     */
+    private void setFavTab(int tab) {
+        if (favTab == tab) {
+            return;
+        }
+        favTab = tab;
+        if (favPanel != null) {
+            favPanel.notifyChanged();
+            // The two lists have unrelated lengths, so without this the incoming one inherits the
+            // outgoing one's scroll offset and can arrive already scrolled part-way down.
+            favPanel.innerListView.scrollToPosition(0);
+        }
+    }
+
+    /**
+     * Rebuild the favourite singers from the local store. Nothing to resolve here: an artist row is
+     * name + photo + count, all of it cached in the entry, and the tap opens a page rather than playing.
+     */
+    private void rebuildArtistFavourites() {
+        artistFavourites.clear();
+        artistFavourites.addAll(SvipeArtistFavouritesSet.getInstance(currentAccount).list());
+        if (favPanel != null && favTab == FAV_TAB_SINGERS) {
+            favPanel.notifyChanged();
+        }
+    }
 
     /**
      * Rebuild the section from the local store, then resolve whatever can be played from a channel into
@@ -1020,6 +1202,13 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void onFavouriteClick(int position) {
+        if (favTab == FAV_TAB_SINGERS) {
+            if (position >= 0 && position < artistFavourites.size()) {
+                SvipeArtistFavourite a = artistFavourites.get(position);
+                presentFragment(new MusicArtistActivity(a.artistId, a.shownName()));
+            }
+            return;
+        }
         if (position < 0 || position >= favourites.size()) {
             return;
         }
@@ -1635,6 +1824,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             refreshVibe();
         } else if (id == NotificationCenter.svipeFavouritesChanged) {
             rebuildFavourites();
+        } else if (id == NotificationCenter.svipeArtistFavouritesChanged) {
+            rebuildArtistFavourites();
         }
     }
 

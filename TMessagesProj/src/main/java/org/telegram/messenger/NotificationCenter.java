@@ -378,6 +378,9 @@ public class NotificationCenter {
     // Svipe: the favourite-songs set changed. Global (not per-account) because several
     // FragmentContextView mini players can be alive at once across fragments.
     public static final int svipeFavouritesChanged = totalEvents++;
+    // Svipe: the favourite-singers set changed. Global for the same reason as the songs above —
+    // an artist row and the artist page can both be on screen at once.
+    public static final int svipeArtistFavouritesChanged = totalEvents++;
 
     public static boolean alreadyLogged;
 
