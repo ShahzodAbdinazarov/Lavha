@@ -11018,6 +11018,9 @@
     <string name="SvipeUpdatePermissionTitle">Permission needed</string>
     <string name="SvipeUpdatePermissionMessage">To install the update, allow Svipe to \"install unknown apps\", then tap again.</string>
     <string name="SvipeUpdateInstallFailed">Couldn\'t install%1$s. Try downloading it from the website.</string>
+    <string name="SvipeUpdateUpToDate">Svipe is up to date</string>
+    <string name="SvipeUpdateCheckFailed">Couldn\'t check for updates. Check your connection.</string>
+    <string name="SvipeUpdateChecking">Checking for updates…</string>
 
     <string name="WearAuthTitle">Use Telegram with WearOS</string>
     <string name="WearAuthText">Connect your account to WatchOS device\nto use it separately from your watch.</string>

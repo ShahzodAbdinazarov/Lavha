@@ -4629,6 +4629,12 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                 }
             } else if (position == noteRow) {
                 editNotes(view, position);
+            } else if (position == versionRow && org.telegram.svipe.SvipeUpdater.isSelfUpdateBuild()) {
+                // Svipe: the direct-download builds have no other way to ASK for an update — the bottom
+                // sheet is offered once per version and the banner only appears after a check already
+                // succeeded. A tap on the version checks now, and always answers. The long-press debug
+                // menu below is untouched.
+                org.telegram.svipe.SvipeUpdater.checkNow(getParentActivity());
             } else {
                 processOnClickOrPress(position, view, x, y);
             }

@@ -360,4 +360,7 @@
     <string name="SvipeUpdatePermissionTitle">Нужно разрешение</string>
     <string name="SvipeUpdatePermissionMessage">Чтобы установить обновление, разрешите Svipe \"установку неизвестных приложений\", затем нажмите снова.</string>
     <string name="SvipeUpdateInstallFailed">Не удалось установить%1$s. Попробуйте скачать с сайта.</string>
+    <string name="SvipeUpdateUpToDate">У вас последняя версия Svipe</string>
+    <string name="SvipeUpdateCheckFailed">Не удалось проверить обновления. Проверьте подключение.</string>
+    <string name="SvipeUpdateChecking">Проверка обновлений…</string>
 </resources>

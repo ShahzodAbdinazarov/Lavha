@@ -38,6 +38,7 @@ import java.lang.ref.WeakReference;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -53,16 +54,27 @@ import java.util.Locale;
  */
 public class SvipeUpdater {
 
-    // We check once per cold start (checkedThisProcess), then throttle further foreground resumes to
-    // this interval so we don't hit the server on every app switch. Short enough that a new release
-    // reaches users promptly.
-    private static final long CHECK_INTERVAL_MS = 30L * 60 * 1000; // 30 min between resume re-checks
+    // We check once per cold start (checkedThisProcess), then throttle further foreground resumes;
+    // how long that throttle lasts depends on whether the last check actually got an answer, see
+    // SvipeUpdateThrottle.
     private static volatile boolean checkedThisProcess = false;
     private static final String PREFS = "svipe_updater";
     private static final String KEY_LAST_CHECK = "last_check";
+    // Outcome of the check KEY_LAST_CHECK stamps. A check that never produced a valid response must not
+    // buy the full success interval — see SvipeUpdateThrottle for why that matters so much here.
+    private static final String KEY_LAST_CHECK_OK = "last_check_ok";
     private static final String KEY_PENDING_PATH = "pending_path";
     private static final String KEY_PENDING_VC = "pending_vc";
     private static final String KEY_PROMPTED_VC = "prompted_vc";
+    // The rest of the offer, persisted alongside the APK so a downloaded-but-not-installed update can be
+    // fully rehydrated on the next cold start — the banner needs the size, and a re-download after the
+    // file is lost needs the url + checksum.
+    private static final String KEY_PENDING_NAME = "pending_name";
+    private static final String KEY_PENDING_SIZE = "pending_size";
+    private static final String KEY_PENDING_SHA = "pending_sha";
+    private static final String KEY_PENDING_URL = "pending_url";
+    private static final String KEY_PENDING_CHANGELOG = "pending_changelog";
+    private static final String KEY_PENDING_CANNOTSKIP = "pending_cannotskip";
 
     /** A newer version offered by the backend. */
     public static class Pending {
@@ -84,10 +96,27 @@ public class SvipeUpdater {
     private static volatile boolean downloading;   // an HTTP download is in flight
     private static volatile float progress;        // 0..1 download progress
     private static volatile File readyFile;        // downloaded + verified APK, ready to install
+    private static volatile int readyVersionCode;  // version code readyFile holds (0 when none)
     private static boolean awaitingInstallPermission; // true only between the unknown-sources settings trip and the return
     private static volatile boolean cancelRequested;
 
     private static boolean checking;
+    /**
+     * Whether the in-flight check has already said "Checking for updates…" to the user.
+     *
+     * <p>UI-thread confined, cleared the moment {@code checking} clears. It exists so that the
+     * acknowledgement is emitted exactly once per in-flight request: the press that starts the request
+     * normally owns it, but a manual press that lands while the automatic cold-start check is still
+     * running has been told nothing yet and must own it instead. See {@link SvipeUpdateAck}.
+     */
+    private static boolean checkAnnounced;
+    /**
+     * Non-null while a manual "check for updates" is waiting on a request that was already in flight.
+     *
+     * <p>UI-thread confined (both {@link #check} and the SvipeApi callback run there), so no locking.
+     * Weak on purpose: this is a long-lived static and must never pin an Activity.
+     */
+    private static WeakReference<Activity> forceWaiterRef;
     private static boolean promptOpen;
     private static WeakReference<SvipeUpdateLayout> bannerRef;
     private static AlertDialog modalProgress; // fallback progress UI when no drawer banner is present
@@ -138,6 +167,10 @@ public class SvipeUpdater {
     /** Called from LaunchActivity.onResume — resumes a pending install, else throttled background check. */
     public static void maybeCheck(Activity activity) {
         if (activity == null || !isSelfUpdateBuild()) return;
+        cleanupOldApksOnce(); // reclaim abandoned downloads (see FIX 2) — no network needed
+        // Restores 'pending' + the ready banner from disk. It only short-circuits when it actually
+        // launched the installer (the unknown-sources round-trip); a merely-waiting APK must NOT stop
+        // the server check, or a version newer than the downloaded one could never be discovered.
         if (resumePendingInstall(activity)) return;
         // Always check once per cold start so a fresh release is picked up on the next app open;
         // only subsequent foreground resumes within the same process are time-throttled.
@@ -147,7 +180,14 @@ public class SvipeUpdater {
             return;
         }
         SharedPreferences p = prefs();
-        if (System.currentTimeMillis() - p.getLong(KEY_LAST_CHECK, 0) < CHECK_INTERVAL_MS) return;
+        // A failed check buys only a short backoff, so the next resume retries instead of going quiet
+        // for half an hour on a network that resolves the backend only some of the time.
+        if (!SvipeUpdateThrottle.shouldCheck(
+                p.getLong(KEY_LAST_CHECK, 0),
+                System.currentTimeMillis(),
+                p.getBoolean(KEY_LAST_CHECK_OK, true))) {
+            return;
+        }
         check(activity, false);
     }
 
@@ -171,19 +211,91 @@ public class SvipeUpdater {
     }
 
     private static void check(Activity activity, boolean force) {
-        if (checking || downloading) return;
+        // Acknowledge a manual press BEFORE anything can block on the network. SvipeApi allows 15s to
+        // connect and 25s to read, so on the kind of half-broken resolver this feature exists to survive
+        // a failing check takes ~40s; anything that leaves the screen unchanged for that long is the dead
+        // button we are fixing. Automatic checks never reach a non-NONE ack (force=false) — they run on
+        // every cold start and nobody asked them a question.
+        final SvipeUpdateAck.Ack ack = SvipeUpdateAck.forCheck(force, checking, downloading, checkAnnounced);
+        if (ack == SvipeUpdateAck.Ack.CHECKING) {
+            toast(activity, getString(R.string.SvipeUpdateChecking));
+            checkAnnounced = true; // either a check is already running, or the one below starts now
+        } else if (ack == SvipeUpdateAck.Ack.DOWNLOADING) {
+            toast(activity, getString(R.string.SvipeUpdateDownloading));
+        }
+        if (checking || downloading) {
+            // A manual request must never be swallowed: an in-flight automatic check can hold this for
+            // the whole 25s read timeout, and silence there is the same dead button we are fixing.
+            // Coalesce onto the request that is already running. Its callback closed over force=false, so
+            // without this latch it would complete silently and the user would get the acknowledgement
+            // above and then nothing at all. Two rapid presses only overwrite the same single latch, so
+            // one response still yields exactly one answer. Nothing is latched for the download-only
+            // case: "Downloading…" already answers the user, and no callback would ever arrive to
+            // consume it.
+            if (force && checking) forceWaiterRef = new WeakReference<>(activity);
+            return;
+        }
         checking = true;
         final int currentVc = currentVersionCode(activity);
         SvipeApi.get("/api/app/update?version_code=" + currentVc, null, (res, code, err) -> {
             checking = false;
-            prefs().edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply();
-            if (res == null || !res.optBoolean("available", false)) return;
-            int newVc = res.optInt("version_code", 0);
-            if (newVc <= currentVc) return;
+            checkAnnounced = false; // this request is over; the next press owns its own acknowledgement
+            // Consume the latch up front, before any branch: that is what makes "cleared exactly once,
+            // on every terminal path including failure" true by construction rather than by review.
+            final Activity waiter = consumeForceWaiter();
+            // A manual check must always answer, or it is indistinguishable from a dead button — whether
+            // it started this request or merely coalesced onto it. An automatic one with no waiter stays
+            // silent: it runs on every cold start and nobody asked it a question.
+            final boolean answer = force || waiter != null;
+            final Activity target = waiter != null ? waiter : activity;
+            // Status first: an error response can still carry a JSON body, and reading "available" off
+            // that would report a 500 as "you are up to date".
+            final boolean transportOk = res != null && code >= 200 && code < 300;
+            // A 2xx JSON body is NOT automatically an answer. SvipeApi parses any body starting with '{',
+            // so a deploy-window '{}' or a '{"detail":...}' envelope reaches us looking valid, and
+            // optBoolean's false default used to turn that into an authoritative "up to date" that
+            // retired the offer and deleted a verified 60 MB APK. Demand positive evidence instead; see
+            // SvipeUpdateResponse.
+            final int newVc = transportOk ? res.optInt("version_code", 0) : 0;
+            final SvipeUpdateResponse.Outcome outcome = transportOk
+                    ? SvipeUpdateResponse.classify(
+                            res.has("available") && !res.isNull("available"),
+                            res.optBoolean("available", false),
+                            newVc, currentVc)
+                    : SvipeUpdateResponse.Outcome.NOT_AN_ANSWER;
+            // An unparseable answer is a failed check for throttling too: it must buy the short backoff,
+            // not the full 30-minute silence.
+            recordCheckOutcome(outcome != SvipeUpdateResponse.Outcome.NOT_AN_ANSWER);
+            if (outcome == SvipeUpdateResponse.Outcome.NOT_AN_ANSWER) {
+                // Deliberately does NOT touch pending/readyFile, and deliberately never calls
+                // retireOffer(): neither one flaky DNS lookup nor one ambiguous body may destroy a
+                // completed download on the very network where re-fetching it costs the most.
+                if (answer) toast(target, getString(R.string.SvipeUpdateCheckFailed));
+                return;
+            }
+            if (outcome == SvipeUpdateResponse.Outcome.NO_UPDATE) {
+                retireOffer();
+                if (answer) toast(target, getString(R.string.SvipeUpdateUpToDate));
+                return;
+            }
             String url = res.optString("url", null);
             String sha = res.optString("sha256", "");
-            // Fail closed: a side-loaded APK is only offered when we have both a URL and a checksum to verify it.
-            if (TextUtils.isEmpty(url) || TextUtils.isEmpty(sha)) return;
+            // Fail closed: a side-loaded APK is only offered when we have both a URL and a checksum to
+            // verify it. The offer is NOT retired here: the server does claim a newer build exists, it
+            // just described it unusably, so an already-downloaded good APK stays installable.
+            if (TextUtils.isEmpty(url) || TextUtils.isEmpty(sha)) {
+                if (answer) toast(target, getString(R.string.SvipeUpdateCheckFailed));
+                return;
+            }
+            // Now that maybeCheck no longer stops at a waiting download, the APK on disk can be a
+            // different build from the one being offered — newer (installed 549, downloaded 559,
+            // released 569) OR older, when a bad release is withdrawn and the server goes back to
+            // offering 559 after 569 was already downloaded. Either way it is not the file this offer
+            // describes, so drop it: otherwise isReady() stays true, the banner advertises one version
+            // and installs another, and startDownload() early-returns instead of fetching the right one.
+            if (SvipeUpdateFiles.readyIsStaleFor(readyVersionCode, newVc)) {
+                clearPending();
+            }
             pending = new Pending(
                     res.optString("version_name", ""), newVc, res.optLong("size", 0),
                     sha, url, res.optString("changelog", ""),
@@ -192,48 +304,127 @@ public class SvipeUpdater {
             // Like native Telegram (LaunchActivity:6018), the bottom-sheet prompt is shown only the first
             // time a given version is detected; every later check for the same version just refreshes the
             // banner. A manual "check for updates" (force) still re-opens the sheet.
-            if (force || newVc != prefs().getInt(KEY_PROMPTED_VC, 0)) {
-                prefs().edit().putInt(KEY_PROMPTED_VC, newVc).apply();
-                promptUpdate(activity);
+            if (answer || newVc != prefs().getInt(KEY_PROMPTED_VC, 0)) {
+                // Record it as prompted ONLY once the sheet is really on screen. promptUpdate bails when
+                // the activity is finishing or another sheet is open, and marking it up front would burn
+                // this version's one modal chance on a prompt the user never saw — leaving the banner as
+                // the only surface, and nothing at all if the banner has not been created yet.
+                if (promptUpdate(target)) {
+                    prefs().edit().putInt(KEY_PROMPTED_VC, newVc).apply();
+                }
             }
         });
     }
 
-    private static void promptUpdate(Activity activity) {
+    /** Take the pending manual-check latch (if any) and clear it. UI thread only. */
+    private static Activity consumeForceWaiter() {
+        WeakReference<Activity> ref = forceWaiterRef;
+        forceWaiterRef = null;
+        if (ref == null) return null;
+        Activity a = ref.get();
+        return a != null && !a.isFinishing() ? a : null;
+    }
+
+    /** Stamp when the last check ran and whether it actually got an answer (drives the throttle). */
+    private static void recordCheckOutcome(boolean valid) {
+        prefs().edit()
+                .putLong(KEY_LAST_CHECK, System.currentTimeMillis())
+                .putBoolean(KEY_LAST_CHECK_OK, valid)
+                .apply();
+    }
+
+    /**
+     * A valid "no update" response is authoritative: the offer we are showing no longer exists.
+     *
+     * <p>Without this the "Svipe is up to date" toast could land on top of a banner still advertising a
+     * version the server has withdrawn (a pulled release, or a downgrade of the served build), and
+     * tapping that banner would download or install it. Retiring clears the in-memory offer, the ready
+     * state and the persisted {@code pending_*} keys, and lets the existing cleanup delete the APK.
+     *
+     * <p>Only ever called on a validated 2xx response — a failed request must leave a good offer alone.
+     * It also stands down while a download is running: that download is something the user explicitly
+     * started, its worker would re-persist the offer on completion anyway, and tearing state out from
+     * under it buys nothing that the next check will not do a moment later.
+     */
+    private static void retireOffer() {
+        if (downloading) return;
+        if (pending == null && readyFile == null && !prefs().contains(KEY_PENDING_PATH)) return;
+        pending = null;
+        clearPending(); // readyFile + persisted keys + delete the retired APK + sweep
+        notifyState();  // drop the banner
+    }
+
+    /** @return true only when the sheet actually reached the screen — the caller keys persistence off this. */
+    private static boolean promptUpdate(Activity activity) {
         Pending u = pending;
-        if (u == null || promptOpen || activity.isFinishing()) return;
+        if (u == null || promptOpen || activity.isFinishing()) return false;
         promptOpen = true;
         // Native-style bottom sheet (mirrors Telegram's UpdateAppAlertDialog), driven by our HTTP data.
         SvipeUpdateSheet sheet = new SvipeUpdateSheet(activity, u.version, u.size, u.changelog, u.canNotSkip,
                 () -> startDownload(activity));
         sheet.setOnDismissListener(d -> promptOpen = false);
-        sheet.show();
+        try {
+            sheet.show();
+        } catch (Throwable t) {
+            // show() throws if the window went away between the isFinishing() check and here. Release the
+            // flag or every later prompt in this process would be swallowed by promptOpen.
+            promptOpen = false;
+            FileLog.e(t);
+            return false;
+        }
+        return true;
+    }
+
+    private static void toast(Activity activity, String text) {
+        if (activity == null || activity.isFinishing()) return;
+        Toast.makeText(activity, text, Toast.LENGTH_SHORT).show();
     }
 
     /** Begin (or resume) downloading the pending update. Triggered by the sheet or the drawer banner. */
     public static void startDownload(Activity activity) {
         final Pending u = pending;
         if (u == null) return;
-        if (isReady()) { installApk(activity, readyFile); return; }
+        // Defence in depth behind readyIsStaleFor(): take the install shortcut only when the file on disk
+        // IS the build this offer describes. The failure mode being guarded is "the user installs a build
+        // we withdrew", so a second, local identity check is worth its two lines — if they ever disagree
+        // we fall through and download the offered build instead.
+        if (isReadyForCurrentOffer()) { installApk(activity, readyFile); return; }
         if (downloading) return;
+        if (TextUtils.isEmpty(u.url) || TextUtils.isEmpty(u.sha256)) {
+            // Only reachable for an offer rehydrated from a build that persisted no url/checksum and
+            // whose APK has since vanished. Nothing to fetch and nothing to verify against: say so and
+            // let the next check re-populate the offer, rather than failing deep inside the thread.
+            toast(activity, getString(R.string.SvipeUpdateCheckFailed));
+            return;
+        }
         downloading = true;
         cancelRequested = false;
         progress = 0f;
+        // Claim the updates directory BEFORE the worker thread exists, so the file this download will
+        // create cannot possibly appear while a sweep believes nothing is in flight. See beginDownload.
+        beginDownload(SvipeUpdateFiles.fileName(u.versionCode));
         notifyState();
 
         // Only show the modal progress dialog when there's no drawer banner to reflect progress
         // (e.g. on the pre-login intro screen). Otherwise the banner is the Telegram-style progress UI.
         if (!hasBanner()) {
-            modalProgress = new AlertDialog(activity, AlertDialog.ALERT_TYPE_LOADING);
-            modalProgress.setCanCancel(false);
-            modalProgress.setMessage(getString(R.string.SvipeUpdateDownloading));
-            modalProgress.show();
+            try {
+                modalProgress = new AlertDialog(activity, AlertDialog.ALERT_TYPE_LOADING);
+                modalProgress.setCanCancel(false);
+                modalProgress.setMessage(getString(R.string.SvipeUpdateDownloading));
+                modalProgress.show();
+            } catch (Throwable t) {
+                // show() throws if the window went away. Progress UI is cosmetic — never let it stop the
+                // download from starting, which would strand 'downloading' and the sweep claim forever.
+                FileLog.e(t);
+                modalProgress = null;
+            }
         }
 
         // Don't capture the Activity in the long-running download (would leak it); resolve it weakly
         // at completion and skip UI if it's gone. The file path uses the app context, not the Activity.
         final WeakReference<Activity> actRef = new WeakReference<>(activity);
-        new Thread(() -> {
+        Thread worker = new Thread(() -> {
             File out = null;
             String error = null;
             HttpURLConnection conn = null;
@@ -243,7 +434,7 @@ public class SvipeUpdater {
                 if (base == null) base = appCtx.getFilesDir(); // external storage unavailable -> internal
                 File dir = new File(base, "updates");
                 if (!dir.exists()) dir.mkdirs();
-                out = new File(dir, "svipe-" + u.versionCode + ".apk");
+                out = new File(dir, SvipeUpdateFiles.fileName(u.versionCode)); // same name beginDownload published
                 if (out.exists()) out.delete();
 
                 conn = (HttpURLConnection) new URL(u.url).openConnection();
@@ -307,11 +498,12 @@ public class SvipeUpdater {
                 dismissModal();
                 if (apk != null) {
                     readyFile = apk;
-                    prefs().edit()
-                            .putString(KEY_PENDING_PATH, apk.getAbsolutePath())
-                            .putInt(KEY_PENDING_VC, u.versionCode)
-                            .apply();
+                    readyVersionCode = u.versionCode;
+                    persistPending(u, apk);
                 }
+                // Release the directory only now, AFTER readyFile/persistPending have committed: the
+                // finished APK hands off from the in-flight name to the keep-set with no gap in between.
+                endDownload();
                 notifyState(); // ready/failed transition -> banner + listeners
                 Activity act = actRef.get();
                 if (act == null || act.isFinishing()) return; // gone: pending-install resumes on next launch
@@ -337,7 +529,20 @@ public class SvipeUpdater {
                             .show();
                 }
             });
-        }, "svipe-apk-download").start();
+        }, "svipe-apk-download");
+        try {
+            worker.start();
+        } catch (Throwable t) {
+            // Thread creation failed (OOM). Unwind everything the guards above set, or 'downloading'
+            // would stay true forever (no download, no retry) and the sweep claim would suppress every
+            // future cleanup in this process.
+            FileLog.e(t);
+            downloading = false;
+            progress = 0f;
+            dismissModal();
+            endDownload();
+            notifyState();
+        }
     }
 
     public static void cancelDownload() {
@@ -351,9 +556,22 @@ public class SvipeUpdater {
         }
     }
 
+    /**
+     * Is the verified APK on disk the exact build the current offer describes?
+     *
+     * <p>{@link #isReady()} only says a file exists. The banner and the sheet advertise
+     * {@code pending.versionCode}, so anything that installs from disk must confirm the identity too —
+     * otherwise a withdrawn build that is still lying in the updates directory gets installed under the
+     * label of the build that replaced it.
+     */
+    public static boolean isReadyForCurrentOffer() {
+        Pending u = pending;
+        return isReady() && u != null && readyVersionCode > 0 && readyVersionCode == u.versionCode;
+    }
+
     /** Drawer-banner tap: install if downloaded, cancel if downloading, else start the download. */
     public static void onBannerClick(Activity activity) {
-        if (isReady()) {
+        if (isReadyForCurrentOffer()) {
             installApk(activity, readyFile);
         } else if (downloading) {
             cancelDownload();
@@ -362,28 +580,260 @@ public class SvipeUpdater {
         }
     }
 
-    /** If a downloaded-but-not-yet-installed APK is waiting, install it (handles the unknown-sources round-trip). */
+    /**
+     * Rehydrate a downloaded-but-not-yet-installed APK into live state, and finish the unknown-sources
+     * round-trip if that is what brought us back.
+     *
+     * <p>Critically this restores {@code pending}, not just {@code readyFile}: {@link SvipeUpdateLayout}
+     * gates entirely on {@link #hasPending()}, so setting only {@code readyFile} left a verified APK on
+     * disk with NO banner — and, when this also short-circuited {@link #maybeCheck}, no server check
+     * either, on every launch, forever. The offer's metadata is persisted with the file precisely so
+     * this can be reconstructed with no network at all, which is the point: the download already
+     * succeeded, the banner must work offline.
+     *
+     * @return true ONLY when the installer was launched here (the caller then skips its check, because
+     *         the install flow owns the screen). A merely-waiting APK returns false so the caller still
+     *         checks the server: with 549 installed and 559 downloaded, a newly released 569 must still
+     *         be discoverable instead of the user sitting on 559 forever.
+     */
     private static boolean resumePendingInstall(Activity activity) {
         SharedPreferences p = prefs();
         String path = p.getString(KEY_PENDING_PATH, null);
         int vc = p.getInt(KEY_PENDING_VC, 0);
         if (path == null) return false;
-        if (currentVersionCode(activity) >= vc) { clearPending(); return false; }
+        if (currentVersionCode(activity) >= vc) {
+            // Already running it (or newer): the file is pure garbage now. On a fresh process readyFile
+            // is null, so clearPending() has nothing to delete — name the file explicitly. This is the
+            // path a self-update takes on its very first launch into the new version.
+            File installed = new File(path);
+            clearPending();
+            deleteQuietlyAsync(installed);
+            return false;
+        }
         File apk = new File(path);
         if (!apk.exists()) { clearPending(); return false; }
         readyFile = apk;
-        notifyState(); // restore the "ready — tap to install" banner; do NOT auto-launch the installer
+        readyVersionCode = vc;
+        if (pending == null || pending.versionCode != vc) {
+            // Fall back to the version code as a display name for state written by an older build that
+            // only persisted path+vc; every other field degrades harmlessly (size 0 hides the size
+            // label, and the ready banner shows "Update now" without it anyway).
+            String name = p.getString(KEY_PENDING_NAME, "");
+            if (TextUtils.isEmpty(name)) name = String.valueOf(vc);
+            pending = new Pending(
+                    name, vc,
+                    p.getLong(KEY_PENDING_SIZE, 0),
+                    p.getString(KEY_PENDING_SHA, ""),
+                    p.getString(KEY_PENDING_URL, ""),
+                    p.getString(KEY_PENDING_CHANGELOG, ""),
+                    p.getBoolean(KEY_PENDING_CANNOTSKIP, false));
+        }
+        notifyState(); // "ready — tap to install" banner; do NOT auto-launch the installer
         if (awaitingInstallPermission) {
             // Returned from the unknown-sources settings round-trip — resume the user's own install.
             awaitingInstallPermission = false;
             installApk(activity, apk);
+            return true;
         }
-        return true;
+        return false;
     }
 
+    /** Persist everything needed to rebuild {@code pending} after a restart, next to the APK path. */
+    private static void persistPending(Pending u, File apk) {
+        prefs().edit()
+                .putString(KEY_PENDING_PATH, apk.getAbsolutePath())
+                .putInt(KEY_PENDING_VC, u.versionCode)
+                .putString(KEY_PENDING_NAME, u.version)
+                .putLong(KEY_PENDING_SIZE, u.size)
+                .putString(KEY_PENDING_SHA, u.sha256)
+                .putString(KEY_PENDING_URL, u.url)
+                .putString(KEY_PENDING_CHANGELOG, u.changelog)
+                .putBoolean(KEY_PENDING_CANNOTSKIP, u.canNotSkip)
+                .apply();
+    }
+
+    /** Forget the downloaded APK (state + file). Never touches {@code pending} — the offer may still stand. */
     private static void clearPending() {
+        File stale = readyFile;
         readyFile = null;
-        prefs().edit().remove(KEY_PENDING_PATH).remove(KEY_PENDING_VC).apply();
+        readyVersionCode = 0;
+        prefs().edit()
+                .remove(KEY_PENDING_PATH).remove(KEY_PENDING_VC)
+                .remove(KEY_PENDING_NAME).remove(KEY_PENDING_SIZE).remove(KEY_PENDING_SHA)
+                .remove(KEY_PENDING_URL).remove(KEY_PENDING_CHANGELOG).remove(KEY_PENDING_CANNOTSKIP)
+                .apply();
+        if (stale != null) deleteQuietlyAsync(stale);
+        cleanupOldApksAsync();
+    }
+
+    // ---- FIX 2: reclaim abandoned update APKs ----------------------------------------------------
+    // startDownload() writes every update to <externalFilesDir>/updates/svipe-<vc>.apk and nothing ever
+    // removed them: a real device held 29 files / ~2.25 GB going back to versionCode 259.
+    //
+    // Triggers, deliberately: (1) once per process from maybeCheck() — so merely LAUNCHING this build
+    // drains an existing backlog, with no network and without waiting for a check to succeed, which
+    // matters because the device that surfaced this could not reach the server at all; and (2) whenever
+    // the pending APK is retired in clearPending() — after a successful install, after the first launch
+    // into the new version, or when a newer release supersedes it — which is the moment a file becomes
+    // garbage and the only way to keep the directory bounded within a long-running process.
+    // Everything here is best-effort: storage may be unreadable and a cleanup failure must never affect
+    // updating.
+
+    private static volatile boolean cleanupInFlight = false;
+    private static volatile boolean cleanedThisProcess = false;
+
+    // ---- FIX 4: the sweep must never race a download --------------------------------------------
+    // The sweep used to snapshot its keep-set and then delete; startDownload creates
+    // svipe-<vc>.apk on another thread and fills it incrementally, so a download that began after the
+    // snapshot but before the delete loop reached that name had its file unlinked underneath it.
+    //
+    // The window is closed by mutual exclusion, not by re-checking a flag (a flag can always flip
+    // between the check and the delete). Everything that mutates or deletes files in the updates
+    // directory takes SWEEP_LOCK:
+    //   * beginDownload() raises activeDownloads and publishes the target name while holding it, and it
+    //     runs on the UI thread BEFORE the worker thread is started — so the file cannot exist yet.
+    //   * cleanupOldApks() holds it across the whole keep-set + delete-loop section and bails out when
+    //     activeDownloads > 0.
+    // Therefore for any download and any sweep, one of two things is true: beginDownload got the lock
+    // first, and the sweep then observes activeDownloads > 0 and deletes nothing; or the sweep got the
+    // lock first, and it has finished every delete before beginDownload returns — at which point the
+    // download's file still does not exist, so there was nothing of it to delete. There is no ordering
+    // in which a delete and a live download's file overlap.
+    // The lock is only held for the delete loop (listing and the PackageManager lookup happen outside),
+    // so the UI thread's beginDownload waits on a few File.delete() calls at most.
+    private static final Object SWEEP_LOCK = new Object();
+    private static int activeDownloads;         // guarded by SWEEP_LOCK
+    private static String inFlightDownloadName; // guarded by SWEEP_LOCK
+
+    /** Claim the updates directory for a download. Call on the UI thread before the worker starts. */
+    private static void beginDownload(String targetName) {
+        synchronized (SWEEP_LOCK) {
+            activeDownloads++;
+            inFlightDownloadName = targetName;
+        }
+    }
+
+    /** Release the claim. Call once the finished file is protected by readyFile/persistPending. */
+    private static void endDownload() {
+        synchronized (SWEEP_LOCK) {
+            if (--activeDownloads <= 0) {
+                activeDownloads = 0;
+                inFlightDownloadName = null;
+            }
+        }
+    }
+
+    /** Launch-time sweep: the backlog only needs draining once per process. */
+    private static void cleanupOldApksOnce() {
+        if (cleanedThisProcess) return;
+        cleanedThisProcess = true;
+        cleanupOldApksAsync();
+    }
+
+    /** Request a sweep. Coalesced: one at a time, so the launch sweep and a clearPending sweep can't race. */
+    private static synchronized void cleanupOldApksAsync() {
+        if (cleanupInFlight) return;
+        cleanupInFlight = true;
+        boolean started = runOffThread(() -> {
+            try {
+                cleanupOldApks();
+            } finally {
+                cleanupInFlight = false;
+            }
+        }, "svipe-apk-cleanup");
+        if (!started) cleanupInFlight = false; // thread creation failed: don't wedge the flag forever
+    }
+
+    /** Delete the just-retired APK immediately; the sweep may not run again this process. */
+    private static void deleteQuietlyAsync(File file) {
+        runOffThread(() -> {
+            try {
+                // Same lock as the sweep, for the same reason: this is a targeted delete in the same
+                // directory and must not be able to hit a file a download is filling right now.
+                synchronized (SWEEP_LOCK) {
+                    if (activeDownloads > 0 && file.getName().equals(inFlightDownloadName)) return;
+                    if (file.exists()) file.delete();
+                }
+            } catch (Throwable ignore) {}
+        }, "svipe-apk-delete");
+    }
+
+    private static boolean runOffThread(Runnable r, String name) {
+        try {
+            new Thread(() -> {
+                try {
+                    r.run();
+                } catch (Throwable t) {
+                    FileLog.e(t); // never let housekeeping take down an update
+                }
+            }, name).start();
+            return true;
+        } catch (Throwable t) {
+            FileLog.e(t);
+            return false;
+        }
+    }
+
+    /** Blocking sweep of the updates directory. Call off the UI thread. */
+    private static void cleanupOldApks() {
+        Context ctx = ApplicationLoader.applicationContext;
+        if (ctx == null) return;
+        File dir = null;
+        try {
+            File base = ctx.getExternalFilesDir(null);
+            if (base == null) base = ctx.getFilesDir(); // mirrors startDownload's fallback
+            if (base != null) dir = new File(base, "updates");
+        } catch (SecurityException e) {
+            FileLog.e(e); // storage revoked/unavailable: nothing we can do, and nothing breaks
+            return;
+        }
+        if (dir == null || !dir.isDirectory()) return;
+
+        String[] names;
+        try {
+            names = dir.list();
+        } catch (SecurityException e) {
+            FileLog.e(e);
+            return;
+        }
+        if (names == null || names.length == 0) return;
+
+        // Everything expensive (the listing above, the PackageManager lookup below) is done outside the
+        // lock so the UI thread's beginDownload() never waits on it.
+        int installedVc = currentVersionCode(ctx);
+
+        // The keep-set is built INSIDE the lock together with the deletes it guards: built outside, it
+        // would be the stale snapshot that made this racy in the first place.
+        synchronized (SWEEP_LOCK) {
+            // A download owns the directory. Its file is created early and written incrementally, so
+            // there is no safe subset to delete while it runs; the next sweep (clearPending, or the
+            // next launch) picks the backlog up.
+            if (activeDownloads > 0) return;
+
+            // Protect, in this order: the persisted pending APK, the live offer's file (an in-flight
+            // download writes svipe-<vc>.apk long before it is persisted), the file a download is
+            // writing right now, and the in-memory ready file. These can legitimately differ mid-flight,
+            // and deleting any of them would break a running download or an install the system installer
+            // is reading through our FileProvider.
+            SharedPreferences p = prefs();
+            String pendingPath = p.getString(KEY_PENDING_PATH, null);
+            Pending u = pending;
+            List<String> keep = SvipeUpdateFiles.keepNamesFor(
+                    pendingPath == null ? null : new File(pendingPath).getName(),
+                    u != null ? u.versionCode : p.getInt(KEY_PENDING_VC, 0),
+                    inFlightDownloadName);
+            File ready = readyFile;
+            if (ready != null && !keep.contains(ready.getName())) keep.add(ready.getName());
+
+            for (String name : SvipeUpdateFiles.selectDeletableForSweep(names, installedVc, keep, activeDownloads > 0)) {
+                try {
+                    File f = new File(dir, name);
+                    if (f.isFile() && !f.delete()) FileLog.e("Svipe: could not delete stale update " + name);
+                } catch (Throwable t) {
+                    FileLog.e(t); // keep sweeping the rest
+                }
+            }
+        }
     }
 
     private static void installApk(Activity activity, File apk) {

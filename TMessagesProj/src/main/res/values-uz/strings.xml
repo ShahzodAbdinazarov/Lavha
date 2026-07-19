@@ -95,4 +95,7 @@
     <string name="SvipeUpdatePermissionTitle">Ruxsat kerak</string>
     <string name="SvipeUpdatePermissionMessage">Yangilanishni o\'rnatish uchun Svipe\'ga \"Noma\'lum ilovalarni o\'rnatish\" ruxsatini bering, so\'ng yana bosing.</string>
     <string name="SvipeUpdateInstallFailed">O\'rnatib bo\'lmadi%1$s. Saytdan qo\'lda yuklab ko\'ring.</string>
+    <string name="SvipeUpdateUpToDate">Sizda Svipe\'ning eng so\'nggi versiyasi</string>
+    <string name="SvipeUpdateCheckFailed">Yangilanishni tekshirib bo\'lmadi. Internetni tekshiring.</string>
+    <string name="SvipeUpdateChecking">Yangilanish tekshirilmoqda…</string>
 </resources>

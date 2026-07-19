@@ -127,7 +127,9 @@ public class SvipeUpdateLayout extends IUpdateLayout {
             createUpdateUI(currentAccount);
 
             boolean showSize;
-            if (SvipeUpdater.isReady()) {
+            // Identity, not mere existence: a leftover APK for a different (e.g. withdrawn) build must not
+            // make the banner read "Update now" when tapping it would download the offered build instead.
+            if (SvipeUpdater.isReadyForCurrentOffer()) {
                 updateLayoutIcon.setIcon(MediaActionDrawable.ICON_UPDATE, true, animated);
                 updateTextView.setText(LocaleController.getString(R.string.AppUpdateNow), animated);
                 showSize = false;
