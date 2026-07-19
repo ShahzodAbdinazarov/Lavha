@@ -1055,6 +1055,34 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
     private int currentPlaylistNum;
     private boolean forceLoopCurrentPlaylist;
     private boolean[] playlistEndReached = new boolean[]{false, false};
+
+    /**
+     * Offered the session when a playlist runs out with repeat off, instead of playback simply
+     * stopping. Returns whether it is taking over — which also decides whether a manual skip past the
+     * last track ends the playlist or keeps wrapping it.
+     */
+    public interface PlaylistEndHandler {
+        boolean onPlaylistEnded(MessageObject last);
+    }
+
+    private static PlaylistEndHandler playlistEndHandler;
+
+    public static void setPlaylistEndHandler(PlaylistEndHandler handler) {
+        playlistEndHandler = handler;
+    }
+
+    /**
+     * Overrides the looping decision setPlaylist derived from its loadMusic flag.
+     *
+     * <p>setPlaylist ties the two together as {@code forceLoopCurrentPlaylist = !loadMusic}, which
+     * suits a dialog's music: a playlist that cannot page in more history should wrap rather than
+     * stop. A playlist that pages from somewhere else entirely — the Svipe catalog — needs the first
+     * half of that bargain without the second, or it loops forever and the repeat setting means
+     * nothing. Call after setPlaylist, which is what assigns the flag.
+     */
+    public void setForceLoopCurrentPlaylist(boolean value) {
+        forceLoopCurrentPlaylist = value;
+    }
     private boolean loadingPlaylist;
     private long playlistMergeDialogId;
     private int playlistClassGuid;
@@ -2962,43 +2990,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         }
 
         boolean last = traversePlaylist(currentPlayList, SharedConfig.playOrderReversed ? +1 : -1);
-        if (last && byStop && SharedConfig.repeatMode == 0 && !forceLoopCurrentPlaylist) {
-            if (audioPlayer != null || videoPlayer != null) {
-                if (audioPlayer != null) {
-                    if (reporter != null) {
-                        reporter.destroy();
-                        reporter = null;
-                    }
-                    try {
-                        audioPlayer.releasePlayer(true);
-                    } catch (Exception e) {
-                        FileLog.e(e);
-                    }
-                    audioPlayer = null;
-                    Theme.unrefAudioVisualizeDrawable(playingMessageObject);
-                } else {
-                    currentAspectRatioFrameLayout = null;
-                    currentTextureViewContainer = null;
-                    currentAspectRatioFrameLayoutReady = false;
-                    currentTextureView = null;
-                    videoPlayer.releasePlayer(true);
-                    videoPlayer = null;
-                    try {
-                        baseActivity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                    } catch (Exception e) {
-                        FileLog.e(e);
-                    }
-                    AndroidUtilities.cancelRunOnUIThread(setLoadingRunnable);
-                    FileLoader.getInstance(playingMessageObject.currentAccount).removeLoadingVideo(playingMessageObject.getDocument(), true, false);
-                }
-                stopProgressTimer();
-                lastProgress = 0;
-                isPaused = true;
-                playingMessageObject.audioProgress = 0.0f;
-                playingMessageObject.audioProgressSec = 0;
-                NotificationCenter.getInstance(playingMessageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingProgressDidChanged, playingMessageObject.getId(), 0);
-                NotificationCenter.getInstance(playingMessageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingPlayStateChanged, playingMessageObject.getId());
-            }
+        if (last && SharedConfig.repeatMode == 0 && !forceLoopCurrentPlaylist && endOfPlaylist(byStop)) {
             return;
         }
         if (currentPlaylistNum < 0 || currentPlaylistNum >= currentPlayList.size()) {
@@ -3009,6 +3001,64 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         }
         playMusicAgain = true;
         playMessage(currentPlayList.get(currentPlaylistNum));
+    }
+
+    /**
+     * The playlist has no track after the current one and repeat is off. Stops playback and lets a
+     * handler take the session over.
+     *
+     * @param byStop whether playback got here by the track ending rather than by the user skipping
+     * @return whether this consumed the advance; false leaves the caller to wrap as it always has
+     */
+    private boolean endOfPlaylist(boolean byStop) {
+        final MessageObject ended = playingMessageObject;
+        // Asked before the stop rather than after it, because the answer is what decides whether a
+        // manual skip past the last track ends the playlist at all. A skip is a request for the next
+        // thing to hear: where something will supply one, stopping here is the handover; where nothing
+        // will, the skip has to keep wrapping the way it always has.
+        final boolean handedOver = playlistEndHandler != null && playlistEndHandler.onPlaylistEnded(ended);
+        if (!byStop && !handedOver) {
+            return false;
+        }
+        // The stop still runs when a handler took over: whatever it plays next arrives asynchronously,
+        // and a handler that then fails must leave the player in the stopped state, not mid-track.
+        if (audioPlayer != null || videoPlayer != null) {
+            if (audioPlayer != null) {
+                if (reporter != null) {
+                    reporter.destroy();
+                    reporter = null;
+                }
+                try {
+                    audioPlayer.releasePlayer(true);
+                } catch (Exception e) {
+                    FileLog.e(e);
+                }
+                audioPlayer = null;
+                Theme.unrefAudioVisualizeDrawable(playingMessageObject);
+            } else {
+                currentAspectRatioFrameLayout = null;
+                currentTextureViewContainer = null;
+                currentAspectRatioFrameLayoutReady = false;
+                currentTextureView = null;
+                videoPlayer.releasePlayer(true);
+                videoPlayer = null;
+                try {
+                    baseActivity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                } catch (Exception e) {
+                    FileLog.e(e);
+                }
+                AndroidUtilities.cancelRunOnUIThread(setLoadingRunnable);
+                FileLoader.getInstance(playingMessageObject.currentAccount).removeLoadingVideo(playingMessageObject.getDocument(), true, false);
+            }
+            stopProgressTimer();
+            lastProgress = 0;
+            isPaused = true;
+            playingMessageObject.audioProgress = 0.0f;
+            playingMessageObject.audioProgressSec = 0;
+            NotificationCenter.getInstance(playingMessageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingProgressDidChanged, playingMessageObject.getId(), 0);
+            NotificationCenter.getInstance(playingMessageObject.currentAccount).postNotificationName(NotificationCenter.messagePlayingPlayStateChanged, playingMessageObject.getId());
+        }
+        return true;
     }
 
     public void playPreviousMessage() {

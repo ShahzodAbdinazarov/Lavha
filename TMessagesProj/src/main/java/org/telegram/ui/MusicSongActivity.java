@@ -29,6 +29,7 @@ import org.telegram.svipe.SvipeFavouritesSet;
 import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.svipe.SvipeMusicResolver;
+import org.telegram.svipe.SvipeVibe;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.Theme;
@@ -44,7 +45,6 @@ import org.telegram.ui.Components.ShareAlert;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 
 /**
@@ -159,7 +159,7 @@ public class MusicSongActivity extends ProfileStyleActivity implements Notificat
     @Override
     protected void onCreateActions(ProfileActionsView view) {
         view.addAction(ProfileActionsView.ActionButton.PLAY, ProfileActionsView.KEY_PLAY);
-        view.addAction(ProfileActionsView.ActionButton.SHUFFLE, ProfileActionsView.KEY_SHUFFLE);
+        view.addAction(ProfileActionsView.ActionButton.VIBE, ProfileActionsView.KEY_VIBE);
         if (isFavouritable()) {
             view.addAction(favouriteButton(), ProfileActionsView.KEY_LIKE);
         }
@@ -173,8 +173,8 @@ public class MusicSongActivity extends ProfileStyleActivity implements Notificat
             if (queue != null && mo != null) {
                 queue.play(mo);
             }
-        } else if (key == ProfileActionsView.KEY_SHUFFLE) {
-            playShuffled();
+        } else if (key == ProfileActionsView.KEY_VIBE) {
+            startVibe();
         } else if (key == ProfileActionsView.KEY_LIKE) {
             toggleFavourite();
         } else if (key == ProfileActionsView.KEY_SHARE) {
@@ -490,20 +490,25 @@ public class MusicSongActivity extends ProfileStyleActivity implements Notificat
         }
     }
 
-    /** Starts on a random version — the rest of the queue follows in its normal order. */
-    private void playShuffled() {
-        if (queue == null || detail == null || detail.versions.isEmpty()) {
+    /**
+     * "My vibe by track": plays this song and then keeps going with what the backend finds similar.
+     *
+     * <p>Seeded on the default version, the one the Play button would start, so the wave is built
+     * around the recording the user would actually have heard.
+     */
+    private void startVibe() {
+        SvipeMusic.SongVersion v = defaultVersion();
+        if (v == null) {
+            // No version means the detail load never landed, and nothing retries it — say so rather
+            // than leaving a button that does nothing.
+            BulletinFactory.of(this).createErrorBulletin(getString(R.string.MusicLoadFailed)).show();
             return;
         }
-        ArrayList<SvipeMusic.SongVersion> shuffled = new ArrayList<>(detail.versions);
-        Collections.shuffle(shuffled);
-        for (SvipeMusic.SongVersion v : shuffled) {
-            MessageObject mo = moByKey.get(v.key());
-            if (mo != null) {
-                queue.play(mo);
-                return;
+        SvipeVibe.start(currentAccount, v, true, null, started -> {
+            if (!started) {
+                BulletinFactory.of(this).createErrorBulletin(getString(R.string.MusicLoadFailed)).show();
             }
-        }
+        });
     }
 
     private void showVersionMenu(SvipeMusic.SongVersion v) {

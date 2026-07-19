@@ -116,6 +116,7 @@ import org.telegram.ui.CastSync;
 import org.telegram.ui.Cells.AudioPlayerCell;
 import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
+import org.telegram.svipe.SvipeVibe;
 import org.telegram.ui.ChatActivity;
 import org.telegram.ui.MusicSongActivity;
 import org.telegram.ui.ChooseQualityLayout;
@@ -151,6 +152,9 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
     private FrameLayout playerLayout;
     private ButtonWithCounterView saveToProfileButton;
     private ButtonWithCounterView unsaveFromProfileButton;
+    private ButtonWithCounterView vibeButton;
+    /** Mirrors the profile state the two (now menu-only) profile actions toggle between. */
+    private boolean visibleInProfile;
     private ItemTouchHelper itemTouchHelper;
     private CoverContainer coverContainer;
     private ClippingTextViewSwitcher titleTextView;
@@ -1091,6 +1095,12 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         // Shown per-track (see setSubItemShown below) only for a canonical svipe music track.
         optionsButton.addSubItem(101, R.drawable.msg_info, LocaleController.getString(R.string.MusicAboutSong));
         optionsButton.setSubItemShown(101, false);
+        // The profile add/remove pair, which used to be the big button at the bottom of the player —
+        // the vibe button has that slot now. Shown one at a time, from setVisibleInProfile.
+        optionsButton.addSubItem(103, R.drawable.filled_track_add, LocaleController.getString(R.string.AudioAddToProfile));
+        optionsButton.setSubItemShown(103, false);
+        optionsButton.addSubItem(104, R.drawable.msg_delete, LocaleController.getString(R.string.AudioRemoveFromProfile));
+        optionsButton.setSubItemShown(104, false);
         optionsButton.addSubItem(1, R.drawable.msg_forward, LocaleController.getString(R.string.Forward));
         optionsButton.addSubItem(2, R.drawable.msg_shareout, LocaleController.getString(R.string.ShareFile));
         optionsButton.addSubItem(5, R.drawable.msg_download, LocaleController.getString(R.string.SaveToMusic));
@@ -1275,7 +1285,9 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
                 .createSimpleBulletin(R.raw.saved_messages, getString(R.string.AudioSaveToMyProfileSaved))
                 .show();
         });
-        playerLayout.addView(saveToProfileButton, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 42, Gravity.FILL_HORIZONTAL | Gravity.BOTTOM, 12, 12, 12, 12));
+        // Not added to playerLayout: this pair moved into the overflow menu (items 103/104) to give the
+        // bottom slot to the vibe button. The views stay because setLoading and the profile-state
+        // plumbing are still keyed on them.
 
         unsaveFromProfileButton = new ButtonWithCounterView(context, resourcesProvider).setRound().setNeutral();
         unsaveFromProfileButton.setText(getString(R.string.AudioRemoveFromProfile));
@@ -1290,7 +1302,29 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
                 .createSimpleBulletin(R.raw.ic_delete, getString(R.string.AudioSaveToMyProfileUnsaved))
                 .show();
         });
-        playerLayout.addView(unsaveFromProfileButton, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 42, Gravity.FILL_HORIZONTAL | Gravity.BOTTOM, 12, 12, 12, 12));
+        // Svipe: "My vibe by track" — starts a vibe from whatever is playing. Takes the slot the profile
+        // button used to hold. Offered on everything, not just catalog tracks: a listener who wants to
+        // keep the music going should not have the option withdrawn because the file came from a chat.
+        // Without a catalog identity there is nothing to seed with, so that case opens the personal
+        // vibe instead (see SvipeVibe.start).
+        vibeButton = new ButtonWithCounterView(context, resourcesProvider).setRound();
+        SpannableStringBuilder vb = new SpannableStringBuilder();
+        vb.append("* ");
+        vb.setSpan(new ColoredImageSpan(R.drawable.svipe_vibe_24), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        vb.append(getString(R.string.SvipeMusicVibeByTrack));
+        vibeButton.setText(vb);
+        vibeButton.setOnClickListener(v -> {
+            final MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+            if (playing == null || parentActivity == null) {
+                return;
+            }
+            // With a catalog track the queue mints its own copy of it, so this song is about to be
+            // replaced by an identical-sounding stranger — hand the playback position over so the
+            // listener hears a change of queue, not a track restarting under them.
+            SvipeVibe.start(currentAccount, svipeTrackForPlaying(), true, playing, null);
+            dismiss();
+        });
+        playerLayout.addView(vibeButton, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 42, Gravity.FILL_HORIZONTAL | Gravity.BOTTOM, 12, 12, 12, 12));
 
         savedMusicList = MediaController.getInstance().currentSavedMusicList;
         isProfilePlaylist = savedMusicList != null;
@@ -1395,8 +1429,9 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         }
 
         if (isMyList()) {
-            saveToProfileButton.setVisibility(View.GONE);
-            unsaveFromProfileButton.setVisibility(View.GONE);
+            // Re-applied rather than hidden by hand: the profile actions are menu items now, and
+            // setVisibleInProfile is the one place that knows isMyList() withdraws both of them.
+            setVisibleInProfile(visibleInProfile);
 
             itemTouchHelper = new ItemTouchHelper(new ItemTouchHelper.Callback() {
                 @Override
@@ -1695,14 +1730,19 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         }
     }
 
-    /** The canonical song id of the currently-playing svipe track, or 0 if it isn't svipe music. */
-    private long svipeSongIdForPlaying() {
+    /** The catalog track behind the currently-playing message, or null if it isn't svipe music. */
+    private SvipeMusic.Track svipeTrackForPlaying() {
         SvipeMusicQueue active = SvipeMusicQueue.getActive();
         MessageObject mo = MediaController.getInstance().getPlayingMessageObject();
         if (active == null || mo == null) {
-            return 0;
+            return null;
         }
-        SvipeMusic.Track t = active.trackFor(mo);
+        return active.trackFor(mo);
+    }
+
+    /** The canonical song id of the currently-playing svipe track, or 0 if it isn't svipe music. */
+    private long svipeSongIdForPlaying() {
+        SvipeMusic.Track t = svipeTrackForPlaying();
         return t != null ? t.songId : 0;
     }
 
@@ -1719,6 +1759,18 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
                 parentActivity.presentFragment(new MusicSongActivity(songId, messageObject.getMusicTitle()), false, false);
                 dismiss();
             }
+        } else if (id == 103) {
+            saveToProfile(messageObject, true, () -> {}, false);
+            setVisibleInProfile(true);
+            BulletinFactory.of((FrameLayout) containerView, resourcesProvider)
+                .createSimpleBulletin(R.raw.saved_messages, getString(R.string.AudioSaveToMyProfileSaved))
+                .show();
+        } else if (id == 104) {
+            saveToProfile(messageObject, false, () -> {}, false);
+            setVisibleInProfile(false);
+            BulletinFactory.of((FrameLayout) containerView, resourcesProvider)
+                .createSimpleBulletin(R.raw.ic_delete, getString(R.string.AudioSaveToMyProfileUnsaved))
+                .show();
         } else if (id == 2) {
             share(messageObject);
         } else if (id == 4) {
@@ -2316,6 +2368,7 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
             optionsButton.setSubItemShown(4, messageObject.getId() > 0);
             optionsButton.setSubItemShown(7, isMyList());
             optionsButton.setSubItemShown(101, svipeSongIdForPlaying() != 0);
+            updateVibeButton();
 
             checkIfMusicDownloaded(messageObject);
             updateProgress(messageObject, !sameMessageObject);
@@ -3002,34 +3055,31 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         o.show();
     }
 
+    /**
+     * Records whether the playing track is on the user's profile and points the menu at the action
+     * that state allows. The cross-fading pair of buttons this used to drive now lives in the overflow
+     * menu, where only one of the two is ever shown.
+     */
     private void setVisibleInProfile(boolean visible) {
-        if (isMyList() || noforwards) {
-            saveToProfileButton.setVisibility(View.GONE);
-            unsaveFromProfileButton.setVisibility(View.GONE);
+        visibleInProfile = visible;
+        if (optionsButton == null) {
             return;
         }
-        saveToProfileButton.setVisibility(View.VISIBLE);
-        unsaveFromProfileButton.setVisibility(View.VISIBLE);
-        saveToProfileButton.animate()
-            .alpha(visible ? 0.0f : 1.0f)
-            .scaleX(visible ? 0.8f : 1.0f)
-            .scaleY(visible ? 0.8f : 1.0f)
-            .setDuration(420)
-            .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
-            .withEndAction(() -> {
-                saveToProfileButton.setVisibility(visible ? View.GONE : View.VISIBLE);
-            })
-            .start();
-        unsaveFromProfileButton.animate()
-            .alpha(!visible ? 0.0f : 1.0f)
-            .scaleX(!visible ? 0.8f : 1.0f)
-            .scaleY(!visible ? 0.8f : 1.0f)
-            .setDuration(420)
-            .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
-            .withEndAction(() -> {
-                unsaveFromProfileButton.setVisibility(visible ? View.VISIBLE : View.GONE);
-            })
-            .start();
+        boolean offered = !isMyList() && !noforwards;
+        optionsButton.setSubItemShown(103, offered && !visible);
+        optionsButton.setSubItemShown(104, offered && visible);
+    }
+
+    /**
+     * The vibe button owns the bottom slot for every track. It used to be withdrawn without a catalog
+     * identity, which took the feature away from exactly the audio a listener is most likely to want
+     * to escape from; the seedless case now opens the personal vibe instead.
+     */
+    private void updateVibeButton() {
+        if (vibeButton == null) {
+            return;
+        }
+        vibeButton.setVisibility(View.VISIBLE);
     }
 
     private void saveToMusic(MessageObject messageObject) {

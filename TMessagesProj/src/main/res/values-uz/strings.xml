@@ -38,6 +38,8 @@
     <!-- Svipe music profile actions -->
     <string name="SvipeMusicPlay">Ijro</string>
     <string name="SvipeMusicShuffle">Aralash</string>
+    <string name="SvipeMusicVibe">Mening to‘lqinim</string>
+    <string name="SvipeMusicVibeByTrack">Trek bo‘yicha to‘lqinim</string>
     <string name="SvipeMusicVersions">Versiyalar</string>
     <string name="SvipeMusicSongs">Qo\'shiqlar</string>
     <string name="SvipeMusicAddingSoon">«%1$s» tez orada qo\'shiladi</string>

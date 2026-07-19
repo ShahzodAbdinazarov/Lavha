@@ -40,6 +40,31 @@ public class SvipeMusicQueue extends MessagesController.SavedMusicList {
     /** The queue currently installed into MediaController, if any. */
     private static SvipeMusicQueue activeQueue;
 
+    static {
+        // Runs the first time anything touches this class, which is the first time a Svipe queue is
+        // built — exactly when the handler starts being able to fire.
+        MediaController.setPlaylistEndHandler(SvipeMusicQueue::onPlaylistEnded);
+    }
+
+    /**
+     * A finite queue (favourites, a search, a section) has played its last track with repeat off.
+     * Rather than falling silent, keep the music going on the wave of what just finished.
+     *
+     * <p>A self-paging queue is only left alone once the backend has said it has nothing more:
+     * endReached is what distinguishes "out of recommendations" from "the last page load failed",
+     * and the latter should recover rather than end the listening session.
+     */
+    private static boolean onPlaylistEnded(MessageObject last) {
+        SvipeMusicQueue q = getActive();
+        SvipeMusic.Track t = q == null ? null : q.trackFor(last);
+        boolean exhausted = q != null && q.infinite && q.endReached;
+        if (!SvipeVibePlan.handsOffToVibe(q != null, exhausted, t != null)) {
+            return false;
+        }
+        SvipeVibe.start(q.account, t, false, null, null);
+        return true;
+    }
+
     // Set only while play()'s setPlaylist() runs. setPlaylist clears currentSavedMusicList and then
     // SYNCHRONOUSLY posts messagePlayingDidStart for the first track before returning, so getActive()
     // must fall back to this during that window or the first track's PLAY_START is lost.
@@ -205,14 +230,19 @@ public class SvipeMusicQueue extends MessagesController.SavedMusicList {
         installing = this;
         boolean ok;
         try {
-            // loadMusic=false: no dialog-history auto-extension, playlist loops (forceLoopCurrentPlaylist)
-            // instead of stopping — the extension below appends pages long before a wrap can happen.
+            // loadMusic=false: our pages come from the catalog, so MediaController must not try to
+            // extend this playlist out of a dialog's history.
             // setPlaylist synchronously posts messagePlayingDidStart for `first`; `installing` lets
             // getActive() resolve this queue during that window so the first PLAY_START is reported.
             ok = mc.setPlaylist(new ArrayList<>(list), first, 0, false, null);
         } finally {
             installing = null;
         }
+        // ...but loadMusic=false also means forceLoopCurrentPlaylist, and that half is wrong here: it
+        // wraps the queue unconditionally, which made the repeat setting a dead control and left every
+        // list looping whether the listener asked for it or not. Undo it and let repeatMode decide —
+        // the end of a finite queue then reaches onPlaylistEnded and flows into a vibe.
+        mc.setForceLoopCurrentPlaylist(false);
         // setPlaylist -> clearPlaylist nulls currentSavedMusicList, so install ourselves after.
         mc.currentSavedMusicList = this;
         return ok;

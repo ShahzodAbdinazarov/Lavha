@@ -300,6 +300,8 @@
     <!-- Svipe music profile actions -->
     <string name="SvipeMusicPlay">Слушать</string>
     <string name="SvipeMusicShuffle">Вперемешку</string>
+    <string name="SvipeMusicVibe">Моя волна</string>
+    <string name="SvipeMusicVibeByTrack">Моя волна по треку</string>
     <string name="SvipeMusicVersions">Версии</string>
     <string name="SvipeMusicSongs">Песни</string>
     <string name="SvipeMusicAddingSoon">«%1$s» скоро добавим</string>

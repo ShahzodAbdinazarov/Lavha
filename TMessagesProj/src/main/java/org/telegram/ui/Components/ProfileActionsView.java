@@ -111,6 +111,7 @@ public class ProfileActionsView extends View {
     public static final int KEY_PLAY = 19;
     public static final int KEY_SHUFFLE = 20;
     public static final int KEY_LIKE = 21;
+    public static final int KEY_VIBE = 22;
 
     private boolean isApplying;
     private boolean isNotificationsEnabled;
@@ -1283,7 +1284,9 @@ public class ProfileActionsView extends View {
         // heart carries the FAVOURITE state, and letting the expand-crossfade also swap it would make a
         // pulled-open header look liked.
         LIKE(R.string.SvipeMusicLike, R.drawable.media_like, R.drawable.media_like),
-        LIKE_ACTIVE(R.string.SvipeMusicLiked, R.drawable.media_like_active, R.drawable.media_like_active),;
+        LIKE_ACTIVE(R.string.SvipeMusicLiked, R.drawable.media_like_active, R.drawable.media_like_active),
+        // Filled and outline are the same drawable, as PLAY/SHUFFLE/LIKE do: this button has one state.
+        VIBE(R.string.SvipeMusicVibe, R.drawable.svipe_vibe_24, R.drawable.svipe_vibe_24),;
 
         final @StringRes int title;
         final @DrawableRes int filledIcon;

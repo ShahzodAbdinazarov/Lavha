@@ -10962,6 +10962,8 @@
     <!-- Svipe music profile actions -->
     <string name="SvipeMusicPlay">Play</string>
     <string name="SvipeMusicShuffle">Shuffle</string>
+    <string name="SvipeMusicVibe">My vibe</string>
+    <string name="SvipeMusicVibeByTrack">My vibe by track</string>
     <string name="SvipeMusicVersions">Versions</string>
     <string name="SvipeMusicSongs">Songs</string>
     <string name="SvipeMusicAddingSoon">«%1$s» is being added — coming soon</string>

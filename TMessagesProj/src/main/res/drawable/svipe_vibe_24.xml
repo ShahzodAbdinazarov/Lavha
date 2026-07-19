@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  "My vibe" — two waves in opposite phase.
+
+  Replaces a reuse of input_ai_star, whose sparkle read as a heavy blob beside a text label: it is
+  drawn for a 5.3dp box, so at 24dp its thick concave arms were the loudest thing in the row. A wave
+  is also what the feature is called in the language it was designed in ("Моя волна").
+
+  Two waves, not three: inside a button the icon is scaled down to the text's height, and at that size
+  a third stroke turned the mark into a scribble. Full-width curves, amplitude 2 and baselines 7.5 /
+  16.5 leave 2.5 units of clear space between the strokes so they stay separate however far it shrinks.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#ffffff"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3 7.5 Q6 3.5 9 7.5 T15 7.5 T21 7.5" />
+
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#ffffff"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3 16.5 Q6 20.5 9 16.5 T15 16.5 T21 16.5" />
+</vector>
