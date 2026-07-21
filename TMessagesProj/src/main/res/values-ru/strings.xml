@@ -272,6 +272,15 @@
          via Telegram's cloud langpack, so the title uses this custom key the langpack cannot override). -->
     <string name="SvipeUpdateTitle">Обновить Svipe</string>
 
+    <!-- Prominent disclosure для фоновой геопозиции: с брендом Svipe и под собственным ключом —
+         нативный ключ PermissionBackgroundLocation перезаписывается облачным языковым пакетом Telegram. -->
+    <string name="SvipePermissionBackgroundLocation">Чтобы делиться геопозицией в этом чате, Svipe нужен доступ к вашему местоположению всё время, включая работу приложения в фоновом режиме.\n\nМы будем обращаться к вашему местоположению только в течение выбранного вами времени, и вы можете прекратить трансляцию в любой момент. Мы не будем использовать ваше местоположение ни для каких целей, кроме передачи его в этот чат.</string>
+
+    <!-- Prominent disclosure для контактов. Собственный ключ, потому что в исходной строке «Telegram»
+         встречается в двух разных смыслах: приложение, запрашивающее доступ (мы), и серверы, с которыми
+         синхронизируются контакты (действительно Telegram). Простая замена сделала бы второе ложью. -->
+    <string name="SvipeContactsPermissionAlert">**Svipe** нужен доступ к вашим контактам, чтобы вы могли общаться с друзьями на всех своих устройствах. Ваши контакты будут постоянно синхронизироваться с надёжно зашифрованными облачными серверами Telegram.</string>
+
     <!-- Bottom tabs -->
     <string name="MainTabsMusic">Музыка</string>
     <string name="MainTabsReels">Reels</string>

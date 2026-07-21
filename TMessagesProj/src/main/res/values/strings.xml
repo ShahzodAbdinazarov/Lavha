@@ -334,6 +334,11 @@
     <string name="Regular">Regular</string>
     <string name="FormattedDate">Date</string>
     <string name="ContactsPermissionAlert">**Telegram** needs access to your contacts so that you can connect with your friends across all your devices. Your contacts will be continuously synced with Telegram\'s heavily encrypted cloud servers.</string>
+    <!-- Contacts prominent disclosure. Owns a Svipe key rather than going through SvipeBrand because
+         the native string names Telegram twice in two different senses: the app asking for the
+         permission (us) and the servers the contacts sync to (genuinely Telegram's). A word swap would
+         turn the second one into a false claim, so this one is written out by hand. -->
+    <string name="SvipeContactsPermissionAlert">**Svipe** needs access to your contacts so that you can connect with your friends across all your devices. Your contacts will be continuously synced with Telegram\'s heavily encrypted cloud servers.</string>
     <string name="ContactsPermissionAlertNotNow">Not now</string>
     <string name="ContactsPermissionAlertContinue">Continue</string>
     <string name="NotificationsPermissionAlertTitle">Turn on notifications</string>
@@ -2760,6 +2765,12 @@
     <string name="AppUpdate">Update Telegram</string>
     <string name="AppUpdateBeta">Update Telegram Beta</string>
     <string name="SvipeUpdateTitle">Update Svipe</string>
+    <!-- Background-location prominent disclosure. Svipe-branded and under a custom key on purpose: the
+         native PermissionBackgroundLocation key is supplied by Telegram's cloud language pack, which wins
+         over our local resource (LocaleController.formatString consults localeValues first), so editing
+         the native string would silently keep saying "Telegram". Google Play reviews this exact dialog in
+         the background-location demo video, and a mismatched app name reads as an inaccurate declaration. -->
+    <string name="SvipePermissionBackgroundLocation">To share your live location in this chat, Svipe needs access to your location all the time, including while the app is in the background.\n\nWe will access your location only for the duration you choose, and you can stop sharing it any time. We won\'t use your location for any purpose other than sharing it in this chat.</string>
     <string name="AppUpdateVersionAndSize">Version %1$s • %2$s</string>
     <string name="AppBetaUpdateVersion">Version %1$s (%2$s)</string>
     <string name="AppUpdateDownloading">Downloading %1$d%%...</string>

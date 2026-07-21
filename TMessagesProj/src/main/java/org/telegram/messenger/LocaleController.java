@@ -1452,7 +1452,9 @@ public class LocaleController {
         if (value == null) {
             value = "LOC_ERR:" + key;
         }
-        return value;
+        // Upstream names itself "Telegram" in copy that describes this app. Corrected here rather than
+        // in strings.xml because the cloud language pack overrides local resources — see SvipeBrand.
+        return org.telegram.svipe.SvipeBrand.apply(key, value);
     }
 
     public static String getServerString(String key) {
@@ -1692,6 +1694,10 @@ public class LocaleController {
                     }
                 }
             }
+
+            // Rebrand before formatting: the placeholders are untouched by the substitution, and doing
+            // it here covers the formatted strings too. See SvipeBrand.
+            value = org.telegram.svipe.SvipeBrand.apply(key, value);
 
             if (getInstance().currentLocale != null) {
                 return String.format(getInstance().currentLocale, value, args);
