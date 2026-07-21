@@ -95,18 +95,6 @@ android {
         }
     }
 
-    sourceSets.debug {
-        manifest.srcFile '../TMessagesProj/config/debug/AndroidManifest.xml'
-    }
-
-    sourceSets.standalone {
-        manifest.srcFile '../TMessagesProj/config/release/AndroidManifest.xml'
-    }
-
-    sourceSets.release {
-        manifest.srcFile '../TMessagesProj/config/release/AndroidManifest.xml'
-    }
-
     flavorDimensions "minApi"
 
     productFlavors {
@@ -123,12 +111,6 @@ android {
             ndk {
                 abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
             }
-            sourceSets.debug {
-                manifest.srcFile '../TMessagesProj/config/debug/AndroidManifest_SDK23.xml'
-            }
-            sourceSets.release {
-                manifest.srcFile '../TMessagesProj/config/release/AndroidManifest_SDK23.xml'
-            }
             minSdkVersion 23
             ext {
                 abiVersionCode = 2
@@ -139,23 +121,30 @@ android {
             ndk {
                 abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
             }
-            sourceSets.debug {
-                manifest.srcFile '../TMessagesProj/config/debug/AndroidManifest_SDK23.xml'
-            }
-            sourceSets.release {
-                manifest.srcFile '../TMessagesProj/config/release/AndroidManifest_SDK23.xml'
-            }
-            sourceSets.standalone {
-                // The .web (direct-download) build reuses the release manifest: upstream's
-                // AndroidManifest_standalone.xml references *_launcher_sa icons that don't exist in
-                // the Svipe rebrand, so the .web build simply ships the same Svipe icon as Play.
-                manifest.srcFile '../TMessagesProj/config/release/AndroidManifest_SDK23.xml'
-            }
             ext {
                 abiVersionCode = 9
             }
             buildConfigField "boolean", "BUNDLE", "false"
         }
+    }
+
+    // Manifest per distribution channel, mirroring upstream Telegram's own split: the Play bundle
+    // ships the clean manifest, while the direct-download builds add the flash-call login
+    // permissions (READ_CALL_LOG, CALL_PHONE) that Play will not let a non-dialer app keep.
+    //
+    // These have to be *variant* source sets. A `sourceSets { }` block written inside a
+    // productFlavor is not flavor-scoped — it mutates the shared android.sourceSets, so whichever
+    // flavor happened to be declared last silently won for every release variant. That is how the
+    // Play bundle ended up carrying READ_CALL_LOG while the code read as if it did not.
+    sourceSets {
+        bundleAfatRelease       { manifest.srcFile '../TMessagesProj/config/release/AndroidManifest.xml' }
+        bundleAfat_SDK23Release { manifest.srcFile '../TMessagesProj/config/release/AndroidManifest_SDK23.xml' }
+        afatRelease             { manifest.srcFile '../TMessagesProj/config/release/AndroidManifest_SDK23.xml' }
+        // The .web build reuses the SDK23 release manifest: upstream's AndroidManifest_standalone.xml
+        // references *_launcher_sa icons that don't exist in the Svipe rebrand, so .web simply ships
+        // the same Svipe icon as Play.
+        afatStandalone          { manifest.srcFile '../TMessagesProj/config/release/AndroidManifest_SDK23.xml' }
+        afatDebug               { manifest.srcFile '../TMessagesProj/config/debug/AndroidManifest_SDK23.xml' }
     }
 
     defaultConfig.versionCode = Integer.parseInt(APP_VERSION_CODE)
@@ -209,3 +198,51 @@ android {
 }
 
 apply plugin: 'com.google.gms.google-services'
+
+// The Play bundle must never carry the flash-call login permissions. Nothing in the manifest files
+// themselves enforces that — the split lives in the gradle wiring above, and a mis-scoped sourceSets
+// block already shipped READ_CALL_LOG to Play once without a single warning. Reading the wiring is
+// not enough to catch it, so the build is the gate, and it checks the *merged* manifest because that
+// is the only artifact that reflects what actually ships.
+ext.playForbiddenPermissions = [
+        'android.permission.READ_CALL_LOG',
+        'android.permission.WRITE_CALL_LOG',
+        'android.permission.PROCESS_OUTGOING_CALLS',
+        'android.permission.CALL_PHONE',
+        'android.permission.SEND_SMS',
+        'android.permission.READ_SMS',
+        'android.permission.RECEIVE_SMS',
+]
+
+tasks.configureEach { theTask ->
+    if (theTask.name != 'processBundleAfatReleaseMainManifest') {
+        return
+    }
+    theTask.doLast {
+        def mergedDir = layout.buildDirectory.dir('intermediates/merged_manifest/bundleAfatRelease').get().asFile
+        def merged = fileTree(mergedDir).matching { include '**/AndroidManifest.xml' }.files.find()
+        if (merged == null) {
+            throw new GradleException(
+                    "Play manifest guard: no merged manifest under ${mergedDir}, so the guard cannot " +
+                    "verify what ships. Refusing to build a Play bundle it has not checked.")
+        }
+        // Parse rather than grep. A component may legitimately carry android:permission="CALL_PHONE"
+        // to *require* that permission of its callers (org.telegram.ui.CallsActivity does exactly
+        // that) — which is the opposite of requesting it. Only <uses-permission> entries decide what
+        // the app asks for, and only those are what Play reads.
+        def root = new groovy.xml.XmlSlurper(false, false).parse(merged)
+        def requested = []
+        root.'uses-permission'.each { requested << it.@'android:name'.toString() }
+        root.'uses-permission-sdk-23'.each { requested << it.@'android:name'.toString() }
+        def offenders = project.ext.playForbiddenPermissions.findAll { requested.contains(it) }
+        if (!offenders.isEmpty()) {
+            throw new GradleException(
+                    "Play bundle declares permissions Google Play rejects for a non-dialer app:\n" +
+                    offenders.collect { "  - ${it}" }.join('\n') + "\n\n" +
+                    "These belong to the direct-download build only. Check that bundleAfatRelease still\n" +
+                    "maps to config/release/AndroidManifest.xml — see the 'Manifest per distribution\n" +
+                    "channel' block in TMessagesProj_App/build.gradle.\n" +
+                    "Merged manifest: ${merged}")
+        }
+    }
+}
