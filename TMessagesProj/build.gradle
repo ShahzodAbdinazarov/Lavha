@@ -151,6 +151,8 @@ android {
             buildConfigField "boolean", "BUNDLE", "false"
             buildConfigField "boolean", "BUILD_HOST_IS_WINDOWS", isWindows
             buildConfigField "int", "VERSION_NUM", "0"
+            // .beta — direct-download build, self-updates. See SELF_UPDATE note on the release type.
+            buildConfigField "boolean", "SELF_UPDATE", "true"
         }
 
         HA_private {
@@ -167,6 +169,8 @@ android {
             buildConfigField "boolean", "BUNDLE", "false"
             buildConfigField "boolean", "BUILD_HOST_IS_WINDOWS", isWindows
             buildConfigField "int", "VERSION_NUM", "1"
+            // Legacy HockeyApp build, not distributed — no self-update path.
+            buildConfigField "boolean", "SELF_UPDATE", "false"
         }
 
         HA_public {
@@ -183,6 +187,8 @@ android {
             buildConfigField "boolean", "BUNDLE", "false"
             buildConfigField "boolean", "BUILD_HOST_IS_WINDOWS", isWindows
             buildConfigField "int", "VERSION_NUM", "4"
+            // Legacy HockeyApp build, not distributed — no self-update path.
+            buildConfigField "boolean", "SELF_UPDATE", "false"
         }
 
         HA_hardcore {
@@ -199,6 +205,8 @@ android {
             buildConfigField "boolean", "BUNDLE", "false"
             buildConfigField "boolean", "BUILD_HOST_IS_WINDOWS", isWindows
             buildConfigField "int", "VERSION_NUM", "5"
+            // Legacy HockeyApp build, not distributed — no self-update path.
+            buildConfigField "boolean", "SELF_UPDATE", "false"
         }
 
         standalone {
@@ -215,6 +223,8 @@ android {
             buildConfigField "boolean", "BUNDLE", "false"
             buildConfigField "boolean", "BUILD_HOST_IS_WINDOWS", isWindows
             buildConfigField "int", "VERSION_NUM", "6"
+            // .web — direct-download build, self-updates. See SELF_UPDATE note on the release type.
+            buildConfigField "boolean", "SELF_UPDATE", "true"
         }
 
         release {
@@ -232,6 +242,11 @@ android {
             buildConfigField "boolean", "BUNDLE", "false"
             buildConfigField "boolean", "BUILD_HOST_IS_WINDOWS", isWindows
             buildConfigField "int", "VERSION_NUM", "7"
+            // Google Play build (uz.svipe.app) — updates come from Play, never from us. This is a
+            // compile-time constant so javac drops the guarded call in SvipeUpdater.installApk and R8
+            // then prunes the whole PackageInstaller chain: the shipped bundle carries no installer code
+            // for Play's automated policy scanning to flag. Keep false for release — see SvipeUpdater.
+            buildConfigField "boolean", "SELF_UPDATE", "false"
         }
     }
 

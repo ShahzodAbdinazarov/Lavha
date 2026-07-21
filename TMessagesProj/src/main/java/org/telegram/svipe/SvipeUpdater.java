@@ -22,6 +22,7 @@ import androidx.core.content.FileProvider;
 import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.BuildConfig;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.NotificationCenter;
@@ -121,8 +122,17 @@ public class SvipeUpdater {
     private static WeakReference<SvipeUpdateLayout> bannerRef;
     private static AlertDialog modalProgress; // fallback progress UI when no drawer banner is present
 
-    /** Only the direct-download builds self-update; the Play build ({@code uz.svipe.app}) uses Google Play. */
+    /**
+     * Only the direct-download builds self-update; the Play build ({@code uz.svipe.app}) uses Google Play.
+     * <p>
+     * The {@code BuildConfig.SELF_UPDATE} check comes first on purpose: it is a compile-time constant, so
+     * for the {@code release} build type javac folds it away and R8 can prune the whole updater. The
+     * package-name check stays as a second, runtime guard — the two agree by construction, since the
+     * {@code .beta} and {@code .web} suffixes are applied by exactly the {@code debug} and
+     * {@code standalone} build types that set SELF_UPDATE to true.
+     */
     public static boolean isSelfUpdateBuild() {
+        if (!BuildConfig.SELF_UPDATE) return false;
         Context ctx = ApplicationLoader.applicationContext;
         if (ctx == null) return false;
         String pkg = ctx.getPackageName();
@@ -836,7 +846,24 @@ public class SvipeUpdater {
         }
     }
 
+    /**
+     * The Play build must not merely avoid installing — it must not <em>contain</em> installer code.
+     * Play's automated policy scanning flags {@link android.content.pm.PackageInstaller} together with
+     * USER_ACTION_NOT_REQUIRED as a silent self-update pattern, and it reads the shipped bundle, not the
+     * control flow: an unreachable path still trips it and still has to be argued away at every review.
+     * <p>
+     * {@code BuildConfig.SELF_UPDATE} is a compile-time constant (false for the {@code release} build
+     * type, true for {@code standalone}/.web and {@code debug}/.beta), so javac drops this call
+     * entirely and R8 then prunes {@link #installApkImpl} and everything it reaches. The Play bundle
+     * ends up with no installer code at all.
+     */
     private static void installApk(Activity activity, File apk) {
+        if (BuildConfig.SELF_UPDATE) {
+            installApkImpl(activity, apk);
+        }
+    }
+
+    private static void installApkImpl(Activity activity, File apk) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 && !activity.getPackageManager().canRequestPackageInstalls()) {
             new AlertDialog.Builder(activity)
