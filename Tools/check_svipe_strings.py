@@ -64,7 +64,10 @@ def svipe_keys():
 
 def our_java():
     files = git("log", "--diff-filter=A", "--format=", "--name-only", f"{UPSTREAM}..HEAD").split()
-    return sorted({f for f in files if f.endswith(".java") and (ROOT / f).exists()})
+    # Test fixtures are not user-facing UI; the langpack guard must not scan them.
+    return sorted({f for f in files if f.endswith(".java")
+                   and "/src/test/" not in f and "/src/androidTest/" not in f
+                   and (ROOT / f).exists()})
 
 
 # A literal is user-facing prose if a UI sink takes it, or if it is Cyrillic, or if it carries the
