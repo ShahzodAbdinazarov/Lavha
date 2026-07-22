@@ -21,8 +21,8 @@ dependencies {
 }
 
 android {
-    compileSdkVersion 35
-    buildToolsVersion '35.0.0'
+    compileSdkVersion 36
+    buildToolsVersion '36.0.0'
 
     defaultConfig.applicationId = APP_PACKAGE
 
@@ -171,7 +171,7 @@ android {
 
     defaultConfig {
         minSdkVersion 21
-        targetSdkVersion 35
+        targetSdkVersion 36
         versionName APP_VERSION_NAME
         ndkVersion "27.2.12479018"
 
@@ -242,6 +242,38 @@ tasks.configureEach { theTask ->
                     "These belong to the direct-download build only. Check that bundleAfatRelease still\n" +
                     "maps to config/release/AndroidManifest.xml — see the 'Manifest per distribution\n" +
                     "channel' block in TMessagesProj_App/build.gradle.\n" +
+                    "Merged manifest: ${merged}")
+        }
+
+        // Google Play refuses updates to apps below targetSdk 36 from Aug 31, 2026. Upstream
+        // DrKLO/Telegram is still on compileSdk/targetSdk 35, so every future sync touches these
+        // build.gradle files and a conflict resolved as "take upstream" walks the level back — with
+        // no warning, because AGP only ever warns about compileSdk. Check the merged manifest for the
+        // same reason the permission guard does: it is what Play actually reads.
+        def targetSdk = root.'uses-sdk'.@'android:targetSdkVersion'.toString()
+        if (!targetSdk.isInteger() || targetSdk.toInteger() < 36) {
+            throw new GradleException(
+                    "Play bundle targets Android API '${targetSdk}', but Google Play requires 36 or higher.\n" +
+                    "Restore 'compileSdkVersion 36' / 'targetSdkVersion 36' in all six module build.gradle\n" +
+                    "files — most likely an upstream merge reverted them.\n" +
+                    "Merged manifest: ${merged}")
+        }
+
+        // targetSdk 36 makes Android ignore this app's orientation and resizability locks on large
+        // screens. The opt-out below is what keeps the API 35 behaviour, so shipping targetSdk 36
+        // without it is the one combination that must never reach Play. See the property's comment in
+        // TMessagesProj/src/main/AndroidManifest.xml for what breaks and when the opt-out expires.
+        def resizeOptOut = root.application.'property'.find {
+            it.@'android:name'.toString() == 'android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY'
+        }
+        if (resizeOptOut == null || resizeOptOut.@'android:value'.toString() != 'true') {
+            throw new GradleException(
+                    "Play bundle targets API ${targetSdk} without\n" +
+                    "  <property android:name=\"android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY\"\n" +
+                    "            android:value=\"true\" />\n" +
+                    "in the merged manifest. Without it, every setRequestedOrientation() call and\n" +
+                    "android:resizeableActivity=\"false\" is ignored on tablets, unfolded foldables and\n" +
+                    "ChromeOS. Restore it in TMessagesProj/src/main/AndroidManifest.xml.\n" +
                     "Merged manifest: ${merged}")
         }
     }

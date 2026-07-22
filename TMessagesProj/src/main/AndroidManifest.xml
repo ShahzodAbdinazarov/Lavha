@@ -695,6 +695,19 @@
 
         <meta-data android:name="com.google.android.gms.vision.DEPENDENCIES" android:value="face,barcode" />
 
+        <!-- At targetSdk 36 Android ignores screenOrientation, resizeableActivity, minAspectRatio and
+             maxAspectRatio on any display whose smallest width is >= 600dp (tablets, unfolded foldables,
+             ChromeOS, desktop windowing). That would silently break the ~20 setRequestedOrientation call
+             sites this app relies on — PhotoViewer fullscreen video, GroupCallActivity's video grid,
+             CameraScanActivity, EmbedBottomSheet — plus android:resizeableActivity="false" on
+             PopupNotificationActivity and android.max_aspect below. This property keeps the API 35
+             behaviour. It is a deadline, not a fix: Google documents it as non-functional once the app
+             targets API 37, and it never applies on virtual displays (Android Auto, external displays).
+             The camera / stories / VoIP surfaces have to become genuinely adaptive before then. -->
+        <property
+            android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
+            android:value="true" />
+
         <meta-data android:name="android.max_aspect" android:value="2.5" />
         <meta-data
             android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
