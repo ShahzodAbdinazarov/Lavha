@@ -1,4 +1,4 @@
-FROM gradle:8.7.0-jdk17
+FROM gradle:8.13.0-jdk17
 
 ENV ANDROID_SDK_URL https://dl.google.com/android/repository/commandlinetools-linux-7302050_latest.zip
 ENV ANDROID_API_LEVEL android-35
