@@ -914,6 +914,11 @@ public class ProfileGalleryView extends CircularViewPager implements Notificatio
         if (id == NotificationCenter.dialogPhotosUpdate) {
             MessagesController.DialogPhotos dialogPhotos = (MessagesController.DialogPhotos) args[0];
             if (this.dialogPhotos == dialogPhotos) {
+                // Svipe: remember every profile photo we see so deleted ones survive in the "Rasmlar" tab.
+                org.telegram.svipe.SvipeAvatarKeeper keeper = org.telegram.svipe.SvipeAvatarKeeper.getInstance(currentAccount);
+                if (keeper != null) {
+                    keeper.onDialogPhotos(dialogId, dialogPhotos.photos);
+                }
                 ArrayList<TLRPC.Photo> arrayList = new ArrayList<>(dialogPhotos.photos);
                 if (arrayList.isEmpty() && dialogPhotos.fromCache) {
                     return;

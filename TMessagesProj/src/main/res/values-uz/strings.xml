@@ -3,6 +3,8 @@
     <!-- Svipe intro page 1 -->
     <string name="SvipeIntroTitle">Svipe</string>
     <string name="SvipeIntroMessage">Telegram kanallaridagi eng qiziqarli qisqa videolar — bitta tasmada.</string>
+    <string name="SvipeProfileImagesTab">Rasmlar</string>
+    <string name="SvipePhotoDeleted">O\'chirilgan</string>
     <string name="SvipeIntroStart">Svayp qilishni boshlash</string>
 
     <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"

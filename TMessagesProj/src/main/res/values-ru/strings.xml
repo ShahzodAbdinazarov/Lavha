@@ -266,6 +266,8 @@
     <!-- Svipe intro page 1 -->
     <string name="SvipeIntroTitle">Svipe</string>
     <string name="SvipeIntroMessage">Самые интересные короткие видео из Telegram-каналов в одной ленте.</string>
+    <string name="SvipeProfileImagesTab">Фото</string>
+    <string name="SvipePhotoDeleted">Удалено</string>
     <string name="SvipeIntroStart">Начать свайпинг</string>
 
     <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"
