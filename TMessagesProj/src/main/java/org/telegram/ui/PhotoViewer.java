@@ -2081,6 +2081,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     // translationY the "dismiss scalar"; only the input mapping and the draw axis are transposed,
     // and only at scale==1 (you can't page while zoomed), so the normal path is untouched.
     public boolean verticalPaging;
+    public boolean svipeVPFix; // Svipe: gate the vertical-paging visual fixes to Profile Images while testing
+    private float svipeVpCurTx, svipeVpCurTy, svipeVpCurScale = 1; // Svipe: interpolated draw values, so the overlay card animates in lockstep with the image
     private boolean draggingDown;
     private float dragY;
     private float translationX;
@@ -2761,6 +2763,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         public boolean keepImageReceiverVisible;
         // Svipe: opening from Search→Media sets this so the viewer pages on the vertical axis.
         public boolean verticalPaging;
+        public boolean svipeVPFix; // Svipe: opt into the vertical-paging visual fixes (Profile Images, for now)
     }
 
     public static class EmptyPhotoViewerProvider implements PhotoViewerProvider {
@@ -4965,7 +4968,18 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
 
             @Override
             protected void dispatchDraw(Canvas canvas) {
+                // Svipe: during vertical paging move EVERY overlay view (caption, header, buttons, progress,
+                // badges) as one card with the image — page->Y (currentTranslationX), dismiss->X (currentTranslationY).
+                final boolean vpMove = svipeVPFix && verticalPaging && svipeVpCurScale == 1 && currentEditMode == EDIT_MODE_NONE
+                        && (svipeVpCurTx != 0 || svipeVpCurTy != 0);
+                if (vpMove) {
+                    canvas.save();
+                    canvas.translate(svipeVpCurTy, svipeVpCurTx); // interpolated, so overlays animate in lockstep with the image
+                }
                 super.dispatchDraw(canvas);
+                if (vpMove) {
+                    canvas.restore();
+                }
                 View overlay = textSelectionHelper.getOverlayView(windowView.getContext());
                 overlay.draw(canvas);
             }
@@ -13835,6 +13849,18 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 return null;
             }
             MessageObject message = imagesArr.get(index);
+            // Svipe: a deleted profile photo has no live server object — resolve it to our saved local copy
+            // (path on attachPath, under svipe_avatars). Feeds the full image for both centre and side slots.
+            if (message.messageOwner != null && message.messageOwner.attachPath != null
+                    && message.messageOwner.attachPath.contains("svipe_avatars")) {
+                File svipeFile = new File(message.messageOwner.attachPath);
+                if (svipeFile.exists() && svipeFile.length() > 0) {
+                    if (size != null) {
+                        size[0] = svipeFile.length();
+                    }
+                    return ImageLocation.getForPath(message.messageOwner.attachPath);
+                }
+            }
             if (message.messageOwner instanceof TLRPC.TL_messageService) {
                 if (message.messageOwner.action instanceof TLRPC.TL_messageActionUserUpdatedPhoto) {
                     return null;
@@ -17636,6 +17662,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
 
         final PlaceProviderObject object = provider.getPlaceForPhoto(messageObject, fileLocation, index, true, false);
         verticalPaging = object != null && object.verticalPaging;   // Svipe: reset per open; only Search→Media sets it
+        svipeVPFix = object != null && object.svipeVPFix;           // Svipe: reset per open
         WindowManager wm = (WindowManager) parentActivity.getSystemService(Context.WINDOW_SERVICE);
         if (attachedToWindow) {
             try {
@@ -18572,8 +18599,13 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 }
                 for (int i = 0; i < animatingImageViews.length; i++) {
                     animatingImageViews[i].setLayoutParams(layoutParams);
-                    animatingImageViews[i].setTranslationX(xPos + translationX);
-                    animatingImageViews[i].setTranslationY(yPos + translationY);
+                    if (svipeVPFix && verticalPaging) { // Svipe: the image sat at dismiss->X, page->Y; start the close from there
+                        animatingImageViews[i].setTranslationX(xPos + translationY);
+                        animatingImageViews[i].setTranslationY(yPos + translationX);
+                    } else {
+                        animatingImageViews[i].setTranslationX(xPos + translationX);
+                        animatingImageViews[i].setTranslationY(yPos + translationY);
+                    }
                     animatingImageViews[i].setScaleX(scale * scale2);
                     animatingImageViews[i].setScaleY(scale * scale2);
                 }
@@ -18657,7 +18689,9 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                             progressAnimator,
                             ObjectAnimator.ofInt(backgroundDrawable, AnimationProperties.COLOR_DRAWABLE_ALPHA, 0),
                             ObjectAnimator.ofFloat(animatingImageView, View.ALPHA, 0.0f),
-                            ObjectAnimator.ofFloat(animatingImageView, View.TRANSLATION_Y, translationY >= 0 ? h : -h),
+                            (svipeVPFix && verticalPaging // Svipe: fling out horizontally (dismiss axis) instead of down
+                                    ? ObjectAnimator.ofFloat(animatingImageView, View.TRANSLATION_X, translationY >= 0 ? getContainerViewWidth() : -getContainerViewWidth())
+                                    : ObjectAnimator.ofFloat(animatingImageView, View.TRANSLATION_Y, translationY >= 0 ? h : -h)),
                             ObjectAnimator.ofFloat(containerView, View.ALPHA, 0.0f),
                             ObjectAnimator.ofFloat(navigationBar, View.ALPHA, 0.0f)
                     );
@@ -19835,6 +19869,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             currentRotation = tr;
             currentTranslationY = ty;
             currentTranslationX = tx;
+            svipeVpCurTx = tx; svipeVpCurTy = ty; svipeVpCurScale = ts; // Svipe: interpolated values for the overlay-card translate
             updateMinMax(currentScale);
             containerView.invalidate();
         } else {
@@ -19879,6 +19914,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             currentRotation = rotate;
             currentTranslationY = translationY;
             currentTranslationX = translationX;
+            svipeVpCurTx = translationX; svipeVpCurTy = translationY; svipeVpCurScale = scale; // Svipe
             if (!moving) {
                 aty = translationY;
             }
@@ -19965,7 +20001,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             float translateX = currentTranslationX;
             float scaleDiff = 0;
             float alpha = 1;
-            if (!zoomAnimation && translateX < minX) {
+            // Svipe: reels-style — the next page slides in 1:1 at full size/opacity, not fading from behind.
+            if (!(svipeVPFix && vpDraw) && !zoomAnimation && translateX < minX) {
                 alpha = Math.min(1.0f, (minX - translateX) / pageExtent);
                 scaleDiff = (1.0f - alpha) * 0.3f;
                 translateX = -pageExtent - dp(30) / 2;
@@ -20026,8 +20063,12 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
 
             if (seekSpeedDrawable == null || !seekSpeedDrawable.isShown()) {
                 canvas.save();
-                canvas.translate(translateX, currentTranslationY / currentScale);
-                canvas.translate((containerWidth * (scale + 1) + dp(30)) / 2, -currentTranslationY / currentScale);
+                if (svipeVPFix && vpDraw) { // Svipe: next-page progress sits below and rises on Y with the side image
+                    canvas.translate(currentTranslationY / currentScale, translateX + (containerHeight * (scale + 1) + dp(30)) / 2);
+                } else {
+                    canvas.translate(translateX, currentTranslationY / currentScale);
+                    canvas.translate((containerWidth * (scale + 1) + dp(30)) / 2, -currentTranslationY / currentScale);
+                }
                 photoProgressViews[1].setScale(1.0f - scaleDiff);
                 photoProgressViews[1].setAlpha(alpha);
                 photoProgressViews[1].onDraw(canvas);
@@ -20047,7 +20088,9 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         float translateX = currentTranslationX;
         float scaleDiff = 0;
         float alpha = 1;
-        if (!zoomAnimation && translateX > maxX && (currentEditMode == EDIT_MODE_NONE || currentEditMode == EDIT_MODE_STICKER_MASK) && sendPhotoType != SELECT_TYPE_AVATAR) {
+        // Svipe: reels-style — dragging to the prev page slides 1:1 at full size/opacity (no fade/clamp).
+        final boolean svipeVpCenter = svipeVPFix && verticalPaging && scale == 1 && currentEditMode == EDIT_MODE_NONE;
+        if (!svipeVpCenter && !zoomAnimation && translateX > maxX && (currentEditMode == EDIT_MODE_NONE || currentEditMode == EDIT_MODE_STICKER_MASK) && sendPhotoType != SELECT_TYPE_AVATAR) {
             alpha = Math.min(1.0f, (translateX - maxX) / containerWidth);
             scaleDiff = alpha * 0.3f;
             alpha = 1.0f - alpha;
@@ -20464,8 +20507,15 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
 
             if (seekSpeedDrawable == null || !seekSpeedDrawable.isShown()) {
                 canvas.save();
-                canvas.translate(currentTranslationX, currentTranslationY / currentScale);
-                canvas.translate(-(containerWidth * (scale + 1) + dp(30)) / 2, -currentTranslationY / currentScale);
+                // Svipe: under vertical paging the prev page sits ABOVE and slides down on Y, so glue its
+                // progress to the same axis (page->Y, dismiss->X) instead of letting it enter from the side.
+                final boolean vpDrawL = svipeVPFix && verticalPaging && currentScale == 1 && currentEditMode == EDIT_MODE_NONE;
+                if (vpDrawL) {
+                    canvas.translate(currentTranslationY / currentScale, currentTranslationX - (containerHeight * (scale + 1) + dp(30)) / 2);
+                } else {
+                    canvas.translate(currentTranslationX, currentTranslationY / currentScale);
+                    canvas.translate(-(containerWidth * (scale + 1) + dp(30)) / 2, -currentTranslationY / currentScale);
+                }
                 photoProgressViews[2].setScale(1.0f);
                 photoProgressViews[2].setAlpha(1.0f);
                 photoProgressViews[2].onDraw(canvas);
@@ -20647,8 +20697,15 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         }
         boolean drawMiniProgress = miniProgressView.getVisibility() == View.VISIBLE || miniProgressAnimator != null;
         if (drawProgress) {
-            final float tx = !zoomAnimation && -translateX > maxX ? translateX + maxX : 0;
-            float ty = currentScale == 1.0f ? currentTranslationY : 0;
+            // Svipe: under vertical paging the image maps page->Y and dismiss->X, so glue the progress
+            // overlay to the same axes; otherwise it slides sideways while the image moves up/down.
+            final boolean vpProg = svipeVPFix && verticalPaging && currentScale == 1 && currentEditMode == EDIT_MODE_NONE; // currentScale: a local `scale` shadows the field here
+            final float tx = vpProg
+                    ? (currentScale == 1.0f ? currentTranslationY : 0)
+                    : (!zoomAnimation && -translateX > maxX ? translateX + maxX : 0);
+            float ty = vpProg
+                    ? translateX
+                    : (currentScale == 1.0f ? currentTranslationY : 0);
             float progressAlpha = alpha;
             if (drawMiniProgress) {
                 progressAlpha *= 1f - miniProgressView.getAlpha();
@@ -20674,7 +20731,11 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         }
         if (drawMiniProgress && !pipAnimationInProgress) {
             canvas.save();
-            canvas.translate(miniProgressView.getLeft() + translateX, miniProgressView.getTop() + currentTranslationY / currentScale);
+            if (svipeVPFix && verticalPaging && currentScale == 1 && currentEditMode == EDIT_MODE_NONE) { // Svipe: mini progress on the same axes as the image
+                canvas.translate(miniProgressView.getLeft() + currentTranslationY / currentScale, miniProgressView.getTop() + translateX);
+            } else {
+                canvas.translate(miniProgressView.getLeft() + translateX, miniProgressView.getTop() + currentTranslationY / currentScale);
+            }
             miniProgressView.draw(canvas);
             canvas.restore();
         }

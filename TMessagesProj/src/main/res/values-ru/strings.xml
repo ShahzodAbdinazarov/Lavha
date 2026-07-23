@@ -266,7 +266,7 @@
     <!-- Svipe intro page 1 -->
     <string name="SvipeIntroTitle">Svipe</string>
     <string name="SvipeIntroMessage">Самые интересные короткие видео из Telegram-каналов в одной ленте.</string>
-    <string name="SvipeProfileImagesTab">Фото</string>
+    <string name="SvipeProfileImagesTab">Фото профиля</string>
     <string name="SvipePhotoDeleted">Удалено</string>
     <string name="SvipeIntroStart">Начать свайпинг</string>
 

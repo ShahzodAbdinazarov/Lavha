@@ -195,6 +195,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
     public static final int TAB_BOT_PREVIEWS = 13;
     public static final int TAB_GIFTS = 14;
     public static final int TAB_POLL = 15;
+    public static final int TAB_IMAGES = 16; // Svipe: profile "Rasmlar" tab (current + captured-deleted avatars)
     private static final int TAB_STORIES_ALBUM_PREFIX = 0x00010000;
     private static final int TAB_STORIES_ALBUM_MASK = 0x0000FFFF;
 
@@ -656,6 +657,8 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
     private ActionBar actionBar;
 
     private SharedPhotoVideoAdapter photoVideoAdapter;
+    private org.telegram.svipe.SvipeProfileImagesAdapter imagesAdapter; // Svipe
+    private int imagesCount = 0; // Svipe: current + captured-deleted profile photos
     private SharedPhotoVideoAdapter animationSupportingPhotoVideoAdapter;
     private SharedLinksAdapter linksAdapter;
     private SharedDocumentsAdapter documentsAdapter;
@@ -1250,7 +1253,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
 
         @Override
         public PhotoViewer.PlaceProviderObject getPlaceForPhoto(MessageObject messageObject, TLRPC.FileLocation fileLocation, int index, boolean needPreview, boolean closing) {
-            if (messageObject == null || mediaPages[0].selectedType != 0 && mediaPages[0].selectedType != 1 && mediaPages[0].selectedType != 3 && mediaPages[0].selectedType != 5) {
+            if (messageObject == null || mediaPages[0].selectedType != 0 && mediaPages[0].selectedType != 1 && mediaPages[0].selectedType != 3 && mediaPages[0].selectedType != 5 && mediaPages[0].selectedType != TAB_IMAGES) {
                 return null;
             }
             final RecyclerListView listView = mediaPages[0].listView;
@@ -1327,7 +1330,9 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     object.thumb = object.imageReceiver.getBitmapSafe();
                     object.parentView.getLocationInWindow(coords);
                     object.clipTopAddition = 0;
-                    object.starOffset = sharedMediaData[0].startOffset;
+                    object.starOffset = mediaPages[0].selectedType == TAB_IMAGES ? 0 : sharedMediaData[0].startOffset; // Svipe
+                    object.verticalPaging = mediaPages[0].selectedType == TAB_IMAGES || mediaPages[0].selectedType == TAB_PHOTOVIDEO; // Svipe: reels-style vertical swipe (Profile Images + Media)
+                    object.svipeVPFix = object.verticalPaging; // Svipe: apply the paging visual fixes wherever vertical paging is on (Profile Images + Media)
                     if (fragmentContextView != null && fragmentContextView.getVisibility() == View.VISIBLE) {
                         object.clipTopAddition += dp(36);
                     }
@@ -2284,6 +2289,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             }
         };
         animationSupportingPhotoVideoAdapter = new SharedPhotoVideoAdapter(context);
+        imagesAdapter = new org.telegram.svipe.SvipeProfileImagesAdapter(context, profileActivity.getCurrentAccount(), mediaColumnsCount[0]); // Svipe
         documentsAdapter = new SharedDocumentsAdapter(context, 1);
         voiceAdapter = new SharedDocumentsAdapter(context, 2);
         audioAdapter = new SharedDocumentsAdapter(context, 4);
@@ -2829,6 +2835,9 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                 @Override
                 public int getSpanSize(int position) {
                     final int columnsCount = mediaColumnsCount[isAnyStoryPageType(mediaPage.selectedType) ? 1 : 0];
+                    if (mediaPage.listView.getAdapter() == imagesAdapter) { // Svipe: one square tile per grid cell
+                        return 1;
+                    }
                     if (mediaPage.listView.getAdapter() == photoVideoAdapter) {
                         if (photoVideoAdapter.getItemViewType(position) == 2) {
                             return columnsCount;
@@ -3229,6 +3238,12 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     onItemClick(position, view, ((SharedAudioCell) view).getMessage(), 0, mediaPage.selectedType);
                 } else if (mediaPage.selectedType == TAB_GIF && view instanceof ContextLinkCell) {
                     onItemClick(position, view, (MessageObject) ((ContextLinkCell) view).getParentObject(), 0, mediaPage.selectedType);
+                } else if (mediaPage.selectedType == TAB_IMAGES && view instanceof SharedPhotoVideoCell2) { // Svipe
+                    if (profileActivity != null && position >= 0 && position < imagesAdapter.getMessages().size()) {
+                        PhotoViewer.getInstance().setParentActivity(profileActivity);
+                        // Same viewer as Media: shared open/close zoom via `provider`, reels-style vertical paging.
+                        PhotoViewer.getInstance().openPhoto(imagesAdapter.getMessages(), position, dialog_id, 0, 0, provider);
+                    }
                 } else if (mediaPage.selectedType == TAB_PHOTOVIDEO && view instanceof SharedPhotoVideoCell2) {
                     final SharedPhotoVideoCell2 cell = (SharedPhotoVideoCell2) view;
                     final MessageObject messageObject = cell.getMessageObject();
@@ -4824,7 +4839,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             if (lastVisiblePosition + 1 >= profileActivity.getMessagesController().getSavedMessagesController().getLoadedCount()) {
                 profileActivity.getMessagesController().getSavedMessagesController().loadDialogs(false);
             }
-        } else if (mediaPage.selectedType != TAB_RECOMMENDED_CHANNELS && mediaPage.selectedType != TAB_SAVED_MESSAGES && mediaPage.selectedType != TAB_BOT_PREVIEWS && mediaPage.selectedType != TAB_GIFTS) {
+        } else if (mediaPage.selectedType != TAB_RECOMMENDED_CHANNELS && mediaPage.selectedType != TAB_SAVED_MESSAGES && mediaPage.selectedType != TAB_BOT_PREVIEWS && mediaPage.selectedType != TAB_GIFTS && mediaPage.selectedType != TAB_IMAGES) {
             final int threshold;
             if (mediaPage.selectedType == 0) {
                 threshold = 3;
@@ -4943,6 +4958,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         }
         return (
             type != TAB_PHOTOVIDEO &&
+            type != TAB_IMAGES && // Svipe
             !isAnyStoryPageType(type) &&
             type != TAB_VOICE &&
             type != TAB_GIF &&
@@ -6849,6 +6865,24 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
     private long giftsLastHash;
     private boolean wasReordering;
     private int firstTab = -1;
+    // Svipe: rebuild the profile-images tab data (live current photos + captured/deleted ones) and its
+    // visibility count. Cheap (prefs + a few file stats); driven from updateTabs and tab selection.
+    private void rebuildImages() {
+        if (profileActivity != null && dialog_id > 0) {
+            java.util.List<org.telegram.svipe.SvipeProfileImages.Item> items =
+                    org.telegram.svipe.SvipeProfileImages.build(profileActivity.getCurrentAccount(), dialog_id);
+            imagesCount = items.size();
+            if (imagesAdapter != null) {
+                imagesAdapter.setItems(items);
+            }
+        } else {
+            imagesCount = 0;
+            if (imagesAdapter != null) {
+                imagesAdapter.setItems(null);
+            }
+        }
+    }
+
     public void updateTabs(boolean animated) {
         if (scrollSlidingTextTabStrip == null) {
             return;
@@ -6856,6 +6890,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         if (!delegate.isFragmentOpened()) {
             animated = false;
         }
+        rebuildImages(); // Svipe: refresh the profile-images count/data before deciding tab visibility
         boolean hasRecommendations = false;
         boolean hasSavedDialogs = false;
         boolean hasSavedMessages = savedMessagesContainer != null && sharedMediaPreloader != null && sharedMediaPreloader.hasSavedMessages;
@@ -6888,6 +6923,9 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                 changed++;
             }
             if ((hasMedia[0] <= 0) == scrollSlidingTextTabStrip.hasTab(TAB_PHOTOVIDEO)) {
+                changed++;
+            }
+            if ((imagesCount <= 0) == scrollSlidingTextTabStrip.hasTab(TAB_IMAGES)) { // Svipe
                 changed++;
             }
             if ((hasMedia[1] <= 0) == scrollSlidingTextTabStrip.hasTab(TAB_FILES)) {
@@ -7041,6 +7079,9 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                 }
                 if (hasRecommendations) {
                     tabs.add(new Pair(TAB_RECOMMENDED_CHANNELS, getString(dialog_id > 0 ? R.string.SimilarBotsTab : R.string.SimilarChannelsTab)));
+                }
+                if (imagesCount > 0) { // Svipe: always the last tab
+                    tabs.add(new Pair(TAB_IMAGES, getString(R.string.SvipeProfileImagesTab)));
                 }
             }
             if (scrollSlidingTextTabStrip.isReordering()) {
@@ -7275,6 +7316,13 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     sharedMediaData[0].recycledViewPool = new RecyclerView.RecycledViewPool();
                 }
                 viewPool = sharedMediaData[0].recycledViewPool;
+            } else if (mediaPages[a].selectedType == TAB_IMAGES) { // Svipe
+                if (currentAdapter != imagesAdapter) {
+                    recycleAdapter(currentAdapter);
+                    mediaPages[a].listView.setAdapter(imagesAdapter);
+                }
+                layoutParams.leftMargin = layoutParams.rightMargin = -dp(1);
+                spanCount = mediaColumnsCount[0];
             } else if (mediaPages[a].selectedType == TAB_FILES) {
                 sections = true;
                 if (sharedMediaData[1].fastScrollDataLoaded && !sharedMediaData[1].fastScrollPeriods.isEmpty()) {
@@ -7491,6 +7539,11 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
 
             } else if (mediaPages[a].selectedType == TAB_GIFTS) {
 
+            } else if (mediaPages[a].selectedType == TAB_IMAGES) { // Svipe
+                rebuildImages();
+                if (imagesAdapter != null) {
+                    imagesAdapter.notifyDataSetChanged();
+                }
             } else {
                 int type = mediaPages[a].selectedType;
                 if (type == TAB_POLL) {

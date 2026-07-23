@@ -231,6 +231,7 @@ public class FilteredSearchView extends FrameLayout implements NotificationCente
                     object.imageReceiver = imageReceiver;
                     object.allowTakeAnimation = false;
                     object.verticalPaging = true;   // Svipe: browse media reels-style (up/down = next/prev, left/right = dismiss)
+                    object.svipeVPFix = true;       // Svipe: the paging visual fixes (progress axis + dismiss direction)
                     object.radius = object.imageReceiver.getRoundRadius(true);
                     object.thumb = object.imageReceiver.getBitmapSafe();
                     object.parentView.getLocationInWindow(coords);

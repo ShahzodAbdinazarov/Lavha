@@ -114,6 +114,7 @@ public class SharedPhotoVideoCell2 extends FrameLayout {
     float highlightProgress;
     public boolean isFirst, isLast;
     public boolean isTop;
+    public boolean svipeDeleted; // Svipe: draw a "deleted" badge on captured-but-gone profile photos
 
     private Drawable gradientDrawable;
     private boolean gradientDrawableLoading;
@@ -283,6 +284,7 @@ public class SharedPhotoVideoCell2 extends FrameLayout {
             return;
         }
         currentMessageObject = messageObject;
+        svipeDeleted = false; // Svipe: reset; the images adapter re-sets it after binding
         isStory = currentMessageObject != null && currentMessageObject.isStory();
         isStoryUploading = currentMessageObject != null && currentMessageObject.uploadingStory != null;
         updateSpoilers2();
@@ -794,6 +796,7 @@ public class SharedPhotoVideoCell2 extends FrameLayout {
         }
         drawDuration(canvas, bounds, customsAlpha);
         drawViews(canvas, bounds, customsAlpha);
+        drawSvipeDeleted(canvas, bounds, customsAlpha); // Svipe
         if (!isSearchingHashtag) {
             drawPrivacy(canvas, bounds, customsAlpha);
         } else {
@@ -963,6 +966,43 @@ public class SharedPhotoVideoCell2 extends FrameLayout {
             .setVerticalClipPadding(dp(14))
             .setShadow(.4f * alpha)
             .draw(canvas, bounds.left + p, bounds.top + dp(currentParentColumnsCount <= 2 ? 15 : 11.33f), Theme.multAlpha(0xFFFFFFFF, alpha), 1f);
+    }
+
+    // Svipe: mark this tile as a deleted profile photo (draws a small badge). Set after setMessageObject.
+    public void setSvipeDeleted(boolean deleted) {
+        if (svipeDeleted != deleted) {
+            svipeDeleted = deleted;
+            invalidate();
+        }
+    }
+
+    private static TextPaint svipeDeletedPaint;
+    private void drawSvipeDeleted(Canvas canvas, RectF bounds, float alpha) {
+        if (!svipeDeleted || imageReceiver != null && !imageReceiver.getVisible()) {
+            return;
+        }
+        if (svipeDeletedPaint == null) {
+            svipeDeletedPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+            svipeDeletedPaint.setTextSize(dp(11));
+            svipeDeletedPaint.setTypeface(AndroidUtilities.bold());
+        }
+        final String text = LocaleController.getString(R.string.SvipePhotoDeleted);
+        final float textW = svipeDeletedPaint.measureText(text);
+        final float pillH = dp(17);
+        final float pillW = textW + dp(10);
+        canvas.save();
+        canvas.translate(bounds.left + dp(5), bounds.top + dp(5));
+        AndroidUtilities.rectTmp.set(0, 0, pillW, pillH);
+        int oldAlpha = Theme.chat_timeBackgroundPaint.getAlpha();
+        Theme.chat_timeBackgroundPaint.setAlpha((int) (oldAlpha * alpha));
+        canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(4), dp(4), Theme.chat_timeBackgroundPaint);
+        Theme.chat_timeBackgroundPaint.setAlpha(oldAlpha);
+        svipeDeletedPaint.setColor(0xFFFFFFFF);
+        svipeDeletedPaint.setAlpha((int) (255 * alpha));
+        Paint.FontMetrics fm = svipeDeletedPaint.getFontMetrics();
+        float ty = (pillH - (fm.descent - fm.ascent)) / 2f - fm.ascent;
+        canvas.drawText(text, dp(5), ty, svipeDeletedPaint);
+        canvas.restore();
     }
 
     public void drawViews(Canvas canvas, RectF bounds, float alpha) {
