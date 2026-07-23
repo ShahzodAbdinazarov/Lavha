@@ -25,6 +25,7 @@ android {
     buildToolsVersion '36.0.0'
 
     defaultConfig.applicationId = APP_PACKAGE
+    defaultConfig.manifestPlaceholders = ['MAPS_API_KEY': MAPS_API_KEY]
 
     sourceSets.main.jniLibs.srcDirs = ['../TMessagesProj/jni/']
 
@@ -274,6 +275,29 @@ tasks.configureEach { theTask ->
                     "in the merged manifest. Without it, every setRequestedOrientation() call and\n" +
                     "android:resizeableActivity=\"false\" is ignored on tablets, unfolded foldables and\n" +
                     "ChromeOS. Restore it in TMessagesProj/src/main/AndroidManifest.xml.\n" +
+                    "Merged manifest: ${merged}")
+        }
+
+        // The Google Maps key ships as the MAPS_API_KEY manifest placeholder (value in
+        // gradle.properties). The stale upstream key 'AIzaSyA-t0jL...' is registered to
+        // org.telegram.messenger and silently renders a blank map under uz.svipe.app — an upstream
+        // merge that re-hardcodes it, or a missing gradle.properties entry, must fail here because
+        // the merged manifest is what actually ships. Same reason the permission guard reads it.
+        def mapsKey = root.application.'meta-data'.find {
+            it.@'android:name'.toString() == 'com.google.android.maps.v2.API_KEY'
+        }?.@'android:value'?.toString()
+        if (mapsKey == null || mapsKey.isEmpty() || mapsKey.startsWith('${')) {
+            throw new GradleException(
+                    "Play bundle has no resolved Google Maps API key in the merged manifest.\n" +
+                    "Set MAPS_API_KEY in gradle.properties and keep the MAPS_API_KEY placeholder in\n" +
+                    "the config/*/AndroidManifest*.xml files.\n" +
+                    "Merged manifest: ${merged}")
+        }
+        if (mapsKey == 'AIzaSyA-t0jLPjUt2FxrA8VPK2EiYHcYcboIR6k') {
+            throw new GradleException(
+                    "Play bundle carries the stale upstream Telegram Google Maps key, which is bound to\n" +
+                    "org.telegram.messenger and renders a blank map under uz.svipe.app. Restore the\n" +
+                    "MAPS_API_KEY placeholder in the config manifests (value lives in gradle.properties).\n" +
                     "Merged manifest: ${merged}")
         }
     }

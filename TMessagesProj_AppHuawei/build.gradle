@@ -33,6 +33,7 @@ android {
     buildToolsVersion '36.0.0'
 
     defaultConfig.applicationId = APP_PACKAGE
+    defaultConfig.manifestPlaceholders = ['MAPS_API_KEY': MAPS_API_KEY]
 
     sourceSets.main.jniLibs.srcDirs = ['../TMessagesProj/jni/']
 
