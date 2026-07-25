@@ -5,6 +5,16 @@
     <string name="SvipeIntroMessage">Telegram kanallaridagi eng qiziqarli qisqa videolar — bitta tasmada.</string>
     <string name="SvipeProfileImagesTab">Profil rasmlari</string>
     <string name="SvipePhotoDeleted">O\'chirilgan</string>
+    <string name="SvipeDeletedLog">O\'chgan va tahrirlangan</string>
+    <string name="SvipeShowInChat">Chatda ko\'rsatish</string>
+    <string name="SvipeDeletedLabel">O\'chirilgan</string>
+    <string name="SvipeMessageHistory">Xabar tarixi</string>
+    <string name="SvipeMediaUnavailable">Media mavjud emas — yuklab olinmasdan turib o\'chirilgan</string>
+    <string name="SvipeDeletedSection">O\'chirilganlar</string>
+    <string name="SvipeEditedSection">Tahrirlanganlar</string>
+    <string name="SvipeArchiveEmpty">Bu yerda hali o\'chgan yoki tahrirlangan xabar yo\'q</string>
+    <string name="SvipeYouDeletedMessage">Siz bu xabarni o\'chirdingiz:</string>
+    <string name="SvipeYouEditedMessage">Siz bu xabarni tahrirladingiz:</string>
     <string name="SvipeIntroStart">Svayp qilishni boshlash</string>
 
     <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"

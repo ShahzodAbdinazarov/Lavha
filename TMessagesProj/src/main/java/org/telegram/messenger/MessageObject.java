@@ -222,6 +222,8 @@ public class MessageObject {
     public String monthKey;
     public boolean deleted;
     public boolean deletedByThanos;
+    public boolean svipeDeleted;   // Svipe — kept-inline deleted message; draw the red "Deleted" label. Distinct from core `deleted` (which has grouping/hit-test side effects).
+    public boolean svipeArchived;  // Svipe — reconstructed from the archive (log / history sheet); block re-download (R10).
     public float audioProgress;
     public float forceSeekTo = -1;
     public int audioProgressMs;
@@ -1862,6 +1864,10 @@ public class MessageObject {
         localUserName = userName;
         messageText = formattedMessage;
         messageOwner = message;
+        if (message != null) { // Svipe — carry inline deleted/archived markers from the raw message
+            if (message.svipeDeleted) svipeDeleted = true;
+            if (message.svipeArchived) svipeArchived = true;
+        }
         localChannel = isChannel;
         localSupergroup = supergroup;
         localEdit = edit;
@@ -1917,6 +1923,10 @@ public class MessageObject {
 
         currentAccount = accountNum;
         messageOwner = message;
+        if (message != null) { // Svipe — carry inline deleted/archived markers from the raw message
+            if (message.svipeDeleted) svipeDeleted = true;
+            if (message.svipeArchived) svipeArchived = true;
+        }
         replyMessageObject = replyToMessage;
         eventId = eid;
         wasUnread = !messageOwner.out && messageOwner.unread;

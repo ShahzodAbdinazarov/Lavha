@@ -17781,6 +17781,14 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
     }
 
     private void didPressButton(boolean animated, boolean video) {
+        if (currentMessageObject != null && (currentMessageObject.svipeArchived || currentMessageObject.svipeDeleted) && !currentMessageObject.mediaExists) {
+            // Svipe R10 — media that wasn't cached at delete time is gone server-side; never try to re-download.
+            try {
+                android.widget.Toast.makeText(getContext(), getString(R.string.SvipeMediaUnavailable), android.widget.Toast.LENGTH_SHORT).show();
+            } catch (Exception ignore) {
+            }
+            return;
+        }
         if (delegate != null && currentMessageObject.isSensitive() && currentMessageObject.hasMediaSpoilers() && !currentMessageObject.needDrawBluredPreview() && !currentMessageObject.isMediaSpoilersRevealed) {
             delegate.didPressRevealSensitiveContent(this);
             return;
@@ -18449,6 +18457,11 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             } else {
                 currentTimeString = TextUtils.concat(formatString(R.string.MessageScheduledRepeatSeconds, period), ", ", currentTimeString);
             }
+        }
+        if (currentMessageObject.svipeDeleted && currentTimeString != null) { // Svipe — red "Deleted" marker fused into the time line (width auto-counted below)
+            SpannableStringBuilder svipeDel = new SpannableStringBuilder(getString(R.string.SvipeDeletedLabel));
+            svipeDel.setSpan(new android.text.style.ForegroundColorSpan(getThemedColor(Theme.key_text_RedRegular)), 0, svipeDel.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            currentTimeString = TextUtils.concat(svipeDel, "  ", currentTimeString);
         }
         timeTextWidth = timeWidth = (int) Math.ceil(Theme.chat_timePaint.measureText(currentTimeString, 0, currentTimeString == null ? 0 : currentTimeString.length()));
         if (currentMessageObject.scheduled && currentMessageObject.messageOwner.date == 0x7FFFFFFE || currentMessageObject.notime) {

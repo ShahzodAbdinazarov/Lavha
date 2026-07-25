@@ -268,6 +268,16 @@
     <string name="SvipeIntroMessage">Самые интересные короткие видео из Telegram-каналов в одной ленте.</string>
     <string name="SvipeProfileImagesTab">Фото профиля</string>
     <string name="SvipePhotoDeleted">Удалено</string>
+    <string name="SvipeDeletedLog">Удалённые и изменённые</string>
+    <string name="SvipeShowInChat">Показывать в чате</string>
+    <string name="SvipeDeletedLabel">Удалено</string>
+    <string name="SvipeMessageHistory">История сообщения</string>
+    <string name="SvipeMediaUnavailable">Медиа недоступно — удалено до завершения загрузки</string>
+    <string name="SvipeDeletedSection">Удалённые</string>
+    <string name="SvipeEditedSection">Изменённые</string>
+    <string name="SvipeArchiveEmpty">Здесь пока нет удалённых или изменённых сообщений</string>
+    <string name="SvipeYouDeletedMessage">Вы удалили это сообщение:</string>
+    <string name="SvipeYouEditedMessage">Вы изменили это сообщение:</string>
     <string name="SvipeIntroStart">Начать свайпинг</string>
 
     <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"

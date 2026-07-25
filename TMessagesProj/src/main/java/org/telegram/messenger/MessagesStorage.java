@@ -35,6 +35,7 @@ import org.telegram.SQLite.SQLiteDatabase;
 import org.telegram.SQLite.SQLiteException;
 import org.telegram.SQLite.SQLitePreparedStatement;
 import org.telegram.messenger.support.LongSparseIntArray;
+import org.telegram.svipe.SvipeMessageArchiveStore;
 import org.telegram.messenger.utils.EphemeralMessagesHelper;
 import org.telegram.tgnet.NativeByteBuffer;
 import org.telegram.tgnet.RequestDelegate;
@@ -117,7 +118,7 @@ public class MessagesStorage extends BaseController {
         }
     }
 
-    public final static int LAST_DB_VERSION = 176;
+    public final static int LAST_DB_VERSION = 177;
     private boolean databaseMigrationInProgress;
     public boolean showClearDatabaseAlert;
 
@@ -764,6 +765,10 @@ public class MessagesStorage extends BaseController {
 
         database.executeFast("CREATE TABLE ephemeral_messages (id INTEGER, dialog_id INTEGER, topic_id INTEGER, date INTEGER, data BLOB, PRIMARY KEY(dialog_id, id));").stepThis().dispose();
         database.executeFast("CREATE INDEX IF NOT EXISTS ephemeral_messages_date_idx ON ephemeral_messages(date);").stepThis().dispose();
+
+        // Svipe — archive of deleted + edited-prior message versions (see docs/svipe-deleted-edited-messages-plan.md)
+        database.executeFast("CREATE TABLE svipe_deleted_messages(uid INTEGER, mid INTEGER, svipe_version INTEGER, data BLOB, date INTEGER, edit_date INTEGER, out INTEGER, media INTEGER, group_id INTEGER, from_id INTEGER, svipe_kind INTEGER, svipe_media_path TEXT, captured_at INTEGER, PRIMARY KEY(uid, mid, svipe_version));").stepThis().dispose();
+        database.executeFast("CREATE INDEX IF NOT EXISTS svipe_deleted_messages_uid_date_idx ON svipe_deleted_messages(uid, date);").stepThis().dispose();
 
         database.executeFast("PRAGMA user_version = " + MessagesStorage.LAST_DB_VERSION).stepThis().dispose();
 
@@ -9683,6 +9688,45 @@ public class MessagesStorage extends BaseController {
                     }
                 }
 
+                // Svipe — merge archived deleted messages inline when "Show in chat" is on. Bounded to the
+                // loaded id window so they land on the right page; best-effort (a failure just skips them,
+                // never breaks the load). See docs/svipe-deleted-edited-messages-plan.md §7.2.
+                if (mode == 0 && threadMessageId == 0 && !DialogObject.isEncryptedDialog(dialogId) && org.telegram.svipe.SvipeConfig.isShowInChat(currentAccount, dialogId)) {
+                    try {
+                        int svMinId = Integer.MAX_VALUE, svMaxId = Integer.MIN_VALUE;
+                        for (int a = 0; a < res.messages.size(); a++) {
+                            int mid = res.messages.get(a).id;
+                            if (mid > 0) {
+                                if (mid < svMinId) svMinId = mid;
+                                if (mid > svMaxId) svMaxId = mid;
+                            }
+                        }
+                        if (svMaxId >= svMinId) {
+                            SQLiteCursor svCursor = database.queryFinalized(String.format(Locale.US, "SELECT data, svipe_media_path FROM svipe_deleted_messages WHERE uid = %d AND svipe_kind = %d AND mid >= %d AND mid <= %d", dialogId, SvipeMessageArchiveStore.KIND_DELETED, svMinId, svMaxId));
+                            while (svCursor.next()) {
+                                NativeByteBuffer svData = svCursor.byteBufferValue(0);
+                                if (svData != null) {
+                                    TLRPC.Message svMsg = TLRPC.Message.TLdeserialize(svData, svData.readInt32(false), false);
+                                    svData.reuse();
+                                    if (svMsg != null) {
+                                        svMsg.svipeDeleted = true;
+                                        svMsg.svipeArchived = true;
+                                        if (!svCursor.isNull(1)) {
+                                            svMsg.attachPath = svCursor.stringValue(1);
+                                        }
+                                        addUsersAndChatsFromMessage(svMsg, usersToLoad, chatsToLoad, animatedEmojiToLoad);
+                                        res.messages.add(svMsg);
+                                        messagesCount++;
+                                    }
+                                }
+                            }
+                            svCursor.dispose();
+                        }
+                    } catch (Exception e) {
+                        FileLog.e(e);
+                    }
+                }
+
                 Collections.sort(res.messages, (lhs, rhs) -> {
                     if (MessageObject.isEphemeralMessageId(lhs.id) || MessageObject.isEphemeralMessageId(rhs.id)) {
                         if (lhs.date > rhs.date) {
@@ -14189,6 +14233,7 @@ public class MessagesStorage extends BaseController {
                         if (data != null) {
                             TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                             message.readAttachPath(data, currentUser);
+                            svipeArchiveMessage(did, message, SvipeMessageArchiveStore.KIND_DELETED); // Svipe — capture deleted message
                             if (deletedMessages != null) {
                                 deletedMessages.add(message);
                             }
@@ -14861,6 +14906,261 @@ public class MessagesStorage extends BaseController {
         executeInStorageQueue(() -> updateDialogsWithDeletedMessagesInternal(dialogId, channelId, messages, additionalDialogsToUpdate));
     }
 
+    // ===== Svipe: deleted/edited message archive (docs/svipe-deleted-edited-messages-plan.md) =====
+
+    /**
+     * Archive one message version into {@code svipe_deleted_messages}. MUST run on the storage thread
+     * (it is — called synchronously from the capture hooks inside markMessagesAsDeletedInternal /
+     * putMessages). Pins the message's media file synchronously if it is already on disk (never starts
+     * a download — R9), so the copy wins the race against the delete pipeline's file removal. Then
+     * serializes the message and inserts a new version row, and enforces the per-dialog capacity cap.
+     * Best-effort: swallows all errors so capture never disturbs the real delete/edit path.
+     *
+     * @param kind {@link SvipeMessageArchiveStore#KIND_DELETED} or {@code KIND_EDITED_PRIOR}
+     */
+    public void svipeArchiveMessage(long dialogId, TLRPC.Message message, int kind) {
+        if (message == null || dialogId == 0 || DialogObject.isEncryptedDialog(dialogId)) {
+            return;
+        }
+        NativeByteBuffer data = null;
+        try {
+            final int mid = message.id;
+
+            // Dedup edited-prior versions by (mid, edit_date): the same pre-edit version can arrive from
+            // both the own-edit snapshot and an edit retry. Each real version has a distinct edit_date
+            // (0 for the original, then the server edit_date of each subsequent version).
+            if (kind == SvipeMessageArchiveStore.KIND_EDITED_PRIOR) {
+                SQLiteCursor dup = database.queryFinalized(String.format(Locale.US, "SELECT 1 FROM svipe_deleted_messages WHERE uid = %d AND mid = %d AND svipe_kind = %d AND edit_date = %d LIMIT 1", dialogId, mid, SvipeMessageArchiveStore.KIND_EDITED_PRIOR, message.edit_date));
+                boolean exists = dup.next();
+                dup.dispose();
+                if (exists) {
+                    return;
+                }
+            }
+
+            int version = 1;
+            SQLiteCursor c = database.queryFinalized(String.format(Locale.US, "SELECT MAX(svipe_version) FROM svipe_deleted_messages WHERE uid = %d AND mid = %d", dialogId, mid));
+            if (c.next() && !c.isNull(0)) {
+                version = c.intValue(0) + 1;
+            }
+            c.dispose();
+
+            // Pin media only if it is already cached — never triggers a download (R9). Synchronous so
+            // it completes before the surrounding delete pipeline removes the cached file.
+            String mediaPath = null;
+            try {
+                File src = getFileLoader().getPathToMessage(message);
+                if (src != null && src.exists() && src.length() > 0) {
+                    File dest = SvipeMessageArchiveStore.getInstance().mediaFileFor(currentAccount, dialogId, mid, version);
+                    if (dest != null && AndroidUtilities.copyFileSafe(src, dest)) {
+                        mediaPath = dest.getAbsolutePath();
+                    }
+                }
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+
+            long fromId = message.from_id != null ? MessageObject.getPeerId(message.from_id) : 0;
+            data = new NativeByteBuffer(message.getObjectSize());
+            message.serializeToStream(data);
+
+            SQLitePreparedStatement state = database.executeFast("REPLACE INTO svipe_deleted_messages(uid, mid, svipe_version, data, date, edit_date, out, media, group_id, from_id, svipe_kind, svipe_media_path, captured_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            state.requery();
+            state.bindLong(1, dialogId);
+            state.bindInteger(2, mid);
+            state.bindInteger(3, version);
+            state.bindByteBuffer(4, data);
+            state.bindInteger(5, message.date);
+            state.bindInteger(6, message.edit_date);
+            state.bindInteger(7, message.out ? 1 : 0);
+            state.bindInteger(8, message.media != null && !(message.media instanceof TLRPC.TL_messageMediaEmpty) ? 1 : 0);
+            state.bindLong(9, message.grouped_id);
+            state.bindLong(10, fromId);
+            state.bindInteger(11, kind);
+            if (mediaPath != null) {
+                state.bindString(12, mediaPath);
+            } else {
+                state.bindNull(12);
+            }
+            state.bindLong(13, System.currentTimeMillis());
+            state.step();
+            state.dispose();
+
+            svipeTrimArchive(dialogId);
+        } catch (Exception e) {
+            FileLog.e(e);
+        } finally {
+            if (data != null) {
+                data.reuse();
+            }
+        }
+    }
+
+    /** Enforce the per-dialog count + byte caps, deleting the oldest rows and their pinned media. */
+    private void svipeTrimArchive(long dialogId) {
+        try {
+            // Cheap gate: a bulk channel delete inserts thousands of rows in a tight loop, so avoid the
+            // full per-row scan on every insert. Only scan when the count cap is exceeded, or
+            // periodically (to enforce the byte cap for a few large media at low count).
+            int count = 0;
+            SQLiteCursor agg = database.queryFinalized("SELECT COUNT(*) FROM svipe_deleted_messages WHERE uid = " + dialogId);
+            if (agg.next()) {
+                count = agg.intValue(0);
+            }
+            agg.dispose();
+            if (count <= SvipeMessageArchiveStore.MAX_PER_DIALOG && (count == 0 || count % 128 != 0)) {
+                return;
+            }
+
+            ArrayList<SvipeMessageArchiveStore.ArchiveRow> rows = new ArrayList<>();
+            SQLiteCursor c = database.queryFinalized(String.format(Locale.US, "SELECT mid, svipe_version, captured_at, length(data), svipe_media_path FROM svipe_deleted_messages WHERE uid = %d", dialogId));
+            while (c.next()) {
+                int mid = c.intValue(0);
+                int version = c.intValue(1);
+                long capturedAt = c.longValue(2);
+                long bytes = c.longValue(3);
+                String mediaPath = c.isNull(4) ? null : c.stringValue(4);
+                long mediaBytes = 0;
+                if (mediaPath != null) {
+                    File mf = new File(mediaPath);
+                    if (mf.exists()) {
+                        mediaBytes = mf.length();
+                    }
+                }
+                rows.add(new SvipeMessageArchiveStore.ArchiveRow(mid, version, capturedAt, bytes + mediaBytes, mediaPath));
+            }
+            c.dispose();
+
+            List<SvipeMessageArchiveStore.ArchiveRow> evict = SvipeMessageArchiveStore.planTrim(rows, SvipeMessageArchiveStore.MAX_PER_DIALOG, SvipeMessageArchiveStore.MAX_BYTES_PER_DIALOG);
+            for (SvipeMessageArchiveStore.ArchiveRow r : evict) {
+                database.executeFast(String.format(Locale.US, "DELETE FROM svipe_deleted_messages WHERE uid = %d AND mid = %d AND svipe_version = %d", dialogId, r.mid, r.version)).stepThis().dispose();
+                if (r.mediaPath != null) {
+                    try {
+                        new File(r.mediaPath).delete();
+                    } catch (Exception ignore) {
+                    }
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+    }
+
+    /**
+     * Read all archived deleted/edited versions for a dialog, oldest first, and deliver them on the
+     * UI thread. Each entry's message has its {@code attachPath} pointed at the pinned local media
+     * copy (if any) so it renders without hitting the network. Runs on the storage queue.
+     */
+    public void getSvipeArchivedMessages(long dialogId, Utilities.Callback<ArrayList<SvipeMessageArchiveStore.Entry>> callback) {
+        storageQueue.postRunnable(() -> {
+            ArrayList<SvipeMessageArchiveStore.Entry> result = new ArrayList<>();
+            try {
+                ArrayList<Integer> editedMids = new ArrayList<>();
+                SQLiteCursor c = database.queryFinalized("SELECT mid, svipe_version, data, svipe_kind, svipe_media_path, captured_at FROM svipe_deleted_messages WHERE uid = " + dialogId + " ORDER BY date ASC, mid ASC, svipe_version ASC");
+                while (c.next()) {
+                    NativeByteBuffer data = c.byteBufferValue(2);
+                    if (data != null) {
+                        TLRPC.Message m = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+                        data.reuse();
+                        if (m != null) {
+                            SvipeMessageArchiveStore.Entry e = new SvipeMessageArchiveStore.Entry();
+                            e.message = m;
+                            e.version = c.intValue(1);
+                            e.kind = c.intValue(3);
+                            e.mediaPath = c.isNull(4) ? null : c.stringValue(4);
+                            e.capturedAt = c.longValue(5);
+                            if (e.mediaPath != null) {
+                                m.attachPath = e.mediaPath;
+                            }
+                            result.add(e);
+                            if (e.kind == SvipeMessageArchiveStore.KIND_EDITED_PRIOR && !editedMids.contains(m.id)) {
+                                editedMids.add(m.id);
+                            }
+                        }
+                    }
+                }
+                c.dispose();
+
+                // Attach the current live version of every edited message so the log can render the
+                // newest edit (prev -> new) exactly like Recent Actions does.
+                if (!editedMids.isEmpty()) {
+                    SQLiteCursor lc = database.queryFinalized(String.format(Locale.US, "SELECT data FROM messages_v2 WHERE uid = %d AND mid IN (%s)", dialogId, TextUtils.join(",", editedMids)));
+                    while (lc.next()) {
+                        NativeByteBuffer data = lc.byteBufferValue(0);
+                        if (data != null) {
+                            TLRPC.Message m = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+                            if (m != null) {
+                                m.readAttachPath(data, getUserConfig().clientUserId);
+                            }
+                            data.reuse();
+                            if (m != null) {
+                                SvipeMessageArchiveStore.Entry e = new SvipeMessageArchiveStore.Entry();
+                                e.message = m;
+                                e.kind = SvipeMessageArchiveStore.KIND_LIVE;
+                                result.add(e);
+                            }
+                        }
+                    }
+                    lc.dispose();
+                }
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+            AndroidUtilities.runOnUIThread(() -> callback.run(result));
+        });
+    }
+
+    /**
+     * Read the archived prior (pre-edit) versions of one message, oldest version first, delivered on
+     * the UI thread. Media attachPath is pointed at the pinned local copy where present.
+     */
+    public void getSvipeMessageHistory(long dialogId, int mid, Utilities.Callback<ArrayList<SvipeMessageArchiveStore.Entry>> callback) {
+        storageQueue.postRunnable(() -> {
+            ArrayList<SvipeMessageArchiveStore.Entry> result = new ArrayList<>();
+            try {
+                SQLiteCursor c = database.queryFinalized(String.format(Locale.US, "SELECT svipe_version, data, svipe_kind, svipe_media_path FROM svipe_deleted_messages WHERE uid = %d AND mid = %d ORDER BY svipe_version ASC", dialogId, mid));
+                while (c.next()) {
+                    NativeByteBuffer data = c.byteBufferValue(1);
+                    if (data != null) {
+                        TLRPC.Message m = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+                        data.reuse();
+                        if (m != null) {
+                            SvipeMessageArchiveStore.Entry e = new SvipeMessageArchiveStore.Entry();
+                            e.message = m;
+                            e.version = c.intValue(0);
+                            e.kind = c.intValue(2);
+                            e.mediaPath = c.isNull(3) ? null : c.stringValue(3);
+                            if (e.mediaPath != null) {
+                                m.attachPath = e.mediaPath;
+                            }
+                            result.add(e);
+                        }
+                    }
+                }
+                c.dispose();
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+            AndroidUtilities.runOnUIThread(() -> callback.run(result));
+        });
+    }
+
+    /** Whether the dialog has any archived deleted/edited versions (fast COUNT). UI-thread callback. */
+    public void hasSvipeArchivedMessages(long dialogId, Utilities.Callback<Boolean> callback) {
+        storageQueue.postRunnable(() -> {
+            boolean any = false;
+            try {
+                SQLiteCursor c = database.queryFinalized("SELECT 1 FROM svipe_deleted_messages WHERE uid = " + dialogId + " LIMIT 1");
+                any = c.next();
+                c.dispose();
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+            final boolean fany = any;
+            AndroidUtilities.runOnUIThread(() -> callback.run(fany));
+        });
+    }
+
     public ArrayList<Long> markMessagesAsDeleted(long dialogId, ArrayList<Integer> messages, boolean useQueue, boolean deleteFiles, int mode, int topicId) {
         if (messages.isEmpty()) {
             return null;
@@ -14913,6 +15213,7 @@ public class MessagesStorage extends BaseController {
                     if (data != null) {
                         TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                         message.readAttachPath(data, getUserConfig().clientUserId);
+                        svipeArchiveMessage(did, message, SvipeMessageArchiveStore.KIND_DELETED); // Svipe — capture channel bulk-delete
                         data.reuse();
                         addFilesToDelete(message, filesToDelete, idsToDelete, namesToDelete, false);
                     }
@@ -15793,6 +16094,13 @@ public class MessagesStorage extends BaseController {
                                     TLRPC.Message oldMessage = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                                     oldMessage.readAttachPath(data, getUserConfig().clientUserId);
                                     data.reuse();
+                                    // Svipe — snapshot pre-edit version for INCOMING edits only (strict > filters
+                                    // webpage-preview re-puts / getDifference replays). Our OWN edits are captured
+                                    // in SendMessagesHelper.editMessage BEFORE the optimistic overwrite, because by
+                                    // the time an own edit reaches here the DB row already holds the new text.
+                                    if (!message.out && message.edit_date > oldMessage.edit_date) {
+                                        svipeArchiveMessage(MessageObject.getDialogId(message), oldMessage, SvipeMessageArchiveStore.KIND_EDITED_PRIOR);
+                                    }
                                     if (reactionUpdates != null) {
                                         reactionUpdates.add(new SavedReactionsUpdate(selfId, oldMessage, message));
                                     }

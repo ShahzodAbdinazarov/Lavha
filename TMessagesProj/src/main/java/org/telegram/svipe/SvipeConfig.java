@@ -1,6 +1,7 @@
 package org.telegram.svipe;
 
 import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.MessagesController;
 
 /** Svipe backend connection constants. Prod (release) -> svipe.uz; dev/beta build -> lavha-dev. */
 public class SvipeConfig {
@@ -44,4 +45,25 @@ public class SvipeConfig {
     public static final String PREF_MUSIC_ARTIST_FAV_SYNCED_AT = "svipe_music_artist_favourites_synced_at";
     /** Artist ids un-favourited locally whose DELETE the backend has not acknowledged yet. */
     public static final String PREF_MUSIC_ARTIST_FAV_PENDING_REMOVALS = "svipe_music_artist_favourites_pending_removals";
+
+    // ---- Deleted/edited message archive: per-chat "Show in chat" toggle (default OFF) ----
+    // Capture is ALWAYS on regardless of this; this only controls whether deleted messages stay
+    // inline in the chat (with a red "Deleted" tag) and edit history is offered there.
+    public static final String PREF_SHOW_IN_CHAT_PREFIX = "svipe_show_in_chat_";
+
+    public static boolean isShowInChat(int account, long dialogId) {
+        try {
+            return MessagesController.getMainSettings(account).getBoolean(PREF_SHOW_IN_CHAT_PREFIX + dialogId, false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static void setShowInChat(int account, long dialogId, boolean on) {
+        try {
+            MessagesController.getMainSettings(account).edit().putBoolean(PREF_SHOW_IN_CHAT_PREFIX + dialogId, on).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
 }

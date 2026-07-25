@@ -10962,6 +10962,16 @@
     <string name="SvipeIntroMessage">The most engaging short videos from Telegram channels, all in one feed.</string>
     <string name="SvipeProfileImagesTab">Profile Images</string>
     <string name="SvipePhotoDeleted">Deleted</string>
+    <string name="SvipeDeletedLog">Deleted &amp; edited</string>
+    <string name="SvipeShowInChat">Show in chat</string>
+    <string name="SvipeDeletedLabel">Deleted</string>
+    <string name="SvipeMessageHistory">Message history</string>
+    <string name="SvipeMediaUnavailable">Media unavailable — it was deleted before it finished downloading</string>
+    <string name="SvipeDeletedSection">Deleted</string>
+    <string name="SvipeEditedSection">Edited</string>
+    <string name="SvipeArchiveEmpty">No deleted or edited messages here yet</string>
+    <string name="SvipeYouDeletedMessage">You deleted this message:</string>
+    <string name="SvipeYouEditedMessage">You edited this message:</string>
     <string name="SvipeIntroStart">Start Sviping</string>
 
     <!-- Svipe reels comments sheet -->

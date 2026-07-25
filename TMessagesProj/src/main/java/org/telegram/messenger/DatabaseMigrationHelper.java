@@ -1679,6 +1679,13 @@ public class DatabaseMigrationHelper {
             database.executeFast("PRAGMA user_version = 176").stepThis().dispose();
             version = 176;
         }
+        if (version == 176) {
+            // Svipe — archive of deleted + edited-prior message versions (see docs/svipe-deleted-edited-messages-plan.md)
+            database.executeFast("CREATE TABLE svipe_deleted_messages(uid INTEGER, mid INTEGER, svipe_version INTEGER, data BLOB, date INTEGER, edit_date INTEGER, out INTEGER, media INTEGER, group_id INTEGER, from_id INTEGER, svipe_kind INTEGER, svipe_media_path TEXT, captured_at INTEGER, PRIMARY KEY(uid, mid, svipe_version));").stepThis().dispose();
+            database.executeFast("CREATE INDEX IF NOT EXISTS svipe_deleted_messages_uid_date_idx ON svipe_deleted_messages(uid, date);").stepThis().dispose();
+            database.executeFast("PRAGMA user_version = 177").stepThis().dispose();
+            version = 177;
+        }
 
         return version;
     }

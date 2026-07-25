@@ -1199,6 +1199,7 @@ public class ChatActivity extends BaseFragment implements
     public final static int OPTION_SAVE_TO_DOWNLOADS_OR_MUSIC = 10;
     public final static int OPTION_ADD_TO_GIFS = 11;
     public final static int OPTION_EDIT = 12;
+    public final static int OPTION_SVIPE_HISTORY = 991; // Svipe — open edit-history bottom sheet
     public final static int OPTION_PIN = 13;
     public final static int OPTION_UNPIN = 14;
     public final static int OPTION_ADD_CONTACT = 15;
@@ -1641,6 +1642,8 @@ public class ChatActivity extends BaseFragment implements
     private final static int text_spoiler = 57;
     private final static int text_quote = 58;
     private final static int text_date = 74;
+    private final static int svipe_show_in_chat = 75; // Svipe — per-chat "Show in chat" toggle
+    private final static int svipe_deleted_log = 76;  // Svipe — open the deleted & edited log
 
     private final static int view_as_topics = 59;
 
@@ -3796,6 +3799,8 @@ public class ChatActivity extends BaseFragment implements
                         return;
                     }
                     showDialog(AlertsCreator.createTTLAlert(getParentActivity(), currentEncryptedChat, themeDelegate).create());
+                } else if (id == svipe_deleted_log) { // Svipe
+                    presentFragment(new org.telegram.svipe.SvipeDeletedLogActivity(dialog_id));
                 } else if (id == clear_history || id == delete_chat || id == auto_delete_timer) {
                     if (getParentActivity() == null) {
                         return;
@@ -4397,6 +4402,9 @@ public class ChatActivity extends BaseFragment implements
             }
             if (themeDelegate.isThemeChangeAvailable(true)) {
                 headerItem.lazilyAddSubItem(change_colors, R.drawable.msg_background, LocaleController.getString(R.string.SetWallpapers));
+            }
+            if (currentEncryptedChat == null) { // Svipe — Recent Actions log (deleted + edited); "Show in chat" switch lives inside that screen
+                headerItem.lazilyAddSubItem(svipe_deleted_log, R.drawable.msg_log, LocaleController.getString(R.string.EventLog));
             }
             if (currentUser != null && currentUser.self && getDialogId() != UserObject.VERIFY) {
                 headerItem.lazilyAddSubItem(add_shortcut, R.drawable.msg_home, LocaleController.getString(R.string.AddShortcut));
@@ -26072,6 +26080,36 @@ public class ChatActivity extends BaseFragment implements
         processDeletedMessages(markAsDeletedMessages, channelId, sent, true);
     }
     private void processDeletedMessages(ArrayList<Integer> markAsDeletedMessages, long channelId, boolean sent, boolean thanos) {
+        // Svipe — "Show in chat" ON: keep deleted messages inline with a red "Deleted" tag instead of
+        // removing them. Only the common case (default mode, main dialog index, no topic/thread, not the
+        // filtered/search view); any edge case falls through to the normal removal so we never mishandle
+        // merge/scheduled/topic paths. See docs/svipe-deleted-edited-messages-plan.md §7.1.
+        if (chatMode == MODE_DEFAULT && !isTopic && threadMessageObject == null
+                && (chatAdapter == null || !chatAdapter.isFiltered)
+                && (ChatObject.isChannel(currentChat) ? channelId == -dialog_id : channelId == 0)
+                && org.telegram.svipe.SvipeConfig.isShowInChat(currentAccount, dialog_id)) {
+            boolean anyKept = false;
+            for (int a = 0; a < markAsDeletedMessages.size(); a++) {
+                Integer mid = markAsDeletedMessages.get(a);
+                MessageObject obj = messagesDict[0].get(mid);
+                if (obj != null && !obj.svipeDeleted && !obj.scheduled) {
+                    obj.svipeDeleted = true;
+                    obj.svipeArchived = true;
+                    if (obj.messageOwner != null) {
+                        obj.messageOwner.svipeDeleted = true;
+                        obj.messageOwner.svipeArchived = true;
+                    }
+                    obj.forceUpdate = true; // rebuild the cell layout so the red "Deleted" label appears now
+                    anyKept = true;
+                }
+            }
+            if (anyKept) {
+                if (chatAdapter != null) {
+                    chatAdapter.notifyDataSetChanged();
+                }
+                return;
+            }
+        }
         ArrayList<Integer> removedIndexes = new ArrayList<>();
         ArrayList<Integer> thanosMessagesIndexes = new ArrayList<>();
         final int currentTime = getConnectionsManager().getCurrentTime();
@@ -30727,6 +30765,14 @@ public class ChatActivity extends BaseFragment implements
                 fillMessageMenu(primaryMessage, icons, items, options);
             }
 
+            if (selectedObject != null && !options.isEmpty() && selectedObject.messageOwner != null
+                    && (selectedObject.messageOwner.flags & TLRPC.MESSAGE_FLAG_EDITED) != 0
+                    && org.telegram.svipe.SvipeConfig.isShowInChat(currentAccount, dialog_id)) { // Svipe — edit-history shortcut
+                items.add(LocaleController.getString(R.string.SvipeMessageHistory));
+                options.add(OPTION_SVIPE_HISTORY);
+                icons.add(R.drawable.msg_edit);
+            }
+
             if (selectedObject != null && selectedObject.isHiddenSensitive() && !selectedObject.isMediaSpoilersRevealed) {
                 for (int i = 0; i < options.size(); ++i) {
                     final int option = options.get(i);
@@ -33055,6 +33101,12 @@ public class ChatActivity extends BaseFragment implements
         }
         boolean preserveDim = false;
         switch (option) {
+            case OPTION_SVIPE_HISTORY: { // Svipe — open the edit-history bottom sheet
+                if (getParentActivity() != null) {
+                    new org.telegram.svipe.SvipeMessageHistorySheet(getParentActivity(), currentAccount, dialog_id, selectedObject).show();
+                }
+                break;
+            }
             case OPTION_RETRY: {
                 final MessageObject object = selectedObject;
                 final MessageObject.GroupedMessages group = selectedObjectGroup;

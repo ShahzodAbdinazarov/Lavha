@@ -2848,6 +2848,28 @@ public class SendMessagesHelper extends BaseController implements NotificationCe
         TLRPC.Message newMsg = messageObject.messageOwner;
         messageObject.cancelEditing = false;
 
+        // Svipe — capture the TRUE pre-edit version of our OWN message before we mutate it optimistically.
+        // By the time the server edit confirmation reaches MessagesStorage, the DB row already holds the
+        // new text, so this is the only place the original survives. Deep-copy now (before mutation) and
+        // archive on the storage queue; dedup by (mid, edit_date) makes retries harmless.
+        try {
+            TLRPC.Message svCurrent = messageObject.messageOwner;
+            if (svCurrent != null && !DialogObject.isEncryptedDialog(messageObject.getDialogId())) {
+                final long svDialogId = messageObject.getDialogId();
+                NativeByteBuffer svBuf = new NativeByteBuffer(svCurrent.getObjectSize());
+                svCurrent.serializeToStream(svBuf);
+                svBuf.position(0);
+                final TLRPC.Message svCopy = TLRPC.Message.TLdeserialize(svBuf, svBuf.readInt32(false), false);
+                svBuf.reuse();
+                if (svCopy != null) {
+                    getMessagesStorage().getStorageQueue().postRunnable(() ->
+                            getMessagesStorage().svipeArchiveMessage(svDialogId, svCopy, org.telegram.svipe.SvipeMessageArchiveStore.KIND_EDITED_PRIOR));
+                }
+            }
+        } catch (Exception sve) {
+            FileLog.e(sve);
+        }
+
         int pollAddingIndex = -1;
 
         try {

@@ -58141,6 +58141,8 @@ public class TLRPC {
         public boolean reactions_are_possible;
         public boolean edit_hide;
         public boolean pinned;
+        public boolean svipeDeleted;  // Svipe — transient: a deleted message re-injected inline (never serialized)
+        public boolean svipeArchived; // Svipe — transient: reconstructed from the archive; block media re-download (R10)
         public MessageFwdHeader fwd_from;
         public long via_bot_id;
         public long via_business_bot_id;
