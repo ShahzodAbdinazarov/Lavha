@@ -1,0 +1,237 @@
+# Svipe — Profil rasmlarini ilovalar aro sinxronlash (reja)
+
+> Holat: **1-BOSQICH BAJARILDI** (2026-07-26) — backend dev'da tirik va E2E tasdiqlangan. Qolgan 2–5 bosqich hali qilinmagan.
+> Asos: mavjud [[profile-images-feature]] — lokal avatar-keeper (`SvipeAvatarStore` + `SvipeAvatarKeeper`).
+> Repolar: mobil `~/StudioProjects/Lavha`, backend `~/StudioProjects/svipe-backend`.
+
+---
+
+## 1. Maqsad va qamrov
+
+Hozir profil rasmlari **faqat o'sha qurilma onlayn ko'rgan** bo'lsa saqlanadi. Maqsad: Svipe foydalanuvchilari o'z arxivlarini **umumiy havza** orqali bo'lishsin — A user ushlab qolgan rasm, keyinchalik C user o'sha odamning profilini ochganda unga ham ko'rinsin.
+
+**Uchta tamoyil (kelishilgan):**
+1. **Serverga faqat O'CHIRILGAN rasmlar yuklanadi.** Joriy rasmlarni Telegram o'zi beradi — ularni saqlash isrof. (Lokal ushlash o'zgarmaydi: rasm tirikligida yuklanadi, serverga esa keyin yo'qolgani chiqadi.)
+2. **Siqish YO'Q.** Asl bayt saqlanadi — aks holda asl ko'rinishni hech qachon ko'ra olmaymiz. Hajmni #1 tejaydi.
+3. **Rasmlar shadow-user'ga bog'lanadi.** Server tomonda rasm egasining `tg_id` si bo'yicha yozuv yaratiladi (ushlagan odamga emas).
+
+---
+
+## 2. Hajm hisobi (nega bu ish qiladi)
+
+- Bitta avatar ≈ **100 KB** (biz saqlaydigan o'lchamda, siqilmagan).
+- **Global dedup:** `photo_id` Telegram bo'yicha yagona → bir rasm 1000 kishi ko'rsa ham bir marta saqlanadi.
+- Faqat o'chirilganlar saqlangani uchun umumiy ushlangan rasmlarning taxminan **20-30%** i serverga chiqadi.
+
+| Ko'rilgan odamlar | Ushlangan (~3/kishi) | Serverda (~25%) | Hajm |
+|---|---|---|---|
+| 50 000 | 150k | ~40k | **~4 GB** |
+| 500 000 | 1.5M | ~375k | **~37 GB** |
+
+**Xulosa:** Cloudflare R2 ning bepul 10 GB'i birinchi bosqichga yetadi; oshsa $0.015/GB/oy (37 GB ≈ **$0.6/oy**). Prod diskda hozir atigi 17 GB bo'sh — shuning uchun baytlar **app serverda saqlanmaydi**.
+
+---
+
+## 3. Saqlash: Cloudflare R2
+
+- **Nega R2:** 10 GB bepul, va eng muhimi **egress (trafik) bepul**. Rasm xizmatini odatda trafik o'ldiradi, storage emas.
+- S3-mos API → `boto3` bilan ishlaydi (backend'da hali S3/R2 integratsiyasi yo'q, yangi qo'shiladi).
+- **Baytlar app server orqali o'tmaydi:** klient **presigned URL** olib, to'g'ridan-to'g'ri R2 ga PUT/GET qiladi. Bu app serverni ham diskdan, ham trafikdan xalos qiladi.
+- Obyekt kaliti: `av/{tg_id}/{photo_id}.jpg` (dedup tabiiy: bir xil kalit = bir xil obyekt).
+- Zaxira variant: Backblaze B2 (10 GB bepul) yoki Hetzner Volume (~€0.05/GB/oy, lokal).
+
+---
+
+## 4. Ruxsat modeli (ikki qatlam)
+
+Muammo: rasm egasi Svipe ishlatmasa, uning Telegram maxfiylik sozlamasini bilmaymiz.
+
+### Qatlam 1 — rasm egasi Svipe useri bo'lsa
+Uning **o'z sozlamasi** serverda saqlanadi. **MUHIM: bu sozlama faqat CHEKLAYDI, hech qachon KENGAYTIRMAYDI** — ya'ni Qatlam 2 (Telegram-gate) har doim ustidan qo'llaniladi. Aks holda Svipe o'rnatgan odam Telegram'dagidan ko'proq ochilib qolardi.
+
+- **`everyone` — STANDART** (Telegram'ning o'zida ham profil rasmi standarti "Everybody"). Qo'shimcha cheklov yo'q → Telegram ruxsati qanday bo'lsa shunday: egasi "faqat kontaktlarga" qo'ygan bo'lsa, arxivni ham faqat kontaktlar ko'radi.
+- `nobody` — hech kimga, kontaktlarga ham berilmaydi.
+- `off` (opt-out) — **umuman arxivlanmaydi**, mavjud arxivi o'chiriladi.
+
+Bu bizning userlarga haqiqiy nazorat beradi va feature'ni himoya qilinadigan qiladi.
+
+### Qatlam 2 — rasm egasi Svipe useri bo'lmasa (aksariyat holat)
+Telegram'ning o'z ruxsatidan kelib chiqamiz. **Kalit g'oya: ko'ruvchining o'z klienti allaqachon biladi.**
+
+> C ga X ning arxiv rasmlari beriladi **faqat** C ning klienti X ning **joriy** rasmini Telegram'dan ko'ra olsa.
+
+**Isbot mexanizmi:** klient so'rovda o'zi **hozir ko'rib turgan `photo_id`** ni yuboradi. Uni faqat ruxsati bor odam Telegram'dan ola oladi.
+- Server bu `photo_id` X uchun **yaqinda ko'rilgan tirik to'plam**da borligini tekshiradi (bu to'plamni kuzatuvchi klientlar o'zlari xabar qiladi — §6.1).
+- X "faqat kontaktlarga" qo'ygan → kontakt bo'lmagan C Telegram'dan hech narsa olmaydi → isbot yo'q → arxiv berilmaydi ✓
+- **Xavfsiz tomonga xato:** X hamma rasmini o'chirgan bo'lsa, kontaktlar ham joriy rasm ko'rmaydi → ularga ham berilmaydi.
+- **Cheklov (ochiq):** o'zgartirilgan APK yolg'on gapirishi mumkin; ilgari kontakt bo'lgan odam eski `photo_id` ni ishlatishi mumkin. Shuning uchun ustiga rate-limit + audit + tirik-to'plam eskirishi (TTL) qo'yiladi.
+
+---
+
+## 5. Backend (`~/StudioProjects/svipe-backend`)
+
+Mavjud konvensiyalar: FastAPI, SQLAlchemy (`app/db/models.py`), sxema `create_all` + `app/db/base.py` dagi idempotent mikro-migratsiyalar, auth `app/api/deps.py` → `CurrentUserDep` (**tg user id faqat tokendan**, hech qachon body'dan — v0 impersonation teshigi shunday yopilgan).
+
+### 5.1 Jadvallar (`app/db/models.py`)
+
+```
+avatar_subject          # shadow-user: rasm EGASI
+  tg_id            BIGINT PK
+  visibility       TEXT     # 'everyone' | 'nobody' | 'off'  (Svipe useri bo'lmasa NULL → Qatlam 2)
+  is_svipe_user    BOOL
+  updated_at
+
+avatar_photo            # o'chirilgan rasm (global dedup)
+  photo_id         BIGINT PK          # Telegram photo id — global yagona
+  subject_tg_id    BIGINT FK -> avatar_subject.tg_id  (index)
+  photo_date       INT                # rasm qo'yilgan vaqt (tartiblash uchun)
+  bytes            INT
+  sha256           TEXT
+  object_key       TEXT               # av/{tg_id}/{photo_id}.jpg
+  uploaded_by      BIGINT             # audit uchun (ko'rsatilmaydi)
+  first_seen_at, uploaded_at
+
+avatar_live             # X uchun YAQINDA ko'rilgan tirik photo_id lar (isbot tekshiruvi uchun)
+  subject_tg_id    BIGINT
+  photo_id         BIGINT
+  last_seen_at     TIMESTAMP          # TTL bilan eskiradi
+  PK(subject_tg_id, photo_id)
+
+avatar_access_log       # abuse audit
+  requester_tg_id, subject_tg_id, granted, at
+```
+
+### 5.2 Endpointlar (`app/api/avatars.py` — yangi)
+
+Hammasi `CurrentUserDep` bilan himoyalangan.
+
+| Metod | Yo'l | Vazifa |
+|---|---|---|
+| `POST` | `/v1/avatars/observed` | Klient X ni ko'rdi: `{subject_tg_id, live_photo_ids[], deleted_photo_ids[]}`. Server `avatar_live` ni yangilaydi va **qaysi o'chgan rasmlar hali yo'qligini** qaytaradi (`missing[]`). |
+| `POST` | `/v1/avatars/upload-url` | `{subject_tg_id, photo_id, bytes, sha256}` → **presigned PUT** URL. Faqat `missing` ro'yxatidagilar uchun. |
+| `POST` | `/v1/avatars/commit` | Yuklash tugadi: server R2 dan hajm/hash tekshiradi, `avatar_photo` ga yozadi. |
+| `GET` | `/v1/avatars/{subject_tg_id}?proof_photo_id=...` | Ruxsat tekshiruvi (§4) → arxiv ro'yxati + **presigned GET** URL lar. |
+| `GET`/`PUT` | `/v1/avatars/me/settings` | O'z visibility sozlamam. |
+| `DELETE` | `/v1/avatars/me` | **Opt-out:** o'z arxivimni butunlay o'chirish (R2 obyektlari ham). |
+
+**Muhim:** `subject_tg_id` body'dan keladi (bu rasm egasi, so'rovchi emas) — lekin **so'rovchi** har doim tokendan olinadi. `uploaded_by` ham tokendan.
+
+### 5.3 Abuse himoyasi
+- Rate-limit: kuniga N ta `GET /v1/avatars/{id}` (masalan 200) va soatiga M ta yangi `subject_tg_id`.
+- Ketma-ket id larni "qazish" (enumeration) aniqlash: qisqa vaqtda ko'p turli `subject_tg_id` → bloklash.
+- Har bir ruxsat berish `avatar_access_log` ga yoziladi.
+- Yuklash kvotasi: bir user kuniga X MB dan ko'p yuklay olmaydi (spam/zaharlash).
+- **Zaharlanish xavfi:** kimdir `photo_id` ga soxta rasm yuklashi mumkin. Chora: `sha256` ni birinchi yuklovchidan qat'iylashtirish + bir necha mustaqil kuzatuvchi tasdig'i (v2).
+
+---
+
+## 6. Klient (mobil, `org.telegram.svipe`)
+
+### 6.1 Kuzatish va yuklash
+- `SvipeAvatarKeeper.onDialogPhotos(dialogId, photos)` allaqachon har profil ko'rilganda **tirik** ro'yxatni oladi → shu yerdan `POST /v1/avatars/observed` yuboriladi (tirik `photo_id` lar).
+- O'chirilganini aniqlash allaqachon bor: `SvipeProfileImages` = (ushlangan to'plam) − (tirik to'plam). Shu farq `deleted_photo_ids` sifatida yuboriladi.
+- Server `missing[]` qaytarsa → har biri uchun `upload-url` → **to'g'ridan-to'g'ri R2 ga PUT** → `commit`.
+- Yuklash **faqat Wi-Fi**da va navbat bilan (batareya/trafik); `SvipeReelQueue`/`SvipeUpdater` dagi navbat naqshini qayta ishlatish.
+
+### 6.2 Ko'rsatish
+- Profil ochilganda: `GET /v1/avatars/{tg_id}?proof_photo_id=<hozir ko'rinayotgan>` → arxiv ro'yxati.
+- Kelgan rasmlar lokal `SvipeAvatarStore` ga qo'shiladi (bir xil `photo_id` — dedup tabiiy) va **Profil rasmlari** tab'ida hozirgidek chiqadi.
+- Manba farqlanmaydi (lokal ushlangan/serverdan kelgan) — foydalanuvchi uchun bir xil.
+
+### 6.3 Sozlamalar UI
+- Settings ichida: "Profil rasmlarim" → `everyone` / `nobody` / **"Meni arxivlamang"** (opt-out, arxivni o'chiradi).
+- Sinxronni butunlay o'chirish tugmasi (lokal ushlash qoladi).
+
+### 6.4 Yangi/tegiladigan fayllar
+| Fayl | O'zgarish |
+|---|---|
+| `svipe/SvipeAvatarSync.java` | **YANGI** — observed/upload/commit/fetch navbati, Wi-Fi gate, throttle |
+| `svipe/SvipeAvatarKeeper.java` | `onDialogPhotos` dan sync'ga xabar berish (bir qator) |
+| `svipe/SvipeProfileImages.java` | Serverdan kelgan yozuvlarni birlashtirish |
+| `svipe/SvipeApi.java` | Presigned URL ga **binary PUT** qo'shish (hozir faqat JSON) |
+| `svipe/SvipeConfig.java` | Sync pref kalitlari |
+| Settings ekrani | Visibility + opt-out UI |
+| strings en/uz/ru | `checkSvipeStrings` majburiy |
+
+---
+
+## 7. Huquqiy / siyosat
+
+- **Maxfiylik siyosati** (`app/privacy.py` mavjud) yangilanadi: nima saqlanadi, qancha, kim ko'radi, qanday o'chiriladi.
+- **Takedown yo'li:** har kim (Svipe useri bo'lmasa ham) o'z rasmlarini o'chirishni so'ray oladigan aloqa kanali.
+- **Saqlash muddati:** o'chgan rasm abadiy emas — masalan 12 oy TTL (ochiq savol).
+- Play Store User Data siyosati: ma'lumot to'plash deklaratsiyasi yangilanadi.
+- Bu feature odam ataylab o'chirgan rasmni saqlaydi — ruxsat qatlamlari xavfni kamaytiradi, **nolga tushirmaydi**. Bu ongli qaror sifatida qabul qilingan.
+
+---
+
+## 8. Bosqichlar
+
+1. ~~**Backend poydevor**~~ — ✅ **BAJARILDI 2026-07-26** (commit `3a4e145`, `dev` branch, dev'da tirik). Batafsil §11.
+2. **Klient yuklash** — `SvipeAvatarSync` (observed + o'chganlarni yuklash), Wi-Fi gate. Ikki emulyatorda tekshirish: A ushlaydi → serverda paydo bo'ladi.
+3. **Klient ko'rsatish** — `GET /v1/avatars/{id}` + isbot, Profil rasmlari tab'iga birlashtirish. E2E: A ushlagan rasm C da ko'rinadi.
+4. **Ruxsat va sozlamalar** — visibility UI, opt-out (arxivni o'chirish), Qatlam-1/Qatlam-2 mantiqi, audit log.
+5. **Siyosat + release** — privacy sahifasi, Play deklaratsiyasi, dev→prod, `.web` release.
+
+---
+
+## 9. Xavflar
+
+- **Isbot mexanizmi yumshoq** — o'zgartirilgan klient chetlab o'tishi mumkin. Rate-limit + audit bilan cheklanadi, butunlay yopilmaydi.
+- **Eski kontakt** — ilgari ruxsati bor odam eski `photo_id` bilan so'rashi mumkin (tirik-to'plam TTL bilan kamaytiriladi).
+- **Zaharlash** — soxta rasm yuklash (§5.3 chora).
+- **Hajm o'sishi kutilganidan tez** bo'lsa — R2 narxi baribir arzon, lekin monitoring kerak.
+- **Trafik** — R2 egress bepul, lekin klient tomonda mobil trafik: Wi-Fi gate majburiy.
+
+## 10. Ochiq savollar
+
+1. ~~Standart visibility~~ → **HAL QILINDI (owner, 2026-07-26): `everyone`**, Telegram'ning o'z standarti kabi. Shart: Qatlam 1 faqat cheklaydi, Telegram-gate'ni kengaytirmaydi (§4).
+2. Arxiv saqlash muddati (TTL): 12 oy? cheksiz?
+3. Yuklashni faqat Wi-Fi bilan cheklashmi yoki foydalanuvchiga tanlov?
+4. v1 da faqat rasm, keyin video-avatar ham qo'shiladimi?
+5. Bir rasmni necha mustaqil kuzatuvchi tasdiqlasa "ishonchli" deb hisoblaymiz (zaharlashga qarshi)?
+
+---
+
+## 11. 1-bosqich — bajarilgan ish (2026-07-26)
+
+Backend `dev` branch'ida, `lavha-dev.abdinazarov.uz` da tirik. Commit `3a4e145`.
+
+### Nima yozildi
+| Fayl | Mazmuni |
+|---|---|
+| `app/db/models.py` | 4 jadval: `avatar_subject`, `avatar_photo`, `avatar_live`, `avatar_access_log` (rejadagidek + `status`, `kind` ustunlari) |
+| `app/db/avatar_repo.py` | Barcha yozuvlar idempotent upsert; ruxsat qarori bu yerda EMAS |
+| `app/api/avatars.py` | `observed` / `upload-url` / `commit` / `GET {subject}` / `me/settings` / `DELETE me` / `blob` |
+| `app/stores/blobstore.py` | R2 (SigV4 qo'lda, botocore bilan solishtirib tekshirilgan) + `local` dev backend |
+| `app/config.py`, `.env.example` | `LAVHA_AVATAR_*`, `LAVHA_R2_*` |
+| `tools/provision_r2.py` | Bucket + lifecycle + R2 kaliti + `.env` — bitta buyruqda |
+| `tools/integration_db.sh` | Dev serverda bir martalik Postgres ko'tarib DB testlarini yuritadi |
+| `tools/avatar_e2e.py` | Tirik muhitga qarshi 13 qadamlik E2E |
+
+### Rejaga nisbatan qo'shilgan qarorlar
+- **`local` blob backend.** R2 bucket hali yo'q (quyida), lekin dev'da butun oqim tekshirilishi kerak edi. Klient protokoli bir xil (presigned URL ga PUT/GET) — mobil kod bir marta yoziladi, prod'da faqat `LAVHA_AVATAR_STORAGE=r2` bo'ladi.
+- **boto3 EMAS.** SigV4 stdlib `hmac` bilan yozildi (~80 qator) va botocore'ning o'zi bilan bayt-ma-bayt solishtirildi (PUT/GET presign + HEAD/DELETE header — 4/4 mos). boto3 ~50 MB bog'liqlik olib kelardi va sinxron.
+- **Rate-limit `avatar_access_log` ustida** (Redis emas): restart'dan omon qoladi va audit bilan bir xil manba.
+- **Rad etish ham commit qilinadi** (`_deny`). `get_session` xatolikda rollback qiladi — busiz har bir rad etish o'z audit yozuvini ham, rate-limit hisobini ham o'chirib yuborardi.
+- **`photo_id` bitta odamniki.** Boshqa `subject_tg_id` ostiga yozishga urinish 400 bilan rad etiladi; `sha256` birinchi yuklovchida qotib qoladi (zaharlashga qarshi arzon yarmi).
+
+### Tekshiruv
+- To'liq suite: **351 passed, 30 skipped** (yangi 21 unit test).
+- DB testlari (`tools/integration_db.sh`, haqiqiy Postgres): **7/7**.
+- Dev deploy'ga qarshi E2E (`tools/avatar_e2e.py`): **13/13 PASS** — B ushlaydi → yuklaydi → C isbot bilan oladi va **baytlar aynan bir xil qaytadi**; isbotsiz/xato isbot bilan 403; `nobody` haqiqiy isbotni ham yengadi; opt-out arxivni ham, baytlarni ham o'chiradi.
+
+### ⚠️ Qolgan yagona qo'lda qadam: R2 kaliti
+Handoff'dagi Cloudflare token faqat **DNS** uchun — R2 ni umuman ko'rmaydi (tekshirildi: `Authentication error`). Birinchi kalitni faqat dashboard'da yasash mumkin (yoki Global API Key bilan) — buni skript qila olmaydi. Undan keyingisi avtomatik:
+
+```bash
+# Cloudflare dashboard -> My Profile -> API Tokens -> Create Token
+#   ruxsat: "Workers R2 Storage: Edit" (+ istasa "User API Tokens: Edit")
+CF_API_TOKEN=<yangi token> tools/provision_r2.py --bucket svipe-avatars \
+    --write-env root@49.12.47.209:/home/main/lavha-dev --ssh-key ~/.ssh/lavha_deploy
+```
+
+Shu buyruq bucket'ni yaratadi, S3 kalitlarini oladi, `.env` ni yangilaydi va app'ni qayta ko'taradi. Undan keyin dev `local` dan `r2` ga o'tadi va prod uchun ham xuddi shu buyruq (`/home/main/svipe-prod`) ishlaydi.
+
+### Keyingi qadam
+2-bosqich: klient tomonda `SvipeAvatarSync` (observed + o'chganlarni yuklash, Wi-Fi gate) — mobil repo.
