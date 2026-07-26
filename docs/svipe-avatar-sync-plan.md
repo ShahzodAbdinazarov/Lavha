@@ -1,6 +1,6 @@
 # Svipe — Profil rasmlarini ilovalar aro sinxronlash (reja)
 
-> Holat: **1–3-BOSQICH BAJARILDI** (2026-07-26) — backend dev'da tirik (§11), klient yuklaydi (§12) va o'qiydi (§13). 4–5-bosqichlar hali qilinmagan.
+> Holat: **1–4-BOSQICH BAJARILDI** (2026-07-26) — backend dev'da tirik (§11), klient yuklaydi (§12), o'qiydi (§13) va sozlamalari bor (§14). Faqat 5-bosqich (siyosat + prod) qoldi.
 > Asos: mavjud [[profile-images-feature]] — lokal avatar-keeper (`SvipeAvatarStore` + `SvipeAvatarKeeper`).
 > Repolar: mobil `~/StudioProjects/Lavha`, backend `~/StudioProjects/svipe-backend`.
 
@@ -170,7 +170,7 @@ Hammasi `CurrentUserDep` bilan himoyalangan.
 1. ~~**Backend poydevor**~~ — ✅ **BAJARILDI 2026-07-26** (commit `3a4e145`, `dev` branch, dev'da tirik). Batafsil §11.
 2. ~~**Klient yuklash**~~ — ✅ **BAJARILDI 2026-07-26** (commit `b61d755`, mobil `dev`). Batafsil §12.
 3. ~~**Klient ko'rsatish**~~ — ✅ **BAJARILDI 2026-07-26** (commit `a564363`, mobil `dev`). Batafsil §13.
-4. **Ruxsat va sozlamalar** — visibility UI, opt-out (arxivni o'chirish), Qatlam-1/Qatlam-2 mantiqi, audit log.
+4. ~~**Ruxsat va sozlamalar**~~ — ✅ **BAJARILDI 2026-07-26** (commit `1abc8d4`, mobil `dev`). Batafsil §14.
 5. **Siyosat + release** — privacy sahifasi, Play deklaratsiyasi, dev→prod, `.web` release.
 
 ---
@@ -295,3 +295,39 @@ Mobil `dev`, commit `a564363`. Halqa yopildi: ushlangan rasm serverga chiqadi va
 
 ### Keyingi qadam
 4-bosqich: visibility/opt-out sozlamalari UI (`everyone` / `nobody` / "meni arxivlamang") + sync'ni o'chirish tugmasi; strings en/uz/ru (`checkSvipeStrings` majburiy).
+
+---
+
+## 14. 4-bosqich — ruxsat va sozlamalar UI (2026-07-26)
+
+Mobil `dev`, commit `1abc8d4`. Emulyatorda dev backend'ga qarshi tekshirilgan.
+
+### Qayerda
+**Settings → Privacy and Security → "Profile photo archive"** — Telegram'ning o'z "Profile Photos" qatori ostida, chunki bu o'sha savolning bir qatlam davomi. Qator qiymati qo'shnilari kabi joriy tanlovni ko'rsatadi (lokal kesh; server manba bo'lib qoladi).
+
+### Ekran (`SvipeAvatarSettingsActivity`)
+| Bo'lim | Nima |
+|---|---|
+| Arxivdagi rasmlarimni kim ko'radi | Radio: **Hamma** / **Hech kim** / **Rasmlarimni arxivlamang** — qiymat **serverda** saqlanadi (boshqa odamlarning qurilmalaridan kelgan so'rovlarga ta'sir qilishi kerak) |
+| Izoh | "Faqat Telegram allaqachon ruxsat bergan odamlarga ko'rinadi; bu sozlama faqat toraytiradi, kengaytirmaydi" |
+| Sinxronlash | 2 ta lokal switch: "Saqlagan rasmlarimni ulashish" + "Faqat Wi-Fi orqali yuklash" (ikkinchisi birinchisiga bog'liq, o'chsa kulrang bo'ladi) |
+| O'chirish | "Arxivdagi rasmlarimni o'chirish" — **sonini ko'rsatadi**, tasdiq so'raydi |
+
+- "Rasmlarimni arxivlamang" — haqiqiy opt-out: mavjud arxivni ham o'chiradi, shuning uchun oldin tasdiq so'raladi.
+- Switch'lar **lokal ushlashga tegmaydi** — o'chirsang ham Profil rasmlari tabi ishlayveradi, faqat ulashish to'xtaydi.
+- Ekran ilovaning **o'z cell'laridan** qurilgan (`HeaderCell`/`RadioCell`/`TextCheckCell`/`TextSettingsCell`/`TextInfoPrivacyCell`), ya'ni boshqa sozlama ekranlariga taqlid emas, o'zi.
+
+### Strings
+`SvipeAvatar*` kalitlari en/uz/ru da — `checkSvipeStrings`: **109 kalit, hammasi uch tilda, kodda qattiq yozilgan matn yo'q**.
+
+### Tekshiruv (svipe_test emulyator → lavha-dev)
+- Ekran ochilganda joriy qiymat serverdan yuklandi (`everyone`, arxiv 0).
+- **Hech kim** → `avatar_subject.visibility = nobody` ✓
+- **Rasmlarimni arxivlamang** → tasdiq oynasi → `visibility = off` ✓
+- **Hamma** → `visibility = everyone` ✓
+- Master switch o'chirildi → pref `svipe_avatar_sync=false`, Wi-Fi qatori kulrang/bosilmas ✓
+- Privacy qatorida qiymat "Everyone" bo'lib chiqdi ✓
+- Test qatorlari tozalandi.
+
+### Keyingi qadam
+5-bosqich: maxfiylik siyosati (`app/privacy.py`), Play Store data-safety deklaratsiyasi, takedown kanali, R2 ulash, dev→prod va `.web` release.
