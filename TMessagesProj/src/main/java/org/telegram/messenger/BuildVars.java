@@ -29,8 +29,8 @@ public class BuildVars {
     public static int APP_ID = BuildConfig.APP_ID;
     public static String APP_HASH = BuildConfig.APP_HASH;
 
-    // SafetyNet key for Google Identity SDK, set it to empty to disable
-    public static String SAFETYNET_KEY = "AIzaSyDqt8P-7F7CPCseMkOiVRgb1LY8RN1bvH8";
+    // SafetyNet is gone (see LoginActivity): Google shut the API down and its key here was
+    // upstream Telegram's anyway, so it never authenticated anything for uz.svipe.app.
     public static String PLAYSTORE_APP_URL = "https://play.google.com/store/apps/details?id=uz.svipe.app";
     public static String HUAWEI_STORE_URL = "https://appgallery.huawei.com/app/C101184875";
     public static String GOOGLE_AUTH_CLIENT_ID = "760348033671-81kmi3pi84p11ub8hp9a1funsv0rn2p9.apps.googleusercontent.com";
