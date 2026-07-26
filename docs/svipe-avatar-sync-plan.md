@@ -1,6 +1,6 @@
 # Svipe — Profil rasmlarini ilovalar aro sinxronlash (reja)
 
-> Holat: **1–5-BOSQICH BAJARILDI** (2026-07-26). Backend **prod'da** (§16), lekin **feature O'CHIRILGAN** — R2 kaliti kelmaguncha (§11 oxiri). Mobil release ushlab turilibdi.
+> Holat: **1–5-BOSQICH BAJARILDI**. Backend **prod'da va YOQILGAN**, R2 ulangan (§17). Qolgani — **mobil release** (.web / Play).
 > Asos: mavjud [[profile-images-feature]] — lokal avatar-keeper (`SvipeAvatarStore` + `SvipeAvatarKeeper`).
 > Repolar: mobil `~/StudioProjects/Lavha`, backend `~/StudioProjects/svipe-backend`.
 
@@ -389,3 +389,31 @@ Backend prod'da (`main` `3f1f7cd`), lekin **`LAVHA_AVATAR_SYNC_ENABLED=false`**:
 ### Ushlab turilgan ish
 - **R2 kaliti** (owner dashboard'dan yasashi kerak) — §11 oxiridagi buyruq.
 - **Mobil release** (.web / Play) — storage yo'q ekan, feature ishlamaydi; kalit ulangach chiqariladi.
+
+---
+
+## 17. R2 ulandi — prod tirik (2026-07-27)
+
+Owner Cloudflare'da R2 ni yoqdi va "Workers R2 Storage: Edit" tokenini berdi; qolgani skript bilan.
+
+| Narsa | Qiymat |
+|---|---|
+| Bucket | `svipe-avatars` (account `04e2c954…`, location `EEUR`, jurisdiction `default`) |
+| Endpoint | `https://04e2c954c0d03462797bcb0f72543335.r2.cloudflarestorage.com` |
+| S3 kalitlari | R2 tokendan olindi (access key = token id, secret = token qiymatining SHA-256 i) |
+| Kreditsiallar | `docs/handoff/SVIPE_HANDOFF.md` (git'ga kirmaydi) |
+
+### Yo'lda chiqqan ikki narsa
+1. **R2 endpointi darrov ishlamadi** — akkaunt hosti TLS handshake'ni rad etdi (SNI uchun sertifikat yo'q; uch xil tarmoqdan bir xil). R2 yoqilgandan ~3 daqiqa keyin o'zi ochildi. Kelajakda shu holat bo'lsa: `curl -o /dev/null -w '%{http_code}' https://<account>.r2.cloudflarestorage.com/` → `000` = hali tayyor emas, `400` = tayyor.
+2. **`provision_r2.py --write-env` dev'ni sindirdi** — compose image'ni `${TAG:-latest}` deb yechadi, skript esa `TAG` bermagan edi, natijada lavha-dev o'sha qutidagi eski `:latest` ga o'tib ketdi va avatar route'lari yo'qoldi. Tuzatildi (`--tag`), dev qaytarildi. **Dars:** bu deploy dir'larda konteynerni qayta ko'tarishda `TAG` ni har doim ber (dev = `dev`, prod = `latest`).
+
+### Tekshiruv (haqiqiy R2 bilan)
+- Bevosita imzo sinovi: presigned PUT → **200**, HEAD → 19 bayt, presigned GET → **bayt-ma-bayt bir xil**, DELETE → yo'q. Ya'ni qo'lda yozilgan SigV4 haqiqiy R2 bilan ishlaydi.
+- **Dev E2E: 13/13** · **PROD E2E: 13/13** (`tools/avatar_e2e.py`) — yuklash to'g'ridan-to'g'ri R2 ga, o'qish presigned GET bilan, opt-out R2 obyektini ham o'chiradi.
+- Test qatorlari va obyektlari tozalandi (prod: 0 qator, bucket'da test obyekti yo'q).
+
+### Prod .env
+`LAVHA_AVATAR_SYNC_ENABLED=true`, `LAVHA_AVATAR_STORAGE=r2`, `LAVHA_R2_*` to'ldirilgan.
+
+### Qolgan yagona ish
+**Mobil release** — `.web` (standalone) va Play uchun AAB. Backend tayyor va tirik; ilova chiqarilgandan keyin feature foydalanuvchilarga ishlay boshlaydi.
