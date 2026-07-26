@@ -168,7 +168,7 @@ Hammasi `CurrentUserDep` bilan himoyalangan.
 ## 8. Bosqichlar
 
 1. ~~**Backend poydevor**~~ — ✅ **BAJARILDI 2026-07-26** (commit `3a4e145`, `dev` branch, dev'da tirik). Batafsil §11.
-2. **Klient yuklash** — `SvipeAvatarSync` (observed + o'chganlarni yuklash), Wi-Fi gate. Ikki emulyatorda tekshirish: A ushlaydi → serverda paydo bo'ladi.
+2. ~~**Klient yuklash**~~ — ✅ **BAJARILDI 2026-07-26** (commit `b61d755`, mobil `dev`). Batafsil §12.
 3. **Klient ko'rsatish** — `GET /v1/avatars/{id}` + isbot, Profil rasmlari tab'iga birlashtirish. E2E: A ushlagan rasm C da ko'rinadi.
 4. **Ruxsat va sozlamalar** — visibility UI, opt-out (arxivni o'chirish), Qatlam-1/Qatlam-2 mantiqi, audit log.
 5. **Siyosat + release** — privacy sahifasi, Play deklaratsiyasi, dev→prod, `.web` release.
@@ -235,3 +235,35 @@ Shu buyruq bucket'ni yaratadi, S3 kalitlarini oladi, `.env` ni yangilaydi va app
 
 ### Keyingi qadam
 2-bosqich: klient tomonda `SvipeAvatarSync` (observed + o'chganlarni yuklash, Wi-Fi gate) — mobil repo.
+
+---
+
+## 12. 2-bosqich — klient yuklash (2026-07-26)
+
+Mobil `dev` branch, commit `b61d755`. Emulyatorda dev backend'ga qarshi tekshirilgan.
+
+### Nima yozildi
+| Fayl | Mazmuni |
+|---|---|
+| `svipe/SvipeAvatarSync.java` | **YANGI** — har profil ko'rilganda tirik + o'chgan id larni xabar qiladi, `missing[]` ni yuklaydi (upload-url → PUT → commit) |
+| `svipe/SvipeApi.java` | `putFile()` — absolut presigned URL ga oqim bilan PUT (**bearer YO'Q** — imzoning o'zi ruxsat) + `RawCallback` |
+| `svipe/SvipeAvatarKeeper.java` | Bir qator ulanish (lokal ushlash bilan bir xil seam) |
+| `svipe/SvipeConfig.java` | `PREF_AVATAR_SYNC` (standart yoqiq), `PREF_AVATAR_SYNC_WIFI_ONLY` (standart yoqiq) |
+| `test/.../SvipeAvatarSyncTest.java` | 6 test: to'liqlik sharti, o'chganlar farqi, signature, throttle, yuklash tanlash/cheklash |
+
+### Ikki muhim qoida (kod ichida)
+1. **O'chganini taxmin qilmaymiz.** Telegram rasmlar ro'yxatini sahifalab beradi va modelda yuklanmagan sahifalar o'rniga `null` turadi — ya'ni id yo'qligi ko'pincha "hali kelmagan" degani, "o'chirilgan" emas. Shuning uchun o'chirish faqat ro'yxat **isbotlangan to'liq** bo'lganda xabar qilinadi (`liveSetComplete`: `loaded && !fromCache && slots == loadedPhotos`). Tab taxmin ko'rsatishi mumkin, yuklash — yo'q.
+2. **Kam xabar, xushmuomala yuklash.** Har subject uchun signature + 6 soat oralig'i → o'sha profilni qayta ochish jim; haqiqiy o'zgarish esa darhol ketadi. Yuklash: faqat Wi-Fi (standart), bir ko'rishda ko'pi bilan 3 ta, birin-ketin.
+
+### Tekshiruv (svipe_test emulyator → lavha-dev)
+- Kontakt profili ochildi → `avatar_subject` da so'rovchi (`everyone`) + shadow-user (visibility NULL), `avatar_live` da 3 ta tirik id, `avatar_access_log` da `observe/granted`.
+- Ushlangan-so'ng-o'chgan rasm holati yaratilib qayta ochildi → `upload-url` → PUT → `commit`: qator `stored`, 41680 bayt, `uploaded_by` = so'rovchi.
+- **Serverdagi blob qurilmadagi fayl bilan bayt-ma-bayt bir xil** (sha256 `c174d14e57ec…`).
+- Rasmsiz profil ochilganda hech narsa yuborilmadi (to'g'ri: xabar qilishga narsa yo'q).
+- Test qatorlari va bloblari tozalandi; qurilmadagi soxta yozuv qaytarildi.
+
+### Eslatma
+Yuklash standart holatda **yoqiq**, lekin UI hali yo'q — foydalanuvchiga ko'rinadigan sozlama 4-bosqichda, maxfiylik matni 5-bosqichda qo'shiladi. Hozircha bu faqat beta build'da (dev backend) ishlaydi.
+
+### Keyingi qadam
+3-bosqich: `GET /v1/avatars/{id}` + isbot bilan o'qish va Profil rasmlari tab'iga birlashtirish — A ushlagan rasm C da ko'rinsin.
