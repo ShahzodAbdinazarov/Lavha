@@ -50,6 +50,7 @@ Muammo: rasm egasi Svipe ishlatmasa, uning Telegram maxfiylik sozlamasini bilmay
 Uning **o'z sozlamasi** serverda saqlanadi. **MUHIM: bu sozlama faqat CHEKLAYDI, hech qachon KENGAYTIRMAYDI** — ya'ni Qatlam 2 (Telegram-gate) har doim ustidan qo'llaniladi. Aks holda Svipe o'rnatgan odam Telegram'dagidan ko'proq ochilib qolardi.
 
 - **`everyone` — STANDART** (Telegram'ning o'zida ham profil rasmi standarti "Everybody"). Qo'shimcha cheklov yo'q → Telegram ruxsati qanday bo'lsa shunday: egasi "faqat kontaktlarga" qo'ygan bo'lsa, arxivni ham faqat kontaktlar ko'radi.
+- `contacts` — faqat mening kontaktlarim (2026-07-26 da qo'shildi, §15). Isbot ustidan **qo'shimcha** toraytirish: kontakt bo'lish isbotni almashtirmaydi.
 - `nobody` — hech kimga, kontaktlarga ham berilmaydi.
 - `off` (opt-out) — **umuman arxivlanmaydi**, mavjud arxivi o'chiriladi.
 
@@ -331,3 +332,31 @@ Mobil `dev`, commit `1abc8d4`. Emulyatorda dev backend'ga qarshi tekshirilgan.
 
 ### Keyingi qadam
 5-bosqich: maxfiylik siyosati (`app/privacy.py`), Play Store data-safety deklaratsiyasi, takedown kanali, R2 ulash, dev→prod va `.web` release.
+
+---
+
+## 15. "Kontaktlarim" varianti (2026-07-26)
+
+Backend `a49456f`, mobil `1fb282b`. Owner so'rovi bilan qo'shildi — dastlab qoldirilgan edi.
+
+### Nega alohida ma'lumot kerak
+"Bu so'rovchi subject'ning kontaktimi?" degan savolga **boshqa hech narsa javob bera olmaydi**: Telegram uchinchi tomonga kontakt ro'yxatini aytmaydi, so'rovchining o'z da'vosi esa aynan hujumchi aytadigan gap. Shuning uchun javob **subject'ning o'z qurilmasidan** keladi.
+
+### Narxi ochiq aytilgan
+Bu — feature'ning **ijtimoiy graf saqlaydigan yagona joyi**. Shuning uchun imkon qadar tor:
+- faqat `contacts` tanlangan paytda yoziladi (`PUT /v1/avatars/me/contacts` boshqa holatda **409**);
+- butunlay almashtiriladi (tarix yo'q);
+- boshqa variant tanlansa / opt-out / arxiv o'chirilsa — **darhol o'chiriladi** (`set_visibility` ichida);
+- faqat **id lar** — ism, telefon va boshqa hech narsa emas; server chegarasi 5000.
+
+**Xeshlanmaydi — ataylab.** Telegram id maydoni kichik va sanab chiqiladigan, ya'ni har qanday xesh brute-force bilan qaytariladi: himoya ko'rinishini beradi-yu, bermaydi, faqat ma'lumotni **bizning o'zimiz** uchun audit qilish va o'chirishni qiyinlashtiradi.
+
+### Mantiq
+`decide_access`: `contacts` — isbot **ustidan** toraytirish. Kontakt bo'lish isbotni almashtirmaydi (`no_proof`), isbot esa kontakt emaslikni yengmaydi (`not_contact`).
+
+### UI
+Radio ro'yxatida "Kontaktlarim" (Hamma dan keyin). Tanlashdan **oldin** dialog nima yuborilishini ochiq aytadi. Strings en/uz/ru — guard: 111 kalit.
+
+### Tekshiruv
+- Haqiqiy Postgres: 8/8 integration (yangi to'liq kontakt ssenariysi bilan) + 355 unit.
+- Emulyator → dev: "Kontaktlarim" tanlandi → **430 ta kontakt id yozildi**, `visibility=contacts`; "Hamma" ga qaytarildi → **0 qator qoldi**.
