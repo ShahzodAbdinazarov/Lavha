@@ -67,6 +67,9 @@ public class SvipeAvatarKeeper implements NotificationCenter.NotificationCenterD
             return;
         }
         final long userId = dialogId;
+        // Same seam feeds the shared archive: report what is live and what has gone (SvipeAvatarSync).
+        // Called here on the UI thread because it has to read the UI-owned DialogPhotos model.
+        SvipeAvatarSync.onProfileSeen(account, userId);
         final ArrayList<TLRPC.Photo> snapshot = new ArrayList<>(photos);
         Utilities.globalQueue.postRunnable(() -> {
             for (TLRPC.Photo photo : snapshot) {

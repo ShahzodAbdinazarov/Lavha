@@ -66,4 +66,42 @@ public class SvipeConfig {
             // best-effort
         }
     }
+
+    // ---- Avatar archive sync (SvipeAvatarSync): pooling DELETED profile photos across Svipe apps ----
+    // Local capture (SvipeAvatarKeeper) is independent of these and keeps working with sync off.
+    public static final String PREF_AVATAR_SYNC = "svipe_avatar_sync";
+    public static final String PREF_AVATAR_SYNC_WIFI_ONLY = "svipe_avatar_sync_wifi_only";
+
+    public static boolean isAvatarSyncEnabled(int account) {
+        try {
+            return MessagesController.getMainSettings(account).getBoolean(PREF_AVATAR_SYNC, true);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static void setAvatarSyncEnabled(int account, boolean on) {
+        try {
+            MessagesController.getMainSettings(account).edit().putBoolean(PREF_AVATAR_SYNC, on).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
+    /** Uploads are metered traffic on someone else's behalf, so they default to Wi-Fi only. */
+    public static boolean isAvatarSyncWifiOnly(int account) {
+        try {
+            return MessagesController.getMainSettings(account).getBoolean(PREF_AVATAR_SYNC_WIFI_ONLY, true);
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    public static void setAvatarSyncWifiOnly(int account, boolean on) {
+        try {
+            MessagesController.getMainSettings(account).edit().putBoolean(PREF_AVATAR_SYNC_WIFI_ONLY, on).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
 }

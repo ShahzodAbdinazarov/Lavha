@@ -20,6 +20,11 @@ public class SvipeApi {
         void run(JSONObject result, int httpCode, String error);
     }
 
+    /** Result of a raw (non-JSON) transfer such as a presigned upload. */
+    public interface RawCallback {
+        void run(int httpCode, String error);
+    }
+
     public static void get(String path, String bearer, JsonCallback cb) {
         request("GET", path, null, bearer, cb);
     }
@@ -30,6 +35,52 @@ public class SvipeApi {
 
     public static void delete(String path, String bearer, JsonCallback cb) {
         request("DELETE", path, null, bearer, cb);
+    }
+
+    /**
+     * PUT a file to an ABSOLUTE, already-signed URL — the presigned upload the backend hands out for
+     * the avatar archive. Deliberately unlike the calls above: no base-url prefix and no bearer, since
+     * the signature in the URL is the whole authorization and storage would reject a stray auth header.
+     * Streams from disk with a fixed length, so a large photo never has to sit in memory.
+     */
+    public static void putFile(String absoluteUrl, java.io.File file, String contentType, RawCallback cb) {
+        Utilities.globalQueue.postRunnable(() -> {
+            HttpURLConnection conn = null;
+            try {
+                conn = (HttpURLConnection) new URL(absoluteUrl).openConnection();
+                conn.setRequestMethod("PUT");
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(60000);
+                conn.setDoOutput(true);
+                conn.setFixedLengthStreamingMode(file.length());
+                if (contentType != null) {
+                    conn.setRequestProperty("Content-Type", contentType);
+                }
+                java.io.FileInputStream in = new java.io.FileInputStream(file);
+                java.io.OutputStream out = conn.getOutputStream();
+                try {
+                    byte[] buf = new byte[16384];
+                    int n;
+                    while ((n = in.read(buf)) != -1) {
+                        out.write(buf, 0, n);
+                    }
+                    out.flush();
+                } finally {
+                    try { in.close(); } catch (Exception ignore) {}
+                    try { out.close(); } catch (Exception ignore) {}
+                }
+                final int code = conn.getResponseCode();
+                AndroidUtilities.runOnUIThread(() -> cb.run(code, null));
+            } catch (Exception e) {
+                FileLog.e(e);
+                final String err = e.getMessage();
+                AndroidUtilities.runOnUIThread(() -> cb.run(0, err));
+            } finally {
+                if (conn != null) {
+                    try { conn.disconnect(); } catch (Exception ignore) {}
+                }
+            }
+        });
     }
 
     private static void request(String method, String path, JSONObject body, String bearer, JsonCallback cb) {
