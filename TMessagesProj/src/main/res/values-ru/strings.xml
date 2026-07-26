@@ -283,6 +283,8 @@
     <string name="SvipeAvatarArchive">Архив фото профиля</string>
     <string name="SvipeAvatarVisibilityHeader">Кто видит мои архивные фото</string>
     <string name="SvipeAvatarVisibilityEveryone">Все</string>
+    <string name="SvipeAvatarVisibilityContacts">Мои контакты</string>
+    <string name="SvipeAvatarContactsConfirm">Чтобы проверять, кто у вас в контактах, Svipe должен хранить на сервере список Telegram ID ваших контактов. Он удаляется, как только вы выберете другой вариант.</string>
     <string name="SvipeAvatarVisibilityNobody">Никто</string>
     <string name="SvipeAvatarVisibilityOff">Не архивировать мои фото</string>
     <string name="SvipeAvatarVisibilityInfo">Архивные фото показываются только тем, кому Telegram и так разрешает видеть ваше текущее фото профиля. Эта настройка может только сузить круг, но не расширить его.</string>

@@ -20,6 +20,8 @@
     <string name="SvipeAvatarArchive">Profil rasmlari arxivi</string>
     <string name="SvipeAvatarVisibilityHeader">Arxivdagi rasmlarimni kim ko\'ra oladi</string>
     <string name="SvipeAvatarVisibilityEveryone">Hamma</string>
+    <string name="SvipeAvatarVisibilityContacts">Kontaktlarim</string>
+    <string name="SvipeAvatarContactsConfirm">Kim kontaktingiz ekanini tekshirish uchun Svipe kontaktlaringizning Telegram ID lari ro\'yxatini serverida saqlashi kerak. Boshqa variantni tanlashingiz bilan u o\'chiriladi.</string>
     <string name="SvipeAvatarVisibilityNobody">Hech kim</string>
     <string name="SvipeAvatarVisibilityOff">Rasmlarimni arxivlamang</string>
     <string name="SvipeAvatarVisibilityInfo">Arxivdagi rasmlaringiz faqat Telegram allaqachon joriy profil rasmingizni ko\'rishga ruxsat bergan odamlarga ko\'rinadi. Bu sozlama uni faqat toraytiradi, hech qachon kengaytirmaydi.</string>

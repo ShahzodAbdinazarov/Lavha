@@ -39,6 +39,9 @@ public class SvipeAvatarSettingsActivity extends BaseFragment {
 
     /** Localized name of a visibility value — shared with the Privacy &amp; Security row. */
     public static String visibilityLabel(String visibility) {
+        if (SvipeAvatarSync.VISIBILITY_CONTACTS.equals(visibility)) {
+            return LocaleController.getString(R.string.SvipeAvatarVisibilityContacts);
+        }
         if (SvipeAvatarSync.VISIBILITY_NOBODY.equals(visibility)) {
             return LocaleController.getString(R.string.SvipeAvatarVisibilityNobody);
         }
@@ -56,6 +59,7 @@ public class SvipeAvatarSettingsActivity extends BaseFragment {
 
     private int visibilityHeaderRow;
     private int everyoneRow;
+    private int contactsRow;
     private int nobodyRow;
     private int offRow;
     private int visibilityInfoRow;
@@ -71,6 +75,7 @@ public class SvipeAvatarSettingsActivity extends BaseFragment {
         rowCount = 0;
         visibilityHeaderRow = rowCount++;
         everyoneRow = rowCount++;
+        contactsRow = rowCount++;
         nobodyRow = rowCount++;
         offRow = rowCount++;
         visibilityInfoRow = rowCount++;
@@ -132,6 +137,11 @@ public class SvipeAvatarSettingsActivity extends BaseFragment {
     private void onRowClick(int position, View view) {
         if (position == everyoneRow) {
             applyVisibility(SvipeAvatarSync.VISIBILITY_EVERYONE);
+        } else if (position == contactsRow) {
+            // Say what it costs before it happens: this is the one choice that sends anything about
+            // other people to the server, and there is no way to check "is a contact" without it.
+            confirm(R.string.SvipeAvatarContactsConfirm, R.string.SvipeAvatarVisibilityContacts,
+                    () -> applyVisibility(SvipeAvatarSync.VISIBILITY_CONTACTS));
         } else if (position == nobodyRow) {
             applyVisibility(SvipeAvatarSync.VISIBILITY_NOBODY);
         } else if (position == offRow) {
@@ -179,6 +189,14 @@ public class SvipeAvatarSettingsActivity extends BaseFragment {
                 if (SvipeAvatarSync.VISIBILITY_OFF.equals(value)) {
                     archivedCount = 0;
                 }
+                if (SvipeAvatarSync.VISIBILITY_CONTACTS.equals(value)) {
+                    // Only after the server accepted the setting — it refuses the list otherwise.
+                    SvipeAvatarSync.uploadMyContacts(currentAccount, (v, stored, uploaded) -> {
+                        if (!uploaded) {
+                            toast(R.string.SvipeAvatarSettingsFailed);
+                        }
+                    });
+                }
             }
             adapter.notifyDataSetChanged();
         });
@@ -221,8 +239,8 @@ public class SvipeAvatarSettingsActivity extends BaseFragment {
             if (position == wifiRow) {
                 return SvipeConfig.isAvatarSyncEnabled(currentAccount);
             }
-            return position == everyoneRow || position == nobodyRow || position == offRow
-                    || position == syncRow || position == deleteRow;
+            return position == everyoneRow || position == contactsRow || position == nobodyRow
+                    || position == offRow || position == syncRow || position == deleteRow;
         }
 
         @Override
@@ -235,7 +253,8 @@ public class SvipeAvatarSettingsActivity extends BaseFragment {
             if (position == visibilityHeaderRow || position == syncHeaderRow) {
                 return 0;
             }
-            if (position == everyoneRow || position == nobodyRow || position == offRow) {
+            if (position == everyoneRow || position == contactsRow || position == nobodyRow
+                    || position == offRow) {
                 return 1;
             }
             if (position == syncRow || position == wifiRow) {
@@ -292,6 +311,9 @@ public class SvipeAvatarSettingsActivity extends BaseFragment {
                     if (position == everyoneRow) {
                         cell.setText(LocaleController.getString(R.string.SvipeAvatarVisibilityEveryone),
                                 SvipeAvatarSync.VISIBILITY_EVERYONE.equals(visibility), true);
+                    } else if (position == contactsRow) {
+                        cell.setText(LocaleController.getString(R.string.SvipeAvatarVisibilityContacts),
+                                SvipeAvatarSync.VISIBILITY_CONTACTS.equals(visibility), true);
                     } else if (position == nobodyRow) {
                         cell.setText(LocaleController.getString(R.string.SvipeAvatarVisibilityNobody),
                                 SvipeAvatarSync.VISIBILITY_NOBODY.equals(visibility), true);

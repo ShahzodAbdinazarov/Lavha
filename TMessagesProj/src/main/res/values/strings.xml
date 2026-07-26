@@ -10977,6 +10977,8 @@
     <string name="SvipeAvatarArchive">Profile photo archive</string>
     <string name="SvipeAvatarVisibilityHeader">Who can see my archived photos</string>
     <string name="SvipeAvatarVisibilityEveryone">Everyone</string>
+    <string name="SvipeAvatarVisibilityContacts">My contacts</string>
+    <string name="SvipeAvatarContactsConfirm">To check who is in your contacts, Svipe has to store the list of your contacts\' Telegram IDs on its server. It is deleted as soon as you pick another option.</string>
     <string name="SvipeAvatarVisibilityNobody">Nobody</string>
     <string name="SvipeAvatarVisibilityOff">Don\'t archive my photos</string>
     <string name="SvipeAvatarVisibilityInfo">Your archived photos are only ever shown to people Telegram already lets see your current profile photo. This setting can narrow that down, never widen it.</string>

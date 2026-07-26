@@ -4,6 +4,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
@@ -55,8 +56,11 @@ public class SvipeAvatarSync {
     // Server-side visibility values (app/db/avatar_repo.py VISIBILITIES). They only ever RESTRICT what
     // Telegram already allows — see the module docstring on the backend.
     public static final String VISIBILITY_EVERYONE = "everyone";
+    public static final String VISIBILITY_CONTACTS = "contacts";
     public static final String VISIBILITY_NOBODY = "nobody";
     public static final String VISIBILITY_OFF = "off";
+    /** Matches the server's cap; sending more would just be trimmed there. */
+    static final int MAX_CONTACTS = 5000;
     /** Matches the server's per-photo cap; a bigger file would only be rejected after we sent it. */
     static final long MAX_UPLOAD_BYTES = 5L * 1024 * 1024;
 
@@ -486,6 +490,51 @@ public class SvipeAvatarSync {
                 boolean ok = res != null && code >= 200 && code < 300;
                 cb.run(ok ? res.optString("visibility", visibility) : null,
                         ok ? res.optInt("deleted") : 0, ok);
+            });
+        });
+    }
+
+    /**
+     * Upload my contact ids — the only way "contacts only" can be checked at all, since Telegram never
+     * tells the server who is in my contacts and a requester's own claim proves nothing.
+     *
+     * <p>Sent only while that visibility is selected (the server rejects it otherwise) and dropped
+     * server-side the moment I choose anything else, so the list never outlives the setting that
+     * needs it. Ids only — no names, phone numbers or anything else from the contact card.
+     */
+    public static void uploadMyContacts(int account, SettingsCallback cb) {
+        final ArrayList<Long> ids = new ArrayList<>();
+        try {
+            ArrayList<TLRPC.TL_contact> contacts =
+                    new ArrayList<>(ContactsController.getInstance(account).contacts);
+            long self = UserConfig.getInstance(account).getClientUserId();
+            for (TLRPC.TL_contact c : contacts) {
+                if (c != null && c.user_id != 0 && c.user_id != self) {
+                    ids.add(c.user_id);
+                    if (ids.size() >= MAX_CONTACTS) {
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                cb.run(null, 0, false);
+                return;
+            }
+            JSONObject body = new JSONObject();
+            try {
+                body.put("contact_tg_ids", new JSONArray(ids));
+            } catch (Exception e) {
+                FileLog.e(e);
+                cb.run(null, 0, false);
+                return;
+            }
+            SvipeApi.put("/v1/avatars/me/contacts", body, token, (res, code, err) -> {
+                boolean ok = res != null && code >= 200 && code < 300;
+                cb.run(null, ok ? res.optInt("stored") : 0, ok);
             });
         });
     }
