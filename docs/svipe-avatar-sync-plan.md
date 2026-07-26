@@ -1,6 +1,6 @@
 # Svipe — Profil rasmlarini ilovalar aro sinxronlash (reja)
 
-> Holat: **1–2-BOSQICH BAJARILDI** (2026-07-26) — backend dev'da tirik (§11), klient ushlaganini yuklaydi (§12). 3–5-bosqichlar hali qilinmagan.
+> Holat: **1–3-BOSQICH BAJARILDI** (2026-07-26) — backend dev'da tirik (§11), klient yuklaydi (§12) va o'qiydi (§13). 4–5-bosqichlar hali qilinmagan.
 > Asos: mavjud [[profile-images-feature]] — lokal avatar-keeper (`SvipeAvatarStore` + `SvipeAvatarKeeper`).
 > Repolar: mobil `~/StudioProjects/Lavha`, backend `~/StudioProjects/svipe-backend`.
 
@@ -169,7 +169,7 @@ Hammasi `CurrentUserDep` bilan himoyalangan.
 
 1. ~~**Backend poydevor**~~ — ✅ **BAJARILDI 2026-07-26** (commit `3a4e145`, `dev` branch, dev'da tirik). Batafsil §11.
 2. ~~**Klient yuklash**~~ — ✅ **BAJARILDI 2026-07-26** (commit `b61d755`, mobil `dev`). Batafsil §12.
-3. **Klient ko'rsatish** — `GET /v1/avatars/{id}` + isbot, Profil rasmlari tab'iga birlashtirish. E2E: A ushlagan rasm C da ko'rinadi.
+3. ~~**Klient ko'rsatish**~~ — ✅ **BAJARILDI 2026-07-26** (commit `a564363`, mobil `dev`). Batafsil §13.
 4. **Ruxsat va sozlamalar** — visibility UI, opt-out (arxivni o'chirish), Qatlam-1/Qatlam-2 mantiqi, audit log.
 5. **Siyosat + release** — privacy sahifasi, Play deklaratsiyasi, dev→prod, `.web` release.
 
@@ -267,3 +267,31 @@ Yuklash standart holatda **yoqiq**, lekin UI hali yo'q — foydalanuvchiga ko'ri
 
 ### Keyingi qadam
 3-bosqich: `GET /v1/avatars/{id}` + isbot bilan o'qish va Profil rasmlari tab'iga birlashtirish — A ushlagan rasm C da ko'rinsin.
+
+---
+
+## 13. 3-bosqich — klient ko'rsatish (2026-07-26)
+
+Mobil `dev`, commit `a564363`. Halqa yopildi: ushlangan rasm serverga chiqadi va boshqa qurilmaga qaytadi.
+
+### Nima yozildi
+| Fayl | Mazmuni |
+|---|---|
+| `svipe/SvipeAvatarSync.java` | `fetchArchive()` — `GET /v1/avatars/{id}?proof_photo_id=…`, `pickDownloads()`, birin-ketin yuklab olish (bir ko'rishda 5 tagacha) |
+| `svipe/SvipeApi.java` | `getFile()` — presigned GET to'g'ridan-to'g'ri diskka, `.tmp` + rename (uzilgan yuklanish yarim rasm qoldirmaydi) |
+| `messenger/NotificationCenter.java` | `svipeAvatarArchiveUpdated` (akkaunt bo'yicha) |
+| `ui/Components/SharedMediaLayout.java` | Shu xabarda `updateTabs(false)` + adapter yangilash |
+
+### Uch qaror
+1. **Isbot — hozir ko'rinayotgan rasm id si.** Uni faqat Telegram ko'rsatgan odam ola oladi. Tirik rasm yo'q bo'lsa umuman so'ramaymiz (403 va bekorga log yozilmaydi). **O'z arxivimga isbot kerak emas** — yangi qurilmada o'z o'chgan rasmlarim shu yo'l bilan qaytadi.
+2. **Fetch `observed` dan KEYIN.** Biz endigina yuborgan tirik id lar serverdagi "tirik to'plam"ni yangilaydi — ya'ni o'z isbotimiz tekshiriluvchi bo'ladi. (Ma'lum cheklov: eski kontakt eski id ni qayta-qayta xabar qilib TTL ni cho'zishi mumkin — §4 dagi bir xil xavf, yopilmagan.)
+3. **Kelgan rasm lokal store'ga yoziladi**, ya'ni tab uchun "serverdan kelgan" degan tushuncha yo'q — `SvipeProfileImages` uni odatdagidek "Deleted" deb ko'rsatadi. Lekin tabning **ko'rinishi** shu songa bog'liq, shuning uchun yangilash `updateTabs` orqali: hamma rasmi o'chirilgan odamda tab umuman yo'q edi, havza javob bermaguncha.
+
+### Tekshiruv (svipe_test emulyator → lavha-dev)
+- Profil ochildi → `fetch / granted=t / reason=ok` (haqiqiy isbot bilan).
+- Rasm lokal o'chirildi (fayl + ledger) → profil qayta ochildi → **havzadan bayt-ma-bayt qaytdi** (41680) va ledger'ga yozildi.
+- **Profil rasmlari tabida "Deleted" yorlig'i bilan ko'rindi** (skrinshot bilan tasdiqlangan).
+- Test qatorlari, bloblari va qurilmadagi soxta holat tozalandi.
+
+### Keyingi qadam
+4-bosqich: visibility/opt-out sozlamalari UI (`everyone` / `nobody` / "meni arxivlamang") + sync'ni o'chirish tugmasi; strings en/uz/ru (`checkSvipeStrings` majburiy).
