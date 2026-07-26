@@ -87,6 +87,16 @@ public class SvipeAvatarSyncTest {
     }
 
     @Test
+    public void onlyMissingArchivedPhotosAreDownloaded() {
+        // The pool offers four; two are already on this device, so only the other two are fetched.
+        List<Long> archived = Arrays.asList(1L, 2L, 3L, 4L);
+        assertEquals(Arrays.asList(2L, 4L), SvipeAvatarSync.pickDownloads(archived, ids(1L, 3L), 10));
+        assertTrue(SvipeAvatarSync.pickDownloads(archived, ids(1L, 2L, 3L, 4L), 10).isEmpty());
+        assertEquals(2, SvipeAvatarSync.pickDownloads(archived, ids(), 2).size());
+        assertTrue(SvipeAvatarSync.pickDownloads(null, ids(), 5).isEmpty());
+    }
+
+    @Test
     public void uploadsAreCappedPerProfileView() {
         List<Long> wanted = Arrays.asList(1L, 2L, 3L, 4L, 5L);
         ArrayList<Long> picked = SvipeAvatarSync.pickUploads(wanted, ids(1L, 2L, 3L, 4L, 5L),

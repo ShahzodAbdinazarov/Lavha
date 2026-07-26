@@ -1690,7 +1690,8 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             .add(NotificationCenter.dialogsNeedReload)
             .add(NotificationCenter.starUserGiftsLoaded)
             .add(NotificationCenter.updatedChatRanks)
-            .add(NotificationCenter.didUpdatePollResults);
+            .add(NotificationCenter.didUpdatePollResults)
+            .add(NotificationCenter.svipeAvatarArchiveUpdated); // Svipe: pooled avatars arrived
 
         for (int a = 0; a < 10; a++) {
             //cellCache.add(new SharedPhotoVideoCell(context));
@@ -6126,6 +6127,19 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
 
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
+        // Svipe: archived profile photos came back from the shared pool. They land in the same local
+        // store the on-device capture writes to, so a plain rebuild picks them up — but the tab's own
+        // visibility depends on that count, so go through updateTabs rather than just the adapter
+        // (a person whose photos are ALL deleted has no tab to refresh until this runs).
+        if (id == NotificationCenter.svipeAvatarArchiveUpdated) {
+            if (args != null && args.length > 0 && args[0] instanceof Long && (Long) args[0] == dialog_id) {
+                updateTabs(false);
+                if (imagesAdapter != null) {
+                    imagesAdapter.notifyDataSetChanged();
+                }
+            }
+            return;
+        }
         if (id == NotificationCenter.mediaDidLoad) {
             long uid = (Long) args[0];
             int guid = (Integer) args[3];

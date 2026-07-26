@@ -2,9 +2,12 @@ package org.telegram.svipe;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.NotificationCenter;
+import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.TLRPC;
 
@@ -46,6 +49,8 @@ public class SvipeAvatarSync {
     static final long MIN_REPORT_INTERVAL_MS = 6L * 60 * 60 * 1000;
     /** Photos uploaded per profile view — a backlog drains over several visits instead of one burst. */
     static final int MAX_UPLOADS_PER_VISIT = 3;
+    /** Archived photos pulled back per profile view. */
+    static final int MAX_DOWNLOADS_PER_VISIT = 5;
     /** Matches the server's per-photo cap; a bigger file would only be rejected after we sent it. */
     static final long MAX_UPLOAD_BYTES = 5L * 1024 * 1024;
 
@@ -115,6 +120,23 @@ public class SvipeAvatarSync {
         }
         for (Long id : missing) {
             if (id != null && id != 0 && haveLocalFile.contains(id)) {
+                out.add(id);
+                if (out.size() >= max) {
+                    break;
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Archived ids the pool offers that this device cannot render yet — everything else is a no-op. */
+    static ArrayList<Long> pickDownloads(List<Long> archived, Set<Long> haveLocalFile, int max) {
+        ArrayList<Long> out = new ArrayList<>();
+        if (archived == null) {
+            return out;
+        }
+        for (Long id : archived) {
+            if (id != null && id != 0 && !haveLocalFile.contains(id)) {
                 out.add(id);
                 if (out.size() >= max) {
                     break;
@@ -200,13 +222,16 @@ public class SvipeAvatarSync {
                 deleted.put(o);
             }
             body.put("deleted", deleted);
-            postObserved(account, userId, body, false);
+            // Any live id doubles as the proof that Telegram shows this person to us — see fetchArchive.
+            long proof = live.isEmpty() ? 0 : live.iterator().next();
+            postObserved(account, userId, proof, body, false);
         } catch (Exception e) {
             FileLog.e(e);
         }
     }
 
-    private static void postObserved(int account, long userId, JSONObject body, boolean retried) {
+    private static void postObserved(int account, long userId, long proofPhotoId, JSONObject body,
+                                     boolean retried) {
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {
                 return;
@@ -214,7 +239,7 @@ public class SvipeAvatarSync {
             SvipeApi.post("/v1/avatars/observed", body, token, (res, code, err) -> {
                 if (code == 401 && !retried) {
                     SvipeAuth.invalidateAccessToken(account);
-                    postObserved(account, userId, body, true);
+                    postObserved(account, userId, proofPhotoId, body, true);
                     return;
                 }
                 if (res == null || code < 200 || code >= 300) {
@@ -222,6 +247,9 @@ public class SvipeAvatarSync {
                     lastSignature.remove(userId);
                     return;
                 }
+                // Read the pool back for this person. Deliberately after the report above: the live
+                // ids we just sent are what makes our own proof verifiable server-side.
+                fetchArchive(account, userId, proofPhotoId, token);
                 JSONArray missing = res.optJSONArray("missing");
                 if (missing == null || missing.length() == 0 || !res.optBoolean("upload_enabled", false)) {
                     return;
@@ -240,6 +268,86 @@ public class SvipeAvatarSync {
                 }
                 Utilities.globalQueue.postRunnable(() -> uploadNext(account, userId, filterToLocal(userId, ids), 0));
             });
+        });
+    }
+
+    /**
+     * Pull this person's archived photos out of the shared pool into the local store, so the profile
+     * "Profile Images" tab shows them exactly like the ones this device captured itself.
+     *
+     * <p>The request carries a photo id the caller's own Telegram client is showing right now. That is
+     * the proof the server checks: only someone Telegram lets see this person could have obtained it.
+     * With no live photo there is no proof, so we do not even ask — except for our own archive, which
+     * needs none (and is how a fresh install gets its own deleted photos back).
+     */
+    private static void fetchArchive(int account, long userId, long proofPhotoId, String token) {
+        boolean self = userId == UserConfig.getInstance(account).getClientUserId();
+        if (proofPhotoId == 0 && !self) {
+            return;
+        }
+        String path = "/v1/avatars/" + userId + (proofPhotoId != 0 ? "?proof_photo_id=" + proofPhotoId : "");
+        SvipeApi.get(path, token, (res, code, err) -> {
+            // 403 is the normal answer for "Telegram would not show you this person" — nothing to do.
+            if (res == null || code < 200 || code >= 300) {
+                return;
+            }
+            JSONArray photos = res.optJSONArray("photos");
+            if (photos == null || photos.length() == 0) {
+                return;
+            }
+            ArrayList<Long> ids = new ArrayList<>();
+            HashMap<Long, String> urls = new HashMap<>();
+            HashMap<Long, Integer> dates = new HashMap<>();
+            for (int i = 0; i < photos.length(); i++) {
+                JSONObject o = photos.optJSONObject(i);
+                if (o == null) {
+                    continue;
+                }
+                long id = o.optLong("photo_id");
+                String url = o.optString("url", null);
+                if (id == 0 || url == null || url.isEmpty()) {
+                    continue;
+                }
+                ids.add(id);
+                urls.put(id, url);
+                dates.put(id, o.optInt("photo_date"));
+            }
+            Utilities.globalQueue.postRunnable(() -> {
+                HashSet<Long> have = new HashSet<>();
+                for (Long id : ids) {
+                    if (SvipeAvatarStore.getInstance().hasFile(userId, id)) {
+                        have.add(id);
+                    }
+                }
+                downloadNext(account, userId, pickDownloads(ids, have, MAX_DOWNLOADS_PER_VISIT),
+                        urls, dates, 0, false);
+            });
+        });
+    }
+
+    /** One at a time, and the tab is told only once, after the batch — not per photo. */
+    private static void downloadNext(int account, long userId, ArrayList<Long> ids,
+                                     HashMap<Long, String> urls, HashMap<Long, Integer> dates,
+                                     int index, boolean anyArrived) {
+        if (ids == null || index >= ids.size()) {
+            if (anyArrived) {
+                AndroidUtilities.runOnUIThread(() -> NotificationCenter.getInstance(account)
+                        .postNotificationName(NotificationCenter.svipeAvatarArchiveUpdated, userId));
+            }
+            return;
+        }
+        final long photoId = ids.get(index);
+        final File dest = SvipeAvatarStore.getInstance().fileFor(userId, photoId);
+        SvipeApi.getFile(urls.get(photoId), dest, (code, err) -> {
+            boolean ok = code >= 200 && code < 300 && dest.exists() && dest.length() > 0;
+            if (ok) {
+                // Same ledger the local capture writes to, so the tab needs no notion of "remote".
+                Integer d = dates.get(photoId);
+                SvipeAvatarStore.getInstance().record(userId, photoId, d == null ? 0 : d);
+            }
+            final boolean arrived = anyArrived || ok;
+            Utilities.globalQueue.postRunnable(() ->
+                    downloadNext(account, userId, ids, urls, dates, index + 1, arrived));
         });
     }
 

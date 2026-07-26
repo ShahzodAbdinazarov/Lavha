@@ -83,6 +83,60 @@ public class SvipeApi {
         });
     }
 
+    /**
+     * GET an ABSOLUTE, already-signed URL straight to a file — the presigned download side of the
+     * avatar archive. Writes to a sibling {@code .tmp} and renames on success, so a interrupted
+     * transfer can never leave a half-written image where the UI would try to render it.
+     */
+    public static void getFile(String absoluteUrl, java.io.File dest, RawCallback cb) {
+        Utilities.globalQueue.postRunnable(() -> {
+            HttpURLConnection conn = null;
+            java.io.File tmp = new java.io.File(dest.getAbsolutePath() + ".tmp");
+            try {
+                conn = (HttpURLConnection) new URL(absoluteUrl).openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(60000);
+                final int code = conn.getResponseCode();
+                if (code < 200 || code >= 300) {
+                    AndroidUtilities.runOnUIThread(() -> cb.run(code, null));
+                    return;
+                }
+                java.io.File parent = dest.getParentFile();
+                if (parent != null && !parent.exists()) {
+                    parent.mkdirs();
+                }
+                InputStream in = conn.getInputStream();
+                java.io.FileOutputStream out = new java.io.FileOutputStream(tmp);
+                try {
+                    byte[] buf = new byte[16384];
+                    int n;
+                    while ((n = in.read(buf)) != -1) {
+                        out.write(buf, 0, n);
+                    }
+                    out.flush();
+                } finally {
+                    try { in.close(); } catch (Exception ignore) {}
+                    try { out.close(); } catch (Exception ignore) {}
+                }
+                final boolean ok = tmp.length() > 0 && tmp.renameTo(dest);
+                if (!ok) {
+                    tmp.delete();
+                }
+                AndroidUtilities.runOnUIThread(() -> cb.run(ok ? code : 0, ok ? null : "write failed"));
+            } catch (Exception e) {
+                FileLog.e(e);
+                try { tmp.delete(); } catch (Exception ignore) {}
+                final String err = e.getMessage();
+                AndroidUtilities.runOnUIThread(() -> cb.run(0, err));
+            } finally {
+                if (conn != null) {
+                    try { conn.disconnect(); } catch (Exception ignore) {}
+                }
+            }
+        });
+    }
+
     private static void request(String method, String path, JSONObject body, String bearer, JsonCallback cb) {
         Utilities.globalQueue.postRunnable(() -> {
             HttpURLConnection conn = null;
