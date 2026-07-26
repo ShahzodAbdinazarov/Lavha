@@ -1,3 +1,20 @@
+// The Maps key must never live in a committed file again: gradle.properties is public, and the key
+// that sat there had to be rotated after GitHub flagged it. apikeys.properties is git-ignored (it
+// already carries the Telegram api_id/api_hash), so that is the single source of truth; the
+// gradle.properties entry stays as an empty fallback purely so a clean clone still configures.
+def svipeMapsApiKey() {
+    def propsFile = rootProject.file('apikeys.properties')
+    if (propsFile.exists()) {
+        def props = new Properties()
+        propsFile.withInputStream { props.load(it) }
+        def value = props['MAPS_API_KEY']
+        if (value != null && value.toString().trim().length() > 0) {
+            return value.toString().trim()
+        }
+    }
+    return project.hasProperty('MAPS_API_KEY') ? MAPS_API_KEY.toString().trim() : ''
+}
+
 apply plugin: 'com.android.application'
 
 repositories {
@@ -25,7 +42,7 @@ android {
     buildToolsVersion '36.0.0'
 
     defaultConfig.applicationId = APP_PACKAGE
-    defaultConfig.manifestPlaceholders = ['MAPS_API_KEY': MAPS_API_KEY]
+    defaultConfig.manifestPlaceholders = ['MAPS_API_KEY': svipeMapsApiKey()]
 
     sourceSets.main.jniLibs.srcDirs = ['../TMessagesProj/jni/']
 
@@ -289,7 +306,8 @@ tasks.configureEach { theTask ->
         if (mapsKey == null || mapsKey.isEmpty() || mapsKey.startsWith('${')) {
             throw new GradleException(
                     "Play bundle has no resolved Google Maps API key in the merged manifest.\n" +
-                    "Set MAPS_API_KEY in gradle.properties and keep the MAPS_API_KEY placeholder in\n" +
+                    "Set MAPS_API_KEY in the git-ignored apikeys.properties and keep the MAPS_API_KEY\n" +
+                    "placeholder in\n" +
                     "the config/*/AndroidManifest*.xml files.\n" +
                     "Merged manifest: ${merged}")
         }
@@ -297,8 +315,26 @@ tasks.configureEach { theTask ->
             throw new GradleException(
                     "Play bundle carries the stale upstream Telegram Google Maps key, which is bound to\n" +
                     "org.telegram.messenger and renders a blank map under uz.svipe.app. Restore the\n" +
-                    "MAPS_API_KEY placeholder in the config manifests (value lives in gradle.properties).\n" +
+                    "MAPS_API_KEY placeholder in the config manifests (value lives in apikeys.properties).\n" +
                     "Merged manifest: ${merged}")
         }
     }
 }
+
+// gradle.properties is committed to a public repo. A Maps key sat there once and had to be rotated
+// after GitHub flagged it, so make the mistake impossible to repeat quietly: any non-empty value in
+// the tracked file fails the build before it can be pushed.
+task checkMapsKeyNotCommitted {
+    doLast {
+        def tracked = rootProject.file('gradle.properties')
+        def line = tracked.readLines().find { it.trim().startsWith('MAPS_API_KEY=') }
+        def value = line == null ? '' : line.substring(line.indexOf('=') + 1).trim()
+        if (!value.isEmpty()) {
+            throw new GradleException(
+                    "MAPS_API_KEY has a value in gradle.properties, which is committed and public.\n" +
+                    "Move it to the git-ignored apikeys.properties and leave the gradle.properties\n" +
+                    "entry empty. If the key was pushed, rotate it in Google Cloud first.")
+        }
+    }
+}
+preBuild.dependsOn checkMapsKeyNotCommitted
