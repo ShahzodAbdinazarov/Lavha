@@ -1,6 +1,6 @@
 # Svipe — Profil rasmlarini ilovalar aro sinxronlash (reja)
 
-> Holat: **1-BOSQICH BAJARILDI** (2026-07-26) — backend dev'da tirik va E2E tasdiqlangan. Qolgan 2–5 bosqich hali qilinmagan.
+> Holat: **1–2-BOSQICH BAJARILDI** (2026-07-26) — backend dev'da tirik (§11), klient ushlaganini yuklaydi (§12). 3–5-bosqichlar hali qilinmagan.
 > Asos: mavjud [[profile-images-feature]] — lokal avatar-keeper (`SvipeAvatarStore` + `SvipeAvatarKeeper`).
 > Repolar: mobil `~/StudioProjects/Lavha`, backend `~/StudioProjects/svipe-backend`.
 
