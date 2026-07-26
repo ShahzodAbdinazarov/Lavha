@@ -354,8 +354,12 @@ Bu — feature'ning **ijtimoiy graf saqlaydigan yagona joyi**. Shuning uchun imk
 ### Mantiq
 `decide_access`: `contacts` — isbot **ustidan** toraytirish. Kontakt bo'lish isbotni almashtirmaydi (`no_proof`), isbot esa kontakt emaslikni yengmaydi (`not_contact`).
 
-### UI
-Radio ro'yxatida "Kontaktlarim" (Hamma dan keyin). Tanlashdan **oldin** dialog nima yuborilishini ochiq aytadi. Strings en/uz/ru — guard: 111 kalit.
+### UI va rozilik matni
+Radio ro'yxatida "Kontaktlarim" (Hamma dan keyin). Tanlashdan **oldin** dialog to'liq aytadi (uch tilda):
+
+> "Kim kontaktingiz ekanini tekshirish uchun Svipe kontaktlaringizning Telegram ID larini **o'z serverida** saqlaydi. Ular **faqat shu tekshiruv uchun** ishlatiladi — **hech qachon uchinchi tomonga berilmaydi va boshqa hech qanday maqsadda ishlatilmaydi** — hamda boshqa variantni tanlashingiz bilan **o'chiriladi**."
+
+Bu va'da 5-bosqichdagi maxfiylik siyosatida **so'zma-so'z takrorlanishi shart** (va Play data-safety deklaratsiyasiga "Contacts — collected, not shared" bo'lib tushishi kerak).
 
 ### Tekshiruv
 - Haqiqiy Postgres: 8/8 integration (yangi to'liq kontakt ssenariysi bilan) + 355 unit.
