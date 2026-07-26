@@ -97,6 +97,26 @@ public class SvipeConfig {
         }
     }
 
+    /** Last visibility the server told us, cached so the Privacy row can show a value immediately
+     *  instead of blanking until a request comes back. The server stays the source of truth. */
+    public static final String PREF_AVATAR_VISIBILITY = "svipe_avatar_visibility";
+
+    public static String getAvatarVisibility(int account) {
+        try {
+            return MessagesController.getMainSettings(account).getString(PREF_AVATAR_VISIBILITY, "everyone");
+        } catch (Exception e) {
+            return "everyone";
+        }
+    }
+
+    public static void setAvatarVisibility(int account, String value) {
+        try {
+            MessagesController.getMainSettings(account).edit().putString(PREF_AVATAR_VISIBILITY, value).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
     public static void setAvatarSyncWifiOnly(int account, boolean on) {
         try {
             MessagesController.getMainSettings(account).edit().putBoolean(PREF_AVATAR_SYNC_WIFI_ONLY, on).apply();

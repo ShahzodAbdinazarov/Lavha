@@ -278,6 +278,25 @@
     <string name="SvipeArchiveEmpty">Здесь пока нет удалённых или изменённых сообщений</string>
     <string name="SvipeYouDeletedMessage">Вы удалили это сообщение:</string>
     <string name="SvipeYouEditedMessage">Вы изменили это сообщение:</string>
+
+    <!-- Svipe: архив фотографий профиля -->
+    <string name="SvipeAvatarArchive">Архив фото профиля</string>
+    <string name="SvipeAvatarVisibilityHeader">Кто видит мои архивные фото</string>
+    <string name="SvipeAvatarVisibilityEveryone">Все</string>
+    <string name="SvipeAvatarVisibilityNobody">Никто</string>
+    <string name="SvipeAvatarVisibilityOff">Не архивировать мои фото</string>
+    <string name="SvipeAvatarVisibilityInfo">Архивные фото показываются только тем, кому Telegram и так разрешает видеть ваше текущее фото профиля. Эта настройка может только сузить круг, но не расширить его.</string>
+    <string name="SvipeAvatarOptOut">Не архивировать</string>
+    <string name="SvipeAvatarOptOutConfirm">Ваши фото больше не будут архивироваться, а уже сохранённые будут удалены.</string>
+    <string name="SvipeAvatarSyncHeader">Синхронизация</string>
+    <string name="SvipeAvatarSyncEnabled">Делиться сохранёнными фото</string>
+    <string name="SvipeAvatarSyncWifiOnly">Загружать только по Wi-Fi</string>
+    <string name="SvipeAvatarSyncInfo">Если кто-то удалит фото профиля, которое вы уже видели, это устройство может поделиться своей копией — тогда её смогут открыть и другие, кому разрешено видеть этого человека. Если выключить, фото останутся только на этом устройстве.</string>
+    <string name="SvipeAvatarDeleteArchive">Удалить мои архивные фото</string>
+    <string name="SvipeAvatarDeleteArchiveInfo">Удаляет из архива все ваши фотографии. Новые будут архивироваться снова, если выше не выбрано «Не архивировать мои фото».</string>
+    <string name="SvipeAvatarDeleteArchiveConfirm">Удалить все ваши архивные фото?</string>
+    <string name="SvipeAvatarArchiveDeleted">Архивные фото удалены</string>
+    <string name="SvipeAvatarSettingsFailed">Не удалось связаться с сервером. Попробуйте ещё раз.</string>
     <string name="SvipeIntroStart">Начать свайпинг</string>
 
     <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"

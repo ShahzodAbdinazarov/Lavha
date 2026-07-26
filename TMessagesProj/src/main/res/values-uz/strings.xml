@@ -15,6 +15,25 @@
     <string name="SvipeArchiveEmpty">Bu yerda hali o\'chgan yoki tahrirlangan xabar yo\'q</string>
     <string name="SvipeYouDeletedMessage">Siz bu xabarni o\'chirdingiz:</string>
     <string name="SvipeYouEditedMessage">Siz bu xabarni tahrirladingiz:</string>
+
+    <!-- Svipe profil rasmlari arxivi -->
+    <string name="SvipeAvatarArchive">Profil rasmlari arxivi</string>
+    <string name="SvipeAvatarVisibilityHeader">Arxivdagi rasmlarimni kim ko\'ra oladi</string>
+    <string name="SvipeAvatarVisibilityEveryone">Hamma</string>
+    <string name="SvipeAvatarVisibilityNobody">Hech kim</string>
+    <string name="SvipeAvatarVisibilityOff">Rasmlarimni arxivlamang</string>
+    <string name="SvipeAvatarVisibilityInfo">Arxivdagi rasmlaringiz faqat Telegram allaqachon joriy profil rasmingizni ko\'rishga ruxsat bergan odamlarga ko\'rinadi. Bu sozlama uni faqat toraytiradi, hech qachon kengaytirmaydi.</string>
+    <string name="SvipeAvatarOptOut">Arxivlanmasin</string>
+    <string name="SvipeAvatarOptOutConfirm">Rasmlaringiz endi arxivlanmaydi va arxivdagilari o\'chiriladi.</string>
+    <string name="SvipeAvatarSyncHeader">Sinxronlash</string>
+    <string name="SvipeAvatarSyncEnabled">Saqlagan rasmlarimni ulashish</string>
+    <string name="SvipeAvatarSyncWifiOnly">Faqat Wi-Fi orqali yuklash</string>
+    <string name="SvipeAvatarSyncInfo">Kimdir siz allaqachon ko\'rgan profil rasmini o\'chirsa, bu qurilma o\'z nusxasini ulashishi mumkin — shunda o\'sha odamni ko\'rishga ruxsati bor boshqalar ham uni ocha oladi. O\'chirsangiz, rasmlar shu qurilmada qoladi.</string>
+    <string name="SvipeAvatarDeleteArchive">Arxivdagi rasmlarimni o\'chirish</string>
+    <string name="SvipeAvatarDeleteArchiveInfo">Arxivdan sizga tegishli barcha rasmni olib tashlaydi. Yuqorida "Rasmlarimni arxivlamang" ni tanlamasangiz, yangilari yana arxivlanadi.</string>
+    <string name="SvipeAvatarDeleteArchiveConfirm">Sizga tegishli barcha arxiv rasmi o\'chirilsinmi?</string>
+    <string name="SvipeAvatarArchiveDeleted">Arxivdagi rasmlar o\'chirildi</string>
+    <string name="SvipeAvatarSettingsFailed">Serverga ulanib bo\'lmadi. Qayta urinib ko\'ring.</string>
     <string name="SvipeIntroStart">Svayp qilishni boshlash</string>
 
     <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"

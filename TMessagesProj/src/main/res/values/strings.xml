@@ -10972,6 +10972,25 @@
     <string name="SvipeArchiveEmpty">No deleted or edited messages here yet</string>
     <string name="SvipeYouDeletedMessage">You deleted this message:</string>
     <string name="SvipeYouEditedMessage">You edited this message:</string>
+
+    <!-- Svipe profile-photo archive (cross-app pool of deleted profile photos) -->
+    <string name="SvipeAvatarArchive">Profile photo archive</string>
+    <string name="SvipeAvatarVisibilityHeader">Who can see my archived photos</string>
+    <string name="SvipeAvatarVisibilityEveryone">Everyone</string>
+    <string name="SvipeAvatarVisibilityNobody">Nobody</string>
+    <string name="SvipeAvatarVisibilityOff">Don\'t archive my photos</string>
+    <string name="SvipeAvatarVisibilityInfo">Your archived photos are only ever shown to people Telegram already lets see your current profile photo. This setting can narrow that down, never widen it.</string>
+    <string name="SvipeAvatarOptOut">Don\'t archive</string>
+    <string name="SvipeAvatarOptOutConfirm">Your photos will no longer be archived, and everything already archived will be deleted.</string>
+    <string name="SvipeAvatarSyncHeader">Sync</string>
+    <string name="SvipeAvatarSyncEnabled">Share photos I saved</string>
+    <string name="SvipeAvatarSyncWifiOnly">Upload over Wi-Fi only</string>
+    <string name="SvipeAvatarSyncInfo">When someone deletes a profile photo you had already seen, this device can share its copy so other people who are allowed to see that person can still open it. Turning this off keeps the photos on this device.</string>
+    <string name="SvipeAvatarDeleteArchive">Delete my archived photos</string>
+    <string name="SvipeAvatarDeleteArchiveInfo">Removes every photo of you from the archive. New ones are archived again unless you choose "Don\'t archive my photos" above.</string>
+    <string name="SvipeAvatarDeleteArchiveConfirm">Delete every archived photo of you?</string>
+    <string name="SvipeAvatarArchiveDeleted">Archived photos deleted</string>
+    <string name="SvipeAvatarSettingsFailed">Couldn\'t reach the server. Try again.</string>
     <string name="SvipeIntroStart">Start Sviping</string>
 
     <!-- Svipe reels comments sheet -->

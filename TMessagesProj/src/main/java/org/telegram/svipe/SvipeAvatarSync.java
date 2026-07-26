@@ -51,6 +51,12 @@ public class SvipeAvatarSync {
     static final int MAX_UPLOADS_PER_VISIT = 3;
     /** Archived photos pulled back per profile view. */
     static final int MAX_DOWNLOADS_PER_VISIT = 5;
+
+    // Server-side visibility values (app/db/avatar_repo.py VISIBILITIES). They only ever RESTRICT what
+    // Telegram already allows — see the module docstring on the backend.
+    public static final String VISIBILITY_EVERYONE = "everyone";
+    public static final String VISIBILITY_NOBODY = "nobody";
+    public static final String VISIBILITY_OFF = "off";
     /** Matches the server's per-photo cap; a bigger file would only be rejected after we sent it. */
     static final long MAX_UPLOAD_BYTES = 5L * 1024 * 1024;
 
@@ -433,6 +439,68 @@ public class SvipeAvatarSync {
             if (then != null) {
                 then.run();
             }
+        });
+    }
+
+    // ---- my own settings (SvipeAvatarSettingsActivity) ----
+
+    public interface SettingsCallback {
+        /** {@code visibility} is null when the call failed; {@code archived} is how many of MY photos
+         *  the pool holds. */
+        void run(String visibility, int archived, boolean ok);
+    }
+
+    /** What the server currently holds for me. The setting lives server-side because it has to apply
+     *  to requests from OTHER people's devices, which never see this phone's preferences. */
+    public static void loadMySettings(int account, SettingsCallback cb) {
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                cb.run(null, 0, false);
+                return;
+            }
+            SvipeApi.get("/v1/avatars/me/settings", token, (res, code, err) -> {
+                if (res == null || code < 200 || code >= 300) {
+                    cb.run(null, 0, false);
+                    return;
+                }
+                cb.run(res.optString("visibility", VISIBILITY_EVERYONE), res.optInt("archived_count"), true);
+            });
+        });
+    }
+
+    public static void setMyVisibility(int account, String visibility, SettingsCallback cb) {
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                cb.run(null, 0, false);
+                return;
+            }
+            JSONObject body = new JSONObject();
+            try {
+                body.put("visibility", visibility);
+            } catch (Exception e) {
+                FileLog.e(e);
+                cb.run(null, 0, false);
+                return;
+            }
+            SvipeApi.put("/v1/avatars/me/settings", body, token, (res, code, err) -> {
+                boolean ok = res != null && code >= 200 && code < 300;
+                cb.run(ok ? res.optString("visibility", visibility) : null,
+                        ok ? res.optInt("deleted") : 0, ok);
+            });
+        });
+    }
+
+    /** Erase every archived photo of me from the pool. Keeps the visibility setting as it is. */
+    public static void deleteMyArchive(int account, SettingsCallback cb) {
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                cb.run(null, 0, false);
+                return;
+            }
+            SvipeApi.delete("/v1/avatars/me", token, (res, code, err) -> {
+                boolean ok = res != null && code >= 200 && code < 300;
+                cb.run(null, ok ? res.optInt("deleted") : 0, ok);
+            });
         });
     }
 
