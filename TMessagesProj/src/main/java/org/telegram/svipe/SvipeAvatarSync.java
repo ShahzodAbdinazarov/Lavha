@@ -163,13 +163,16 @@ public class SvipeAvatarSync {
     private static final ConcurrentHashMap<Long, Long> lastReportAt = new ConcurrentHashMap<>();
     // Photos whose upload is running or failed this session — never attempted twice in a row.
     private static final Set<Long> attempted = java.util.Collections.newSetFromMap(new ConcurrentHashMap<>());
+    // The server can switch the whole feature off (it does until storage is provisioned). Once it says
+    // so, stop asking for the rest of the session instead of a pointless request per profile opened.
+    private static volatile boolean serverDisabled;
 
     /**
      * Called on the UI thread from {@link SvipeAvatarKeeper} once a profile's photo list has been seen.
      * Snapshots the live set here (the model is UI-thread owned) and does everything else off it.
      */
     public static void onProfileSeen(int account, long userId) {
-        if (userId <= 0 || !SvipeConfig.isAvatarSyncEnabled(account)) {
+        if (userId <= 0 || serverDisabled || !SvipeConfig.isAvatarSyncEnabled(account)) {
             return;
         }
         final HashSet<Long> live = new HashSet<>();
@@ -255,6 +258,10 @@ public class SvipeAvatarSync {
                 if (res == null || code < 200 || code >= 300) {
                     // Let the next profile view try again rather than burning a report window.
                     lastSignature.remove(userId);
+                    return;
+                }
+                if (!res.optBoolean("enabled", true)) {
+                    serverDisabled = true;   // nothing was stored, and nothing will be — stand down
                     return;
                 }
                 // Read the pool back for this person. Deliberately after the report above: the live

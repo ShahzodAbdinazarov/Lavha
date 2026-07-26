@@ -1,6 +1,6 @@
 # Svipe — Profil rasmlarini ilovalar aro sinxronlash (reja)
 
-> Holat: **1–4-BOSQICH BAJARILDI** (2026-07-26) — backend dev'da tirik (§11), klient yuklaydi (§12), o'qiydi (§13) va sozlamalari bor (§14). Faqat 5-bosqich (siyosat + prod) qoldi.
+> Holat: **1–5-BOSQICH BAJARILDI** (2026-07-26). Backend **prod'da** (§16), lekin **feature O'CHIRILGAN** — R2 kaliti kelmaguncha (§11 oxiri). Mobil release ushlab turilibdi.
 > Asos: mavjud [[profile-images-feature]] — lokal avatar-keeper (`SvipeAvatarStore` + `SvipeAvatarKeeper`).
 > Repolar: mobil `~/StudioProjects/Lavha`, backend `~/StudioProjects/svipe-backend`.
 
@@ -172,7 +172,7 @@ Hammasi `CurrentUserDep` bilan himoyalangan.
 2. ~~**Klient yuklash**~~ — ✅ **BAJARILDI 2026-07-26** (commit `b61d755`, mobil `dev`). Batafsil §12.
 3. ~~**Klient ko'rsatish**~~ — ✅ **BAJARILDI 2026-07-26** (commit `a564363`, mobil `dev`). Batafsil §13.
 4. ~~**Ruxsat va sozlamalar**~~ — ✅ **BAJARILDI 2026-07-26** (commit `1abc8d4`, mobil `dev`). Batafsil §14.
-5. **Siyosat + release** — privacy sahifasi, Play deklaratsiyasi, dev→prod, `.web` release.
+5. ~~**Siyosat + release**~~ — ✅ **BAJARILDI 2026-07-26** (backend `3f1f7cd` prod'da; mobil release **ushlab turilibdi**, sabab §16).
 
 ---
 
@@ -364,3 +364,28 @@ Bu va'da 5-bosqichdagi maxfiylik siyosatida **so'zma-so'z takrorlanishi shart** 
 ### Tekshiruv
 - Haqiqiy Postgres: 8/8 integration (yangi to'liq kontakt ssenariysi bilan) + 355 unit.
 - Emulyator → dev: "Kontaktlarim" tanlandi → **430 ta kontakt id yozildi**, `visibility=contacts`; "Hamma" ga qaytarildi → **0 qator qoldi**.
+
+---
+
+## 16. 5-bosqich — siyosat va prod (2026-07-26)
+
+### Maxfiylik siyosati (`app/privacy.py`, svipe.uz/privacy — **tirik**)
+Yangi **4-bo'lim "Profile photo archive"**: nima saqlanadi, **kim ko'ra oladi** (faqat Telegram o'zi joriy rasmni ko'rsatadigan odam — isbotsiz so'rov rad etiladi), foydalanuvchi nazorati (Everyone/My contacts/Nobody/"arxivlamang" + o'chirish), va **Svipe ishlatmaydigan odam uchun** takedown yo'li. Kontaktlar haqidagi va'da 3-bo'limda **ilovadagi rozilik matni bilan bir xil so'zlarda**: faqat shu tekshiruv uchun, uchinchi tomonga berilmaydi, boshqa maqsadda ishlatilmaydi, sozlama o'zgarsa o'chiriladi.
+
+### Takedown avtomatlashtirildi
+`tools/avatar_takedown.py --tg-id <id>` — bitta buyruq: rasm qatorlari + **baytlar** + tirik to'plam + kontakt ro'yxati o'chadi, `visibility='off'` qo'yiladi. **Access log ataylab qoldiriladi** — bu "kim so'ragan" yozuvi, ya'ni o'sha odamning o'zi ko'rishi mumkin bo'lgan narsa. Skript **image ichida** (`docker/Dockerfile`), ya'ni so'rov kelganda serverda darhol ishlaydi (dev'da haqiqiy ma'lumotda sinovdan o'tkazildi).
+
+### Play Data safety
+`docs/svipe-play-data-safety.md` — Play Console formasiga so'zma-so'z ko'chiriladigan javoblar. Muhimi: **Contacts — Collected: Yes, Shared: No, Optional**; **Photos — Collected: Yes, Shared: No**.
+
+### Prod holati (MUHIM)
+Backend prod'da (`main` `3f1f7cd`), lekin **`LAVHA_AVATAR_SYNC_ENABLED=false`**:
+- `POST /v1/avatars/observed` → `{"enabled": false}` (klient shu javobdan keyin sessiya davomida umuman so'ramaydi — `serverDisabled`);
+- `PUT /v1/avatars/me/contacts` → **503** (o'chirilgan holat "hech narsa yig'ilmaydi" degani bo'lishi kerak);
+- prod bazasida 5 ta jadval yaratildi, **0 qator**.
+
+**Sabab:** R2 bucket hali yo'q, prod diskda esa ~17 GB bo'sh — `local` saqlashni prod'da yoqish rejaga zid. Kalit kelgach: `tools/provision_r2.py --write-env root@23.88.110.173:/home/main/svipe-prod` → `.env` da `LAVHA_AVATAR_STORAGE=r2` + `LAVHA_AVATAR_SYNC_ENABLED=true`.
+
+### Ushlab turilgan ish
+- **R2 kaliti** (owner dashboard'dan yasashi kerak) — §11 oxiridagi buyruq.
+- **Mobil release** (.web / Play) — storage yo'q ekan, feature ishlamaydi; kalit ulangach chiqariladi.
