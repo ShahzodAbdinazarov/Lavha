@@ -9777,9 +9777,9 @@ public class ChatActivity extends BaseFragment implements
         b.setMessage(AndroidUtilities.replaceTags(LocaleController.getString(R.string.SvipeMsgSyncPromptMessage)));
         b.setRightAlignedButtons(true);
         b.setPositiveButton(LocaleController.getString(R.string.SvipeMsgSyncAllow),
-                (d, w) -> svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_WITH_PARTNER, fromReAsk));
+                (d, w) -> { svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_WITH_PARTNER, fromReAsk); svipeMsgSyncShowGrantedBulletin(); });
         b.setNegativeButton(LocaleController.getString(R.string.SvipeMsgSyncForMe),
-                (d, w) -> svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_SELF_ONLY, fromReAsk));
+                (d, w) -> { svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_SELF_ONLY, fromReAsk); svipeMsgSyncShowGrantedBulletin(); });
         b.setNeutralButton(LocaleController.getString(R.string.Decline),
                 (d, w) -> svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_OFF, fromReAsk));
         showDialog(b.create());
@@ -9821,6 +9821,12 @@ public class ChatActivity extends BaseFragment implements
 
     private void svipeMsgSyncSnackbarAllow() {
         svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_WITH_PARTNER, false);
+        svipeMsgSyncShowGrantedBulletin();
+    }
+
+    /** The "sync on" confirmation bulletin — shown after ANY grant: the dialog's Allow / For me
+     *  buttons and the snackbar's Allow all end here, so the same confirmation appears every time. */
+    private void svipeMsgSyncShowGrantedBulletin() {
         if (getParentActivity() == null) {
             return;
         }
