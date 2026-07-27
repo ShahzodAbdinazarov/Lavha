@@ -18,6 +18,7 @@ import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserObject;
 import org.telegram.tgnet.TLRPC;
@@ -47,7 +48,8 @@ import java.util.List;
  * docs/svipe-deleted-edited-messages-plan.md §6); the per-chat "Show in chat" switch on top only
  * controls whether deleted messages additionally stay inline in the chat itself.
  */
-public class SvipeDeletedLogActivity extends BaseFragment {
+public class SvipeDeletedLogActivity extends BaseFragment
+        implements NotificationCenter.NotificationCenterDelegate {
 
     private final long dialogId;
 
@@ -64,6 +66,27 @@ public class SvipeDeletedLogActivity extends BaseFragment {
 
     public SvipeDeletedLogActivity(long dialogId) {
         this.dialogId = dialogId;
+    }
+
+    @Override
+    public boolean onFragmentCreate() {
+        getNotificationCenter().addObserver(this, NotificationCenter.svipeMessageArchiveUpdated);
+        return super.onFragmentCreate();
+    }
+
+    @Override
+    public void onFragmentDestroy() {
+        getNotificationCenter().removeObserver(this, NotificationCenter.svipeMessageArchiveUpdated);
+        super.onFragmentDestroy();
+    }
+
+    @Override
+    public void didReceivedNotification(int id, int account, Object... args) {
+        // Synced items for THIS chat arrived from the pool — rebuild the log to include them.
+        if (id == NotificationCenter.svipeMessageArchiveUpdated
+                && args.length > 0 && args[0] instanceof Long && (Long) args[0] == dialogId) {
+            loadArchive();
+        }
     }
 
     @Override

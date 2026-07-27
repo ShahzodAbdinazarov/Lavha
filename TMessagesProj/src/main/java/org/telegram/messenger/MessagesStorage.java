@@ -14995,6 +14995,57 @@ public class MessagesStorage extends BaseController {
     }
 
     /**
+     * Insert a message pulled from the shared pool (identified by its content-addressed merge_key), so a
+     * chat's Recent Actions log shows the peer's synced deletions/edits alongside this device's own.
+     * Idempotent: the synthetic negative mid is derived from the key, so re-fetching overwrites the row
+     * rather than duplicating it, and the negative id keeps synced items out of the in-chat inline merge.
+     * The media cover, if any, is already downloaded at {@code mediaPath}. Must run on the storage queue.
+     */
+    public void svipeInsertSyncedMessage(long dialogId, TLRPC.Message message, int kind, String mergeKey,
+                                         String mediaPath) {
+        if (message == null || dialogId == 0 || DialogObject.isEncryptedDialog(dialogId) || mergeKey == null) {
+            return;
+        }
+        NativeByteBuffer data = null;
+        try {
+            final int mid = SvipeMessageArchiveStore.syntheticMid(mergeKey);
+            long fromId = message.from_id != null ? MessageObject.getPeerId(message.from_id) : 0;
+            data = new NativeByteBuffer(message.getObjectSize());
+            message.serializeToStream(data);
+
+            SQLitePreparedStatement state = database.executeFast("REPLACE INTO svipe_deleted_messages(uid, mid, svipe_version, data, date, edit_date, out, media, group_id, from_id, svipe_kind, svipe_media_path, captured_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            state.requery();
+            state.bindLong(1, dialogId);
+            state.bindInteger(2, mid);
+            state.bindInteger(3, 1);
+            state.bindByteBuffer(4, data);
+            state.bindInteger(5, message.date);
+            state.bindInteger(6, message.edit_date);
+            state.bindInteger(7, message.out ? 1 : 0);
+            state.bindInteger(8, message.media != null && !(message.media instanceof TLRPC.TL_messageMediaEmpty) ? 1 : 0);
+            state.bindLong(9, message.grouped_id);
+            state.bindLong(10, fromId);
+            state.bindInteger(11, kind);
+            if (mediaPath != null) {
+                state.bindString(12, mediaPath);
+            } else {
+                state.bindNull(12);
+            }
+            state.bindLong(13, System.currentTimeMillis());
+            state.step();
+            state.dispose();
+
+            svipeTrimArchive(dialogId);
+        } catch (Exception e) {
+            FileLog.e(e);
+        } finally {
+            if (data != null) {
+                data.reuse();
+            }
+        }
+    }
+
+    /**
      * Persist the archived copy of a message's media, applying the media-pin policy (plan §7): photos and
      * short audio/round messages in full; videos and files as a sharp cover only; stickers/GIFs not at all.
      * Reads only already-cached files — never starts a download (R9). Returns the pinned file path or null.

@@ -134,6 +134,28 @@ public class SvipeMessageArchiveStoreTest {
         assertEquals(SvipeMessageArchiveStore.PIN_COVER, pin(true, false, false, false, true, 8L * 1024 * 1024));
     }
 
+    // ---- synthetic mid for synced (server-pulled) items ----
+
+    @Test
+    public void syntheticMidIsAlwaysNegativeAndDeterministic() {
+        String key = "0123456789abcdef" + "0".repeat(48);
+        int a = SvipeMessageArchiveStore.syntheticMid(key);
+        assertTrue("negative so it never collides with a real positive mid", a < 0);
+        assertEquals("deterministic, so re-fetch overwrites not duplicates", a,
+                SvipeMessageArchiveStore.syntheticMid(key));
+    }
+
+    @Test
+    public void syntheticMidDiffersByKeyAndHandlesGarbage() {
+        int a = SvipeMessageArchiveStore.syntheticMid("aaaaaaaa" + "0".repeat(56));
+        int b = SvipeMessageArchiveStore.syntheticMid("bbbbbbbb" + "0".repeat(56));
+        assertTrue(a != b);
+        assertEquals(-1, SvipeMessageArchiveStore.syntheticMid(null));
+        assertEquals(-1, SvipeMessageArchiveStore.syntheticMid("short"));
+        // The all-zero prefix would map to 0; it must be forced to a non-zero negative id.
+        assertTrue(SvipeMessageArchiveStore.syntheticMid("0".repeat(64)) < 0);
+    }
+
     @Test
     public void trimHonorsWhicheverCapBitesHarder() {
         List<SvipeMessageArchiveStore.ArchiveRow> rows = Arrays.asList(

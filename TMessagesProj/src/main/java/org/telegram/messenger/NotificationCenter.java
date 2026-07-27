@@ -384,6 +384,9 @@ public class NotificationCenter {
     // Svipe: archived profile photos arrived from the shared pool for a user (arg0 = userId), so the
     // profile-images tab has more to show than when it was built. Per-account, like the fetch itself.
     public static final int svipeAvatarArchiveUpdated = totalEvents++;
+    // Svipe: synced deleted/edited messages arrived from the pool for a chat (arg0 = dialogId), so its
+    // Recent Actions log has more to show. Per-account, like the fetch itself.
+    public static final int svipeMessageArchiveUpdated = totalEvents++;
 
     public static boolean alreadyLogged;
 

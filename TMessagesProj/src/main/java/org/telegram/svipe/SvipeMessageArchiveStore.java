@@ -140,6 +140,25 @@ public class SvipeMessageArchiveStore {
         return canProduceCover ? PIN_COVER : PIN_NONE;       // video or any other document (file)
     }
 
+    /**
+     * A synthetic, always-negative row id for a message pulled from the server (identified by its
+     * content-addressed merge_key, not a local mid). Negative so it can never collide with a real
+     * positive mid — which keeps synced peer messages out of the in-chat inline merge (that scans real
+     * mid ranges) while still appearing in the Recent Actions log. Deterministic from the key, so
+     * re-fetching the same item overwrites its row instead of duplicating it.
+     */
+    public static int syntheticMid(String mergeKey) {
+        if (mergeKey == null || mergeKey.length() < 8) {
+            return -1;
+        }
+        try {
+            int v = (int) (Long.parseLong(mergeKey.substring(0, 8), 16) & 0x7fffffffL);
+            return v == 0 ? -1 : -v;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
     /** Next version index for a message id given the versions already stored for it. */
     public static int nextVersion(List<Integer> existingVersions) {
         int max = 0;
