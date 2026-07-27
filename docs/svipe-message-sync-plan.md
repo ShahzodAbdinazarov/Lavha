@@ -235,3 +235,21 @@ Har bosqichdan keyin owner ko'rib tasdiqlaydi (avatar ishidagidek).
 ---
 
 *Andoza fayllar: `docs/svipe-avatar-sync-plan.md` (backend/prod naqshi), `docs/svipe-deleted-edited-messages-plan.md` (lokal arxiv). Barcha langarlar `ground-message-sync-plan` workflow (2026-07-27) natijasi.*
+
+---
+
+## 18. 7-bosqich — retention + prod launch runbook (2026-07-27)
+
+**Bajarildi (kod):**
+- **Retention sweep** — `_msg_sync_retention_loop` (`app/main.py`, lifespanда `msg_sync_enabled && retention_days>0` bo'lganда ishga tushadi, har 6 soatда), `msg_sync_repo.sweep_expired_items`/`sweep_expired_self` (90 kundan eski STORED qatorlar → o'chiradi, blob cover'larни keyin; rows-first). Integration test: eski itemни backdate qilib sweep → o'chiriladi, yangisi qoladi.
+- **Play data-safety** — `docs/svipe-play-data-safety.md`ga "Messages → Other in-app messages" (Collected yes, Shared **no**, optional, default off) qo'shildi.
+- **`cryptography>=43`** requirements.txt'да → keyingi CI image build'ига kiradi (server'да qo'lда pip KERAK EMAS).
+
+**Deploy (GitLab CI, ikkalasi ham MANUAL):** `dev` branch → lavha-dev (49.12.47.209, `:dev`); `main` → svipe.uz (23.88.110.173, `:latest`).
+
+**LAUNCH qadamlari (owner qaror qiladi — bu prod'да BEGONA odamning o'chirgan xabarlarини yig'ishни yoqadi, shuning uchun ataylab avtomatlashtirilmagan):**
+1. Backend `dev`ни push → CI build → dev deploy (manual). `LAVHA_MSG_SYNC_ENABLED=true` + `LAVHA_MSG_SYNC_ENCRYPTION_KEY` dev .env'да → dev'да E2E.
+2. Backend `dev`→`main` merge → push → prod deploy (manual). Prod .env'ga `LAVHA_MSG_SYNC_ENABLED=true` + kaliti (handoff'да) qo'shiladi + konteyner qayta ko'tariladi (`export TAG=latest`).
+3. **Mobil release** — feature faqat ilova chiqqач foydalanuvchilarга ishlaydi (peers/check hozir 503 → banner uxlaydi). Release'дан oldin owner emulyator E2E qilsa yaxshi.
+
+**Nega men prod'ни yoqmadim:** xabar-kontenti yig'ish — loyihaning eng nozik amali; deploy + yoqish outward-facing/orqaga-qaytmas, shuning uchun owner'ning aniq ruxsati kerak (avatar R2 yoqишдаги naqsh).

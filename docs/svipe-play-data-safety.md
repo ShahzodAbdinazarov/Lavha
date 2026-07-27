@@ -36,6 +36,16 @@
   bog'lab saqlanadi. Ko'rish faqat Telegram o'zi ruxsat bergan odamlarga; egasi butunlay o'chirib
   tashlashi mumkin.
 
+### Messages → Other in-app messages
+- **Collected:** Yes · **Shared:** **No** · **Required:** No (default o'chiq, foydalanuvchi yoqadi)
+- **Purposes:** App functionality
+- Izoh (ko'rib chiquvchi so'rasa): faqat **shaxsiy (1:1) suhbatда** va faqat **ikkala odam ham Svipe
+  ishlatib, ikkalasi ham yoqganда** o'sha suhbatning **o'chirilgan/tahrirlangan** xabarlari saqlanadi.
+  Guruh/kanal/Maxfiy chatlarга hech qachon; rozilik bermagan odamning hech narsasi yuklanmaydi.
+  Serverда **at-rest shifrlanadi** (kalit bazadan tashqarida); videо/fayllardan faqat tiniq muqova.
+  Faqat o'sha ikki kishi ko'radi; muallif o'z xabarlarini istalgan payt o'chiradi; 90 kun saqlanadi.
+  Ilovada majburiy Svipe ToS + kontekstли rozilik (chat ichидаги banner) bilan ochiladi.
+
 ### App activity → App interactions
 - **Collected:** Yes · **Shared:** No · **Purposes:** App functionality, Analytics, Personalization
 
