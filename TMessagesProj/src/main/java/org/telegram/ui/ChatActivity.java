@@ -22274,6 +22274,7 @@ public class ChatActivity extends BaseFragment implements
                     removeSelfFromStack();
                 }
             }
+            updateSvipeMsgSyncBanner(); // Svipe: a deletion just happened in this open chat -> prompt now, not on next open
         } else if (id == NotificationCenter.quickRepliesDeleted) {
             if (chatMode != MODE_QUICK_REPLIES) return;
             if ((Long) args[1] != getQuickReplyId()) return;
