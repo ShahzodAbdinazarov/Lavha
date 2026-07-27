@@ -387,6 +387,9 @@ public class NotificationCenter {
     // Svipe: synced deleted/edited messages arrived from the pool for a chat (arg0 = dialogId), so its
     // Recent Actions log has more to show. Per-account, like the fetch itself.
     public static final int svipeMessageArchiveUpdated = totalEvents++;
+    // Svipe: a message was just deleted/edited and captured LOCALLY in a chat (arg0 = dialogId). Drives
+    // the in-chat consent prompt so it can appear the instant it happens, on delete AND edit. Per-account.
+    public static final int svipeMsgLocalArchived = totalEvents++;
 
     public static boolean alreadyLogged;
 

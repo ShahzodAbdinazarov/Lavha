@@ -155,19 +155,61 @@ public class SvipeConfig {
         return m != null && !m.isEmpty();
     }
 
-    public static boolean isMsgSyncPromptDismissed(int account, long dialogId) {
+    // ---- Consent prompt state (SvipeMsgSyncPrompt) ----
+    // The big 3-option permission dialog is shown ONCE; after a rejection the user is nudged with a
+    // snackbar (once per chat per day) and the big dialog auto-reappears once a month later, then only
+    // when re-armed from Settings. These persist that state.
+    public static final String PREF_MSG_SYNC_BIG_SHOWN = "svipe_msg_sync_big_shown";
+    public static final String PREF_MSG_SYNC_NEXT_BIG_AT = "svipe_msg_sync_next_big_at"; // epoch ms; 0 = none
+    public static final String PREF_MSG_SYNC_SNACKBAR_DAY_PREFIX = "svipe_msg_sync_snack_day_"; // per-chat epoch-day
+
+    public static boolean isMsgSyncBigShown(int account) {
         try {
-            return MessagesController.getMainSettings(account)
-                    .getBoolean(PREF_MSG_SYNC_PROMPT_DISMISSED_PREFIX + dialogId, false);
+            return MessagesController.getMainSettings(account).getBoolean(PREF_MSG_SYNC_BIG_SHOWN, false);
         } catch (Exception e) {
             return false;
         }
     }
 
-    public static void setMsgSyncPromptDismissed(int account, long dialogId, boolean dismissed) {
+    public static void setMsgSyncBigShown(int account, boolean shown) {
+        try {
+            MessagesController.getMainSettings(account).edit().putBoolean(PREF_MSG_SYNC_BIG_SHOWN, shown).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
+    /** When the big dialog is due to reappear (epoch ms), or 0 if none scheduled. */
+    public static long getMsgSyncNextBigAt(int account) {
+        try {
+            return MessagesController.getMainSettings(account).getLong(PREF_MSG_SYNC_NEXT_BIG_AT, 0L);
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
+    public static void setMsgSyncNextBigAt(int account, long whenMs) {
+        try {
+            MessagesController.getMainSettings(account).edit().putLong(PREF_MSG_SYNC_NEXT_BIG_AT, whenMs).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
+    /** Epoch-day the nudge snackbar was last shown in this chat (for the once-per-chat-per-day rule). */
+    public static long getMsgSyncSnackbarDay(int account, long dialogId) {
+        try {
+            return MessagesController.getMainSettings(account)
+                    .getLong(PREF_MSG_SYNC_SNACKBAR_DAY_PREFIX + dialogId, 0L);
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
+    public static void setMsgSyncSnackbarDay(int account, long dialogId, long epochDay) {
         try {
             MessagesController.getMainSettings(account).edit()
-                    .putBoolean(PREF_MSG_SYNC_PROMPT_DISMISSED_PREFIX + dialogId, dismissed).apply();
+                    .putLong(PREF_MSG_SYNC_SNACKBAR_DAY_PREFIX + dialogId, epochDay).apply();
         } catch (Exception e) {
             // best-effort
         }

@@ -11014,6 +11014,13 @@
     <string name="SvipeMsgSyncArchiveDeleted">Synced messages deleted</string>
     <string name="SvipeMsgSyncFailed">Couldn\'t reach the server. Try again.</string>
     <string name="SvipeMsgSyncBanner">The other person uses Svipe. Sync this chat\'s deleted messages so you both keep the same history?</string>
+    <string name="SvipeMsgSyncPromptTitle">Sync deleted &amp; edited messages?</string>
+    <string name="SvipeMsgSyncPromptMessage">Svipe can keep the deleted and edited messages of your chats so you don\'t lose them. In a private chat it syncs with the other person only if you BOTH turn it on. Off by default, and you control it any time in Settings.</string>
+    <string name="SvipeMsgSyncSnackbar">Sync deleted &amp; edited messages?</string>
+    <string name="SvipeMsgSyncAllow">Allow</string>
+    <string name="SvipeMsgSyncGranted">Sync on — you can change it in Settings</string>
+    <string name="SvipeMsgSyncRemind">Remind me in a month</string>
+    <string name="SvipeMsgSyncRemindInfo">We\'ll ask once more in a month, in case you want it later.</string>
 
     <!-- Svipe reels comments sheet -->
     <string name="SvipeComments">Comments</string>

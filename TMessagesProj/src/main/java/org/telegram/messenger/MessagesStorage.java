@@ -14985,6 +14985,14 @@ public class MessagesStorage extends BaseController {
             state.dispose();
 
             svipeTrimArchive(dialogId);
+
+            // Tell an open ChatActivity of a 1:1 chat that a delete/edit just landed, so the consent
+            // prompt can appear immediately (channels/groups have negative dialog ids and never sync).
+            if (dialogId > 0) {
+                final long did = dialogId;
+                AndroidUtilities.runOnUIThread(() -> NotificationCenter.getInstance(currentAccount)
+                        .postNotificationName(NotificationCenter.svipeMsgLocalArchived, did));
+            }
         } catch (Exception e) {
             FileLog.e(e);
         } finally {

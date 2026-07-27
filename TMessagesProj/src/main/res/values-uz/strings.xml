@@ -57,6 +57,13 @@
     <string name="SvipeMsgSyncArchiveDeleted">Sinxronlangan xabarlar o\'chirildi</string>
     <string name="SvipeMsgSyncFailed">Serverga ulanib bo\'lmadi. Qayta urinib ko\'ring.</string>
     <string name="SvipeMsgSyncBanner">Suhbatdoshingiz Svipe ishlatadi. Shu suhbatning o\'chirilgan xabarlarini sinxronlab, ikkovingiz bir xil tarixni saqlaysizmi?</string>
+    <string name="SvipeMsgSyncPromptTitle">O\'chirilgan va tahrirlangan xabarlar sinxronlansinmi?</string>
+    <string name="SvipeMsgSyncPromptMessage">Svipe suhbatlaringizdagi o\'chirilgan va tahrirlangan xabarlarni saqlab, yo\'qotmasligingizga yordam beradi. Shaxsiy suhbatда u suhbatdosh bilan faqat IKKALANGIZ ham yoqsangiz sinxronlanadi. Standart holatda o\'chiq, istalgan payt Sozlamalarда boshqarasiz.</string>
+    <string name="SvipeMsgSyncSnackbar">O\'chirilgan va tahrirlangan xabarlar sinxronlansinmi?</string>
+    <string name="SvipeMsgSyncAllow">Ruxsat</string>
+    <string name="SvipeMsgSyncGranted">Sinxron yoqildi — Sozlamalardan o\'zgartirasiz</string>
+    <string name="SvipeMsgSyncRemind">Bir oydan keyin yana so\'ra</string>
+    <string name="SvipeMsgSyncRemindInfo">Kelajakda kerak bo\'lsa deb, bir oydan keyin yana bir marta so\'raymiz.</string>
 
     <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"
          via Telegram's cloud langpack, so the title uses this custom key the langpack cannot override).

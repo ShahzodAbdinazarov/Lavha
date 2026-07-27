@@ -526,7 +526,6 @@ public class ChatActivity extends BaseFragment implements
     public ChatAttachAlert chatAttachAlert;
     @Nullable
     private FrameLayout topChatPanelView;
-    private FrameLayout svipeMsgSyncBanner; // Svipe: message-sync mode-picker banner
     @Nullable
     private TextView addToContactsButton;
     private boolean addToContactsButtonArchive;
@@ -2900,6 +2899,7 @@ public class ChatActivity extends BaseFragment implements
             .add(NotificationCenter.didLoadSendAsPeers)
             .add(NotificationCenter.closeChatActivity)
             .add(NotificationCenter.messagesDeleted)
+            .add(NotificationCenter.svipeMsgLocalArchived) // Svipe: delete/edit -> consent prompt
             .add(NotificationCenter.historyCleared)
             .add(NotificationCenter.messageReceivedByServer)
             .add(NotificationCenter.messageReceivedByAck)
@@ -9714,11 +9714,12 @@ public class ChatActivity extends BaseFragment implements
         });
     }
 
-    // ---- Svipe: message-sync mode-picker banner ----
-    // An independent top-panel child (like pendingRequests), so it never touches updateTopPanel's logic.
-    // Shown once, in a 1:1 chat whose peer is a sync-enabled Svipe user, after this chat has an archived
-    // deletion/edit and while the user has not yet chosen a global sync mode. Tapping it opens the mode
-    // settings; the × dismisses it for this chat. This is the in-context consent prompt (plan phase 4).
+    // ---- Svipe: message-sync consent prompt (big dialog + snackbar) ----
+    // Fires when a message is deleted/edited in a 1:1 chat (NotificationCenter.svipeMsgLocalArchived).
+    // Not gated on the peer being a Svipe user — it records the user's OWN consent to sync their recent
+    // actions with the server; a chat still only syncs once BOTH sides grant (enforced server-side).
+    // The big 3-option dialog shows once; after a rejection a snackbar nudges (once/chat/day) and the big
+    // dialog auto-reappears a month later, then only when re-armed from Settings — see SvipeMsgSyncPrompt.
 
     private boolean svipeMsgSyncApplicable() {
         return currentUser != null
@@ -9726,92 +9727,96 @@ public class ChatActivity extends BaseFragment implements
                 && !currentUser.bot
                 && currentUser.id != getUserConfig().getClientUserId()
                 && currentChat == null
-                && currentEncryptedChat == null
-                && !org.telegram.svipe.SvipeConfig.hasMsgSyncMode(currentAccount)
-                && !org.telegram.svipe.SvipeConfig.isMsgSyncPromptDismissed(currentAccount, currentUser.id);
+                && currentEncryptedChat == null;
     }
 
-    private void createSvipeMsgSyncBanner() {
-        if (svipeMsgSyncBanner != null || getContext() == null || topPanelLayout == null) {
+    public void svipeMsgSyncMaybePrompt() {
+        if (getParentActivity() == null || !svipeMsgSyncApplicable()) {
             return;
         }
-        FrameLayout banner = new FrameLayout(getContext());
-        banner.setBackgroundColor(getThemedColor(Theme.key_chat_topPanelBackground));
-        banner.setClickable(true);
-        banner.setOnClickListener(v ->
-                presentFragment(new org.telegram.svipe.SvipeMessageSyncSettingsActivity()));
-
-        TextView text = new TextView(getContext());
-        text.setTextColor(getThemedColor(Theme.key_chat_topPanelTitle));
-        text.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        text.setMaxLines(2);
-        text.setEllipsize(TextUtils.TruncateAt.END);
-        text.setGravity(Gravity.CENTER_VERTICAL);
-        text.setText(LocaleController.getString(R.string.SvipeMsgSyncBanner));
-        banner.addView(text, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT,
-                Gravity.LEFT | Gravity.CENTER_VERTICAL, 16, 0, 44, 0));
-
-        ImageView close = new ImageView(getContext());
-        close.setImageResource(R.drawable.miniplayer_close);
-        close.setContentDescription(LocaleController.getString(R.string.Close));
-        close.setBackground(Theme.createCircleSelectorDrawable(getThemedColor(Theme.key_listSelector), 0, 0));
-        close.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_chat_topPanelClose), PorterDuff.Mode.MULTIPLY));
-        close.setScaleType(ImageView.ScaleType.CENTER);
-        banner.addView(close, LayoutHelper.createFrame(34, 34, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 5, 0));
-        close.setOnClickListener(v -> {
-            if (currentUser != null) {
-                org.telegram.svipe.SvipeConfig.setMsgSyncPromptDismissed(currentAccount, currentUser.id, true);
-            }
-            if (topPanelLayout != null && svipeMsgSyncBanner != null) {
-                topPanelLayout.setViewVisible(svipeMsgSyncBanner, false, true);
-            }
-        });
-
-        svipeMsgSyncBanner = banner;
-        topPanelLayout.addView(banner, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 44));
-        topPanelLayout.setPriority(banner, 9);
-        topPanelLayout.setDebugName(banner, "svipe msg sync banner");
-        topPanelLayout.setViewVisible(banner, false, false);
-    }
-
-    private void hideSvipeMsgSyncBanner() {
-        if (topPanelLayout != null && svipeMsgSyncBanner != null) {
-            topPanelLayout.setViewVisible(svipeMsgSyncBanner, false, true);
+        final long dialogId = currentUser.id;
+        final long now = System.currentTimeMillis();
+        final long today = org.telegram.svipe.SvipeMsgSyncPrompt.epochDay(now);
+        boolean snackbarToday = org.telegram.svipe.SvipeConfig.getMsgSyncSnackbarDay(currentAccount, dialogId) == today;
+        int what = org.telegram.svipe.SvipeMsgSyncPrompt.decide(
+                org.telegram.svipe.SvipeConfig.getMsgSyncMode(currentAccount),
+                org.telegram.svipe.SvipeConfig.isMsgSyncBigShown(currentAccount),
+                org.telegram.svipe.SvipeConfig.getMsgSyncNextBigAt(currentAccount),
+                now, snackbarToday);
+        if (what == org.telegram.svipe.SvipeMsgSyncPrompt.BIG_DIALOG) {
+            svipeMsgSyncShowBigDialog();
+        } else if (what == org.telegram.svipe.SvipeMsgSyncPrompt.SNACKBAR) {
+            svipeMsgSyncShowSnackbar(dialogId, today);
         }
     }
 
-    public void updateSvipeMsgSyncBanner() {
-        if (topPanelLayout == null) {
+    private void svipeMsgSyncShowBigDialog() {
+        if (getParentActivity() == null) {
             return;
         }
-        if (!svipeMsgSyncApplicable()) {
-            hideSvipeMsgSyncBanner();
-            return;
-        }
-        final long peerId = currentUser.id;
-        Boolean verdict = org.telegram.svipe.SvipeMessageSync.cachedPeerVerdict(peerId);
-        if (verdict == null) {
-            // Probe once (k-anonymously); re-evaluate when the verdict lands.
-            org.telegram.svipe.SvipeMessageSync.checkPeer(currentAccount, peerId,
-                    isPeer -> AndroidUtilities.runOnUIThread(this::updateSvipeMsgSyncBanner));
-            return;
-        }
-        if (!verdict) {
-            hideSvipeMsgSyncBanner();
-            return;
-        }
-        // Peer syncs and we haven't decided — show only once this chat actually has an archived
-        // deletion/edit, so the prompt lands in context rather than over an empty archive.
-        getMessagesStorage().hasSvipeArchivedMessages(peerId, has -> AndroidUtilities.runOnUIThread(() -> {
-            if (!has || !svipeMsgSyncApplicable()) {
-                hideSvipeMsgSyncBanner();
-                return;
+        // Showing consumes the "first ask" and any scheduled monthly re-ask.
+        boolean fromReAsk = org.telegram.svipe.SvipeConfig.getMsgSyncNextBigAt(currentAccount) > 0;
+        org.telegram.svipe.SvipeConfig.setMsgSyncBigShown(currentAccount, true);
+        org.telegram.svipe.SvipeConfig.setMsgSyncNextBigAt(currentAccount, 0);
+
+        AlertDialog.Builder b = new AlertDialog.Builder(getParentActivity());
+        b.setTitle(LocaleController.getString(R.string.SvipeMsgSyncPromptTitle));
+        b.setMessage(LocaleController.getString(R.string.SvipeMsgSyncPromptMessage));
+        b.setPositiveButton(LocaleController.getString(R.string.SvipeMsgSyncWithPartner),
+                (d, w) -> svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_WITH_PARTNER, fromReAsk));
+        b.setNeutralButton(LocaleController.getString(R.string.SvipeMsgSyncSelfOnly),
+                (d, w) -> svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_SELF_ONLY, fromReAsk));
+        b.setNegativeButton(LocaleController.getString(R.string.SvipeMsgSyncOff),
+                (d, w) -> svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_OFF, fromReAsk));
+        showDialog(b.create());
+    }
+
+    /** Persist the chosen mode, schedule the monthly re-ask on a FIRST rejection, and push to the server. */
+    private void svipeMsgSyncApply(String mode, boolean fromReAsk) {
+        org.telegram.svipe.SvipeConfig.setMsgSyncMode(currentAccount, mode);
+        if (org.telegram.svipe.SvipeMessageSync.MODE_OFF.equals(mode)) {
+            if (!fromReAsk) {
+                // First rejection: the big dialog auto-reappears once, a month from now.
+                org.telegram.svipe.SvipeConfig.setMsgSyncNextBigAt(currentAccount,
+                        System.currentTimeMillis() + org.telegram.svipe.SvipeMsgSyncPrompt.ONE_MONTH_MS);
             }
-            createSvipeMsgSyncBanner();
-            if (topPanelLayout != null && svipeMsgSyncBanner != null) {
-                topPanelLayout.setViewVisible(svipeMsgSyncBanner, true, true);
-            }
-        }));
+        } else {
+            org.telegram.svipe.SvipeConfig.setMsgSyncNextBigAt(currentAccount, 0); // granted -> no re-ask
+        }
+        org.telegram.svipe.SvipeMessageSync.setMyMode(currentAccount, mode, (applied, deleted, ok) -> {});
+        if (!org.telegram.svipe.SvipeMessageSync.MODE_OFF.equals(mode) && currentUser != null) {
+            org.telegram.svipe.SvipeMessageSync.syncDialogOnOpen(currentAccount, currentUser.id);
+        }
+    }
+
+    private void svipeMsgSyncShowSnackbar(long dialogId, long today) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        org.telegram.svipe.SvipeConfig.setMsgSyncSnackbarDay(currentAccount, dialogId, today); // once/chat/day
+        Bulletin.LottieLayout layout = new Bulletin.LottieLayout(getParentActivity(), themeDelegate);
+        layout.setAnimation(R.raw.chats_infotip, 36, 36);
+        layout.textView.setText(LocaleController.getString(R.string.SvipeMsgSyncSnackbar));
+        layout.setButton(new Bulletin.UndoButton(getParentActivity(), true, themeDelegate)
+                .setText(LocaleController.getString(R.string.SvipeMsgSyncAllow))
+                .setUndoAction(this::svipeMsgSyncSnackbarAllow));
+        // Tapping the body (not the Allow button) opens the settings screen.
+        layout.setOnClickListener(v -> presentFragment(new org.telegram.svipe.SvipeMessageSyncSettingsActivity()));
+        Bulletin.make(this, layout, Bulletin.DURATION_PROLONG).show();
+    }
+
+    private void svipeMsgSyncSnackbarAllow() {
+        svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_WITH_PARTNER, false);
+        if (getParentActivity() == null) {
+            return;
+        }
+        Bulletin.LottieLayout layout = new Bulletin.LottieLayout(getParentActivity(), themeDelegate);
+        layout.setAnimation(R.raw.chats_infotip, 36, 36);
+        layout.textView.setText(LocaleController.getString(R.string.SvipeMsgSyncGranted));
+        layout.setButton(new Bulletin.UndoButton(getParentActivity(), true, themeDelegate)
+                .setText(LocaleController.getString(R.string.Settings))
+                .setUndoAction(() -> presentFragment(new org.telegram.svipe.SvipeMessageSyncSettingsActivity())));
+        Bulletin.make(this, layout, Bulletin.DURATION_PROLONG).show();
     }
 
     private void createTranslateButton() {
@@ -22274,7 +22279,11 @@ public class ChatActivity extends BaseFragment implements
                     removeSelfFromStack();
                 }
             }
-            updateSvipeMsgSyncBanner(); // Svipe: a deletion just happened in this open chat -> prompt now, not on next open
+        } else if (id == NotificationCenter.svipeMsgLocalArchived) {
+            // Svipe: a message was just deleted/edited in a chat -> maybe prompt for sync consent (this one).
+            if (args.length > 0 && args[0] instanceof Long && currentUser != null && (Long) args[0] == currentUser.id) {
+                svipeMsgSyncMaybePrompt();
+            }
         } else if (id == NotificationCenter.quickRepliesDeleted) {
             if (chatMode != MODE_QUICK_REPLIES) return;
             if ((Long) args[1] != getQuickReplyId()) return;
@@ -29696,7 +29705,6 @@ public class ChatActivity extends BaseFragment implements
         checkAdjustResize();
         MediaController.getInstance().startRaiseToEarSensors(this);
         checkRaiseSensors();
-        updateSvipeMsgSyncBanner(); // Svipe: in-context mode-picker prompt
         if (currentUser != null && currentUser.id > 0 && !currentUser.bot
                 && currentChat == null && currentEncryptedChat == null) {
             // Svipe: publish this 1:1 chat's archived deletions/edits per the chosen sync mode (no-op if none).

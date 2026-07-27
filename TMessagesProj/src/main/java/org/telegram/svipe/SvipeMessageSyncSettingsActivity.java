@@ -18,6 +18,7 @@ import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.RadioCell;
+import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.LayoutHelper;
@@ -57,6 +58,8 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
     private int selfOnlyRow;
     private int offRow;
     private int modeInfoRow;
+    private int remindRow;       // only when mode == off
+    private int remindInfoRow;   // only when mode == off
     private int deleteRow;
     private int deleteInfoRow;
     private int rowCount;
@@ -68,8 +71,19 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
         selfOnlyRow = rowCount++;
         offRow = rowCount++;
         modeInfoRow = rowCount++;
+        remindRow = -1;
+        remindInfoRow = -1;
+        if (SvipeMessageSync.MODE_OFF.equals(mode)) {   // "remind me in a month" only makes sense after opting out
+            remindRow = rowCount++;
+            remindInfoRow = rowCount++;
+        }
         deleteRow = rowCount++;
         deleteInfoRow = rowCount++;
+    }
+
+    /** The monthly re-ask is armed when a future re-ask time is scheduled. */
+    private boolean isRemindArmed() {
+        return SvipeConfig.getMsgSyncNextBigAt(currentAccount) > System.currentTimeMillis();
     }
 
     @Override
@@ -116,11 +130,11 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
         adapter = new ListAdapter(context);
         listView.setAdapter(adapter);
         frameLayout.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-        listView.setOnItemClickListener((view, position) -> onRowClick(position));
+        listView.setOnItemClickListener((view, position) -> onRowClick(position, view));
         return fragmentView;
     }
 
-    private void onRowClick(int position) {
+    private void onRowClick(int position, View view) {
         if (position == withPartnerRow) {
             applyMode(SvipeMessageSync.MODE_WITH_PARTNER);
         } else if (position == selfOnlyRow) {
@@ -132,12 +146,21 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
             // Reciprocity warning (the "last seen" pattern): turning off also stops you receiving.
             confirm(R.string.SvipeMsgSyncOffConfirm, R.string.SvipeMsgSyncOff,
                     () -> applyMode(SvipeMessageSync.MODE_OFF));
+        } else if (position == remindRow) {
+            // One-shot "remind me in a month": arm schedules the big dialog for +1 month; disarm clears it.
+            boolean arm = !isRemindArmed();
+            SvipeConfig.setMsgSyncNextBigAt(currentAccount,
+                    arm ? System.currentTimeMillis() + SvipeMsgSyncPrompt.ONE_MONTH_MS : 0L);
+            if (view instanceof TextCheckCell) {
+                ((TextCheckCell) view).setChecked(arm);
+            }
         } else if (position == deleteRow) {
             confirm(R.string.SvipeMsgSyncDeleteConfirm, R.string.SvipeMsgSyncDelete, () ->
                     SvipeMessageSync.deleteMyArchive(currentAccount, (value, deleted, ok) -> {
                         if (ok) {
                             mode = SvipeMessageSync.MODE_OFF;
                             SvipeConfig.setMsgSyncMode(currentAccount, SvipeMessageSync.MODE_OFF);
+                            updateRows();
                             adapter.notifyDataSetChanged();
                         }
                         toast(ok ? R.string.SvipeMsgSyncArchiveDeleted : R.string.SvipeMsgSyncFailed);
@@ -149,11 +172,13 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
         String previous = mode;
         mode = value;                             // optimistic: the radios must not lag the tap
         SvipeConfig.setMsgSyncMode(currentAccount, value);
+        updateRows();                             // show/hide the "remind me" row for off
         adapter.notifyDataSetChanged();
         SvipeMessageSync.setMyMode(currentAccount, value, (applied, deleted, ok) -> {
             if (!ok) {
                 mode = previous;
                 SvipeConfig.setMsgSyncMode(currentAccount, previous);
+                updateRows();
                 toast(R.string.SvipeMsgSyncFailed);
             }
             adapter.notifyDataSetChanged();
@@ -195,7 +220,7 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
             return position == withPartnerRow || position == selfOnlyRow || position == offRow
-                    || position == deleteRow;
+                    || position == remindRow || position == deleteRow;
         }
 
         @Override
@@ -214,6 +239,9 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
             if (position == deleteRow) {
                 return 2;
             }
+            if (position == remindRow) {
+                return 4;
+            }
             return 3;
         }
 
@@ -231,6 +259,10 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
                     break;
                 case 2:
                     view = new TextSettingsCell(context);
+                    view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                    break;
+                case 4:
+                    view = new TextCheckCell(context);
                     view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                     break;
                 default:
@@ -272,10 +304,20 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
                     cell.setTextColor(Theme.getColor(Theme.key_text_RedRegular));
                     break;
                 }
+                case 4: {
+                    ((TextCheckCell) holder.itemView).setTextAndCheck(
+                            LocaleController.getString(R.string.SvipeMsgSyncRemind), isRemindArmed(), true);
+                    break;
+                }
                 default: {
                     TextInfoPrivacyCell cell = (TextInfoPrivacyCell) holder.itemView;
-                    cell.setText(LocaleController.getString(position == modeInfoRow
-                            ? R.string.SvipeMsgSyncModeInfo : R.string.SvipeMsgSyncDeleteInfo));
+                    int res = R.string.SvipeMsgSyncDeleteInfo;
+                    if (position == modeInfoRow) {
+                        res = R.string.SvipeMsgSyncModeInfo;
+                    } else if (position == remindInfoRow) {
+                        res = R.string.SvipeMsgSyncRemindInfo;
+                    }
+                    cell.setText(LocaleController.getString(res));
                     break;
                 }
             }

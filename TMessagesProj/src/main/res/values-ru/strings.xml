@@ -320,6 +320,13 @@
     <string name="SvipeMsgSyncArchiveDeleted">Синхронизированные сообщения удалены</string>
     <string name="SvipeMsgSyncFailed">Не удалось связаться с сервером. Попробуйте ещё раз.</string>
     <string name="SvipeMsgSyncBanner">Собеседник использует Svipe. Синхронизировать удалённые сообщения этого чата, чтобы у вас обоих была одна история?</string>
+    <string name="SvipeMsgSyncPromptTitle">Синхронизировать удалённые и изменённые сообщения?</string>
+    <string name="SvipeMsgSyncPromptMessage">Svipe может хранить удалённые и изменённые сообщения ваших чатов, чтобы вы их не теряли. В личном чате синхронизация с собеседником работает, только если её включат ОБА. По умолчанию выключено, вы управляете этим в Настройках.</string>
+    <string name="SvipeMsgSyncSnackbar">Синхронизировать удалённые и изменённые сообщения?</string>
+    <string name="SvipeMsgSyncAllow">Разрешить</string>
+    <string name="SvipeMsgSyncGranted">Синхронизация включена — изменить можно в Настройках</string>
+    <string name="SvipeMsgSyncRemind">Напомнить через месяц</string>
+    <string name="SvipeMsgSyncRemindInfo">Спросим ещё раз через месяц — вдруг пригодится позже.</string>
 
     <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"
          via Telegram's cloud langpack, so the title uses this custom key the langpack cannot override). -->
