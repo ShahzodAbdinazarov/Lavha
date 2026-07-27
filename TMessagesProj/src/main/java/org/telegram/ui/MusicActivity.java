@@ -148,6 +148,9 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
      * the insets, the drag's listAtTop() and the scroll-to-top handler for no gain. */
     private FavouritesPanel favPanel;
     private int favTab = FAV_TAB_SONGS;
+    // The gesture (by ACTION_DOWN time) whose horizontal swipe already switched a favourites sub-tab, so
+    // one continuous drag switches at most one sub-tab and never also spills to the outer pager.
+    private long favSwipeDownTime = -1;
     private final ArrayList<SvipeFavourite> favourites = new ArrayList<>();
     private final ArrayList<SvipeArtistFavourite> artistFavourites = new ArrayList<>();
     // Favourite key -> its entry in the CURRENT favQueue, so rows render as native audio cells.
@@ -1844,6 +1847,29 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
     @Override
     public boolean canParentTabsSlide(MotionEvent ev, boolean forward) {
+        // When the favourites panel is open, a horizontal swipe first moves BETWEEN its sub-tabs
+        // (Songs <-> Singers) and only spills to the outer Search/Profile tabs at the edges. Nested
+        // order left->right: Search | Songs | Singers | Profile. `forward` (finger-left) heads right
+        // (toward Singers, then Profile); backward (finger-right) heads left (toward Songs, then Search).
+        if (favPanel != null && favPanel.isOpen()) {
+            long dt = ev != null ? ev.getDownTime() : 0;
+            if (dt == favSwipeDownTime) {
+                return false;   // this gesture already switched a sub-tab -> keep the outer pager blocked
+            }
+            if (forward && favTab == FAV_TAB_SONGS) {
+                favSwipeDownTime = dt;
+                favPanel.selectTab(FAV_TAB_SINGERS);
+                setFavTab(FAV_TAB_SINGERS);
+                return false;
+            }
+            if (!forward && favTab == FAV_TAB_SINGERS) {
+                favSwipeDownTime = dt;
+                favPanel.selectTab(FAV_TAB_SONGS);
+                setFavTab(FAV_TAB_SONGS);
+                return false;
+            }
+            // Already on the edge sub-tab in this direction -> let the outer pager take over.
+        }
         return true;
     }
 
