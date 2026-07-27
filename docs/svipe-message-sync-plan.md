@@ -1,6 +1,8 @@
 # Svipe — O'chirilgan/tahrirlangan xabarlar arxivini serverda sinxronlash (reja)
 
-> Holat: **REJA (kod yozilmagan)**. 2026-07-27 muhokamasidan chiqqan, kod langarlari `ground-message-sync-plan` workflow (4 parallel o'quvchi) bilan grounded.
+> Holat: **1-BOSQICH ✅ + 2-BOSQICH ✅** (2026-07-27). Qolgani reja. Kod langarlari `ground-message-sync-plan` workflow (4 parallel o'quvchi) bilan grounded.
+> - **1-bosqich (media muqova, lokal)** — `feat(msg-archive)` `dev` da: `planMediaPin` + `svipeCaptureMedia`/`svipeExtractCover`, video/fayl → tiniq muqova. 21 unit-test, compile toza.
+> - **2-bosqich (backend poydevor)** — svipe-backend `dev`: 5 jadval (`msg_sync_*`), `msg_sync_repo`, `msg_sync_keys` (pure), `app/api/msg_sync.py` (`decide_pair_access` pure + `_deny` + mode/peers-check/erase), config. 20 unit + endpoint testlar; DB integration `tools/integration_db.sh`.
 > Asos: mavjud **lokal** o'chirilgan/tahrirlangan xabarlar arxivi (P1–P3 `dev` da qurilgan) — bu reja uning **ustiga** server qatlamini qo'shadi, lokal qismga tegmaydi.
 > Andoza: [[svipe-avatar-sync-plan]] backend + [[deleted-edited-messages-feature]] lokal arxiv.
 > Repolar: mobil `~/StudioProjects/Lavha`, backend `~/StudioProjects/svipe-backend`.
