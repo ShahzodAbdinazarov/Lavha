@@ -38,6 +38,11 @@
     <string name="SvipeAvatarSettingsFailed">Serverga ulanib bo\'lmadi. Qayta urinib ko\'ring.</string>
     <string name="SvipeIntroStart">Svayp qilishni boshlash</string>
 
+    <!-- Svipe terms & privacy disclosure (mandatory, shown once) -->
+    <string name="SvipeTermsTitle">Svipe — Shartlar va maxfiylik</string>
+    <string name="SvipeTermsMessage">Svipe — Telegram asosidagi mustaqil ilova. Agar shaxsiy suhbatdagi ikkala odam ham Svipe ishlatsa va ikkalasi ham yoqsa, Svipe o\'sha suhbatning o\'chirilgan va tahrirlangan xabarlarini akkauntingizda saqlab, ikkovingiz bir xil tarixni ko\'rasiz. U standart holatda o\'chiq, faqat o\'sha ikki kishiga tegishli, hech qachon guruh yoki Maxfiy chatlarga emas, va uni istalgan payt Sozlamalarda boshqarasiz. Nimalarni to\'playmiz, nega va qanday himoyalanadi — **Maxfiylik siyosati**da o\'qing.</string>
+    <string name="SvipeTermsAccept">Qabul qilish va davom etish</string>
+
     <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"
          via Telegram's cloud langpack, so the title uses this custom key the langpack cannot override).
          The other update strings keep their native keys and are localized by the cloud langpack. -->

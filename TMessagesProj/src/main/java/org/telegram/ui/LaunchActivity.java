@@ -7002,6 +7002,8 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                     layersActionBarLayout.onResume();
                 }
             }
+            // Svipe: mandatory terms & privacy disclosure, shown once (not over the passcode screen).
+            AndroidUtilities.runOnUIThread(() -> org.telegram.svipe.SvipeTerms.maybeShow(this), 300);
         } else {
             actionBarLayout.dismissDialogs();
             if (AndroidUtilities.isTablet()) {
