@@ -43,6 +43,21 @@
     <string name="SvipeTermsMessage">Svipe — Telegram asosidagi mustaqil ilova. Agar shaxsiy suhbatdagi ikkala odam ham Svipe ishlatsa va ikkalasi ham yoqsa, Svipe o\'sha suhbatning o\'chirilgan va tahrirlangan xabarlarini akkauntingizda saqlab, ikkovingiz bir xil tarixni ko\'rasiz. U standart holatda o\'chiq, faqat o\'sha ikki kishiga tegishli, hech qachon guruh yoki Maxfiy chatlarga emas, va uni istalgan payt Sozlamalarda boshqarasiz. Nimalarni to\'playmiz, nega va qanday himoyalanadi — **Maxfiylik siyosati**da o\'qing.</string>
     <string name="SvipeTermsAccept">Qabul qilish va davom etish</string>
 
+    <!-- Svipe message sync (P2P deleted/edited archive) -->
+    <string name="SvipeMsgSyncTitle">O\'chirilgan xabar sinxroni</string>
+    <string name="SvipeMsgSyncModeHeader">O\'chirilgan va tahrirlangan xabarlarni sinxronlash</string>
+    <string name="SvipeMsgSyncWithPartner">Suhbatdosh bilan</string>
+    <string name="SvipeMsgSyncSelfOnly">Faqat mening qurilmalarim</string>
+    <string name="SvipeMsgSyncOff">Sinxronlanmasin</string>
+    <string name="SvipeMsgSyncModeInfo">\"Suhbatdosh bilan\" — shaxsiy suhbatning o\'chirilgan va tahrirlangan xabarlarini ikkovingiz uchun saqlaydi, faqat ikkalangiz ham yoqsangiz. \"Faqat mening qurilmalarim\" — faqat o\'zingiz yuborgan xabarlarni o\'zingiz uchun zaxiralaydi. Alohida suhbatni o\'sha suhbat ichidan o\'chirib qo\'yishingiz mumkin. Guruh, kanal yoki Maxfiy chatlarga hech qachon qo\'llanmaydi.</string>
+    <string name="SvipeMsgSyncOffConfirm">Sinxronni o\'chirsangiz, suhbatdoshingizning o\'chirgan xabarlari ham sizga kelmaydi — xuddi \"oxirgi ko\'rilgan\"ni yashirgandek. O\'chirilsinmi?</string>
+    <string name="SvipeMsgSyncDelete">Serverdan hammasini o\'chirish</string>
+    <string name="SvipeMsgSyncDeleteInfo">Siz sinxronlagan barcha xabarni o\'chiradi. Qurilmangizda qoladi.</string>
+    <string name="SvipeMsgSyncDeleteConfirm">Serverga sinxronlagan barcha xabaringiz o\'chirilsinmi?</string>
+    <string name="SvipeMsgSyncArchiveDeleted">Sinxronlangan xabarlar o\'chirildi</string>
+    <string name="SvipeMsgSyncFailed">Serverga ulanib bo\'lmadi. Qayta urinib ko\'ring.</string>
+    <string name="SvipeMsgSyncBanner">Suhbatdoshingiz Svipe ishlatadi. Shu suhbatning o\'chirilgan xabarlarini sinxronlab, ikkovingiz bir xil tarixni saqlaysizmi?</string>
+
     <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"
          via Telegram's cloud langpack, so the title uses this custom key the langpack cannot override).
          The other update strings keep their native keys and are localized by the cloud langpack. -->

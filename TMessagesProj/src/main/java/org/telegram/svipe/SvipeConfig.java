@@ -124,4 +124,52 @@ public class SvipeConfig {
             // best-effort
         }
     }
+
+    // ---- Message sync (SvipeMessageSync): P2P archive of deleted/edited messages ----
+    // Cached copy of my server-held mode ("" = not decided), so the Privacy row and the in-chat banner
+    // can render instantly. The server stays the source of truth.
+    public static final String PREF_MSG_SYNC_MODE = "svipe_msg_sync_mode";
+    // Per-chat dismissal of the mode-picker banner (× tapped): don't nag again in that chat.
+    public static final String PREF_MSG_SYNC_PROMPT_DISMISSED_PREFIX = "svipe_msg_sync_prompt_dismissed_";
+
+    public static String getMsgSyncMode(int account) {
+        try {
+            return MessagesController.getMainSettings(account).getString(PREF_MSG_SYNC_MODE, "");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    public static void setMsgSyncMode(int account, String mode) {
+        try {
+            MessagesController.getMainSettings(account).edit()
+                    .putString(PREF_MSG_SYNC_MODE, mode == null ? "" : mode).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
+    /** Has the user already decided a mode (any of the three)? Blank means never asked. */
+    public static boolean hasMsgSyncMode(int account) {
+        String m = getMsgSyncMode(account);
+        return m != null && !m.isEmpty();
+    }
+
+    public static boolean isMsgSyncPromptDismissed(int account, long dialogId) {
+        try {
+            return MessagesController.getMainSettings(account)
+                    .getBoolean(PREF_MSG_SYNC_PROMPT_DISMISSED_PREFIX + dialogId, false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static void setMsgSyncPromptDismissed(int account, long dialogId, boolean dismissed) {
+        try {
+            MessagesController.getMainSettings(account).edit()
+                    .putBoolean(PREF_MSG_SYNC_PROMPT_DISMISSED_PREFIX + dialogId, dismissed).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
 }

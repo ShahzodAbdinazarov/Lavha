@@ -101,6 +101,7 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
     // Telegram's own profile-photo privacy because it is the same question, one layer further on.
     @Keep
     private int svipeAvatarArchiveRow;
+    private int svipeMsgSyncRow;
     @Keep
     private int bioRow;
     @Keep
@@ -425,6 +426,8 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
                 presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_PHOTO));
             } else if (position == svipeAvatarArchiveRow) { // Svipe
                 presentFragment(new org.telegram.svipe.SvipeAvatarSettingsActivity());
+            } else if (position == svipeMsgSyncRow) { // Svipe
+                presentFragment(new org.telegram.svipe.SvipeMessageSyncSettingsActivity());
             } else if (position == bioRow) {
                 presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_BIO));
             } else if (position == musicRow) {
@@ -743,6 +746,7 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
         lastSeenRow = rowCount++;
         profilePhotoRow = rowCount++;
         svipeAvatarArchiveRow = rowCount++; // Svipe
+        svipeMsgSyncRow = rowCount++; // Svipe
         forwardsRow = rowCount++;
         callsRow = rowCount++;
         groupsDetailRow = -1;
@@ -1029,6 +1033,7 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
             int position = holder.getAdapterPosition();
             return position == passcodeRow || position == passwordRow || position == passkeysRow || position == blockedRow || position == sessionsRow || position == secretWebpageRow || position == webSessionsRow ||
                     position == svipeAvatarArchiveRow || // Svipe: never waits on a Telegram privacy load
+                    position == svipeMsgSyncRow || // Svipe: same — instant, server-cached value
 
                     position == groupsRow && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_INVITE) ||
                     position == lastSeenRow && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_LASTSEEN) ||
@@ -1138,6 +1143,10 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
                         textCell.setTextAndValue(getString(R.string.SvipeAvatarArchive),
                                 org.telegram.svipe.SvipeAvatarSettingsActivity.visibilityLabel(
                                         org.telegram.svipe.SvipeConfig.getAvatarVisibility(currentAccount)), true);
+                    } else if (position == svipeMsgSyncRow) { // Svipe
+                        textCell.setTextAndValue(getString(R.string.SvipeMsgSyncTitle),
+                                org.telegram.svipe.SvipeMessageSyncSettingsActivity.modeLabel(
+                                        org.telegram.svipe.SvipeConfig.getMsgSyncMode(currentAccount)), true);
                     } else if (position == bioRow) {
                         if (getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_BIO)) {
                             showLoading = true;

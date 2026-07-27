@@ -11000,6 +11000,21 @@
     <string name="SvipeTermsMessage">Svipe is an independent app built on Telegram. When both people in a one-to-one chat use Svipe and both turn it on, Svipe can keep the deleted and edited messages of that chat in your account so you both see the same history. It is off by default, only covers those two people, never groups or Secret Chats, and you control it any time in Settings. Read what we collect, why, and how it is protected in our **Privacy Policy**.</string>
     <string name="SvipeTermsAccept">Accept &amp; Continue</string>
 
+    <!-- Svipe message sync (P2P deleted/edited archive) -->
+    <string name="SvipeMsgSyncTitle">Deleted message sync</string>
+    <string name="SvipeMsgSyncModeHeader">Sync deleted &amp; edited messages</string>
+    <string name="SvipeMsgSyncWithPartner">With the other person</string>
+    <string name="SvipeMsgSyncSelfOnly">Only my own devices</string>
+    <string name="SvipeMsgSyncOff">Don\'t sync</string>
+    <string name="SvipeMsgSyncModeInfo">\"With the other person\" keeps a one-to-one chat\'s deleted and edited messages for both of you — only if you both turn it on. \"Only my own devices\" backs up just the messages you sent, for yourself. You can turn a single chat off from inside that chat. Never applies to groups, channels or Secret Chats.</string>
+    <string name="SvipeMsgSyncOffConfirm">If you turn sync off, the other person\'s deleted messages won\'t reach you either — just like hiding your last seen. Turn it off?</string>
+    <string name="SvipeMsgSyncDelete">Delete everything from the server</string>
+    <string name="SvipeMsgSyncDeleteInfo">Removes every message you have synced. It stays on your device.</string>
+    <string name="SvipeMsgSyncDeleteConfirm">Delete every message you have synced to the server?</string>
+    <string name="SvipeMsgSyncArchiveDeleted">Synced messages deleted</string>
+    <string name="SvipeMsgSyncFailed">Couldn\'t reach the server. Try again.</string>
+    <string name="SvipeMsgSyncBanner">The other person uses Svipe. Sync this chat\'s deleted messages so you both keep the same history?</string>
+
     <!-- Svipe reels comments sheet -->
     <string name="SvipeComments">Comments</string>
     <string name="SvipeCommentHint">Add a comment…</string>

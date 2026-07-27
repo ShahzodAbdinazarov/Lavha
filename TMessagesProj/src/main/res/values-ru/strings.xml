@@ -306,6 +306,21 @@
     <string name="SvipeTermsMessage">Svipe — независимое приложение на базе Telegram. Если оба собеседника в личном чате используют Svipe и оба включат это, Svipe сохранит удалённые и изменённые сообщения этого чата в вашем аккаунте, чтобы вы оба видели одну историю. По умолчанию выключено, охватывает только этих двух людей, никогда не группы и не секретные чаты, и вы в любой момент управляете этим в Настройках. Что мы собираем, зачем и как это защищено — читайте в **Политике конфиденциальности**.</string>
     <string name="SvipeTermsAccept">Принять и продолжить</string>
 
+    <!-- Svipe message sync (P2P deleted/edited archive) -->
+    <string name="SvipeMsgSyncTitle">Синхронизация удалённых сообщений</string>
+    <string name="SvipeMsgSyncModeHeader">Синхронизировать удалённые и изменённые сообщения</string>
+    <string name="SvipeMsgSyncWithPartner">С собеседником</string>
+    <string name="SvipeMsgSyncSelfOnly">Только мои устройства</string>
+    <string name="SvipeMsgSyncOff">Не синхронизировать</string>
+    <string name="SvipeMsgSyncModeInfo">«С собеседником» — хранит удалённые и изменённые сообщения личного чата для вас обоих, только если оба включите. «Только мои устройства» — резервирует лишь ваши сообщения, для вас. Отдельный чат можно отключить внутри самого чата. Никогда не применяется к группам, каналам и секретным чатам.</string>
+    <string name="SvipeMsgSyncOffConfirm">Если выключить синхронизацию, удалённые сообщения собеседника тоже не будут к вам приходить — как при скрытом «был(а) в сети». Выключить?</string>
+    <string name="SvipeMsgSyncDelete">Удалить всё с сервера</string>
+    <string name="SvipeMsgSyncDeleteInfo">Удаляет все синхронизированные вами сообщения. На устройстве они останутся.</string>
+    <string name="SvipeMsgSyncDeleteConfirm">Удалить все сообщения, синхронизированные вами на сервер?</string>
+    <string name="SvipeMsgSyncArchiveDeleted">Синхронизированные сообщения удалены</string>
+    <string name="SvipeMsgSyncFailed">Не удалось связаться с сервером. Попробуйте ещё раз.</string>
+    <string name="SvipeMsgSyncBanner">Собеседник использует Svipe. Синхронизировать удалённые сообщения этого чата, чтобы у вас обоих была одна история?</string>
+
     <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"
          via Telegram's cloud langpack, so the title uses this custom key the langpack cannot override). -->
     <string name="SvipeUpdateTitle">Обновить Svipe</string>
