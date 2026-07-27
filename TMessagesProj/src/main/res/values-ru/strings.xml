@@ -321,9 +321,10 @@
     <string name="SvipeMsgSyncFailed">Не удалось связаться с сервером. Попробуйте ещё раз.</string>
     <string name="SvipeMsgSyncBanner">Собеседник использует Svipe. Синхронизировать удалённые сообщения этого чата, чтобы у вас обоих была одна история?</string>
     <string name="SvipeMsgSyncPromptTitle">Синхронизировать удалённые и изменённые сообщения?</string>
-    <string name="SvipeMsgSyncPromptMessage">Svipe может хранить удалённые и изменённые сообщения ваших чатов, чтобы вы их не теряли. В личном чате синхронизация с собеседником работает, только если её включат ОБА. По умолчанию выключено, вы управляете этим в Настройках.</string>
+    <string name="SvipeMsgSyncPromptMessage">**Svipe** может хранить сообщения, которые вы удаляете или редактируете, чтобы вы их не теряли. **Разрешить** — синхронизировать с собеседником (только если включат оба) и между вашими устройствами. **Мне** — резервировать только ваши сообщения. **Отклонить** — не синхронизировать. Это можно изменить в Настройках.</string>
     <string name="SvipeMsgSyncSnackbar">Синхронизировать удалённые и изменённые сообщения?</string>
     <string name="SvipeMsgSyncAllow">Разрешить</string>
+    <string name="SvipeMsgSyncForMe">Мне</string>
     <string name="SvipeMsgSyncGranted">Синхронизация включена — изменить можно в Настройках</string>
     <string name="SvipeMsgSyncRemind">Не спрашивать месяц</string>
     <string name="SvipeMsgSyncRemindInfo">Включите, чтобы месяц не показывать запросы синхронизации.</string>

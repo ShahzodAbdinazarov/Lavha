@@ -9730,10 +9730,19 @@ public class ChatActivity extends BaseFragment implements
                 && currentEncryptedChat == null;
     }
 
+    private long svipeMsgSyncLastPromptAt;
+
     public void svipeMsgSyncMaybePrompt() {
         if (getParentActivity() == null || !svipeMsgSyncApplicable()) {
             return;
         }
+        // A single delete can reach here from two sources (the archive notification AND the delete
+        // action hook); debounce so we never show a dialog and a snackbar for the same action.
+        final long nowMs = System.currentTimeMillis();
+        if (nowMs - svipeMsgSyncLastPromptAt < 1500) {
+            return;
+        }
+        svipeMsgSyncLastPromptAt = nowMs;
         final long dialogId = currentUser.id;
         final long now = System.currentTimeMillis();
         final long today = org.telegram.svipe.SvipeMsgSyncPrompt.epochDay(now);
@@ -9760,14 +9769,18 @@ public class ChatActivity extends BaseFragment implements
         org.telegram.svipe.SvipeConfig.setMsgSyncBigShown(currentAccount, true);
         org.telegram.svipe.SvipeConfig.setMsgSyncNextBigAt(currentAccount, 0);
 
+        // Reuse Telegram's bot-permission look: a two-avatar header (you -> Svipe) with three
+        // right-aligned text buttons. Order left->right is Decline | For me | Allow (Allow primary).
         AlertDialog.Builder b = new AlertDialog.Builder(getParentActivity());
-        b.setTitle(LocaleController.getString(R.string.SvipeMsgSyncPromptTitle));
-        b.setMessage(LocaleController.getString(R.string.SvipeMsgSyncPromptMessage));
-        b.setPositiveButton(LocaleController.getString(R.string.SvipeMsgSyncWithPartner),
+        b.setTopImage(new org.telegram.svipe.SvipeSyncHeaderDrawable(getParentActivity(), getUserConfig().getCurrentUser()),
+                Theme.getColor(Theme.key_dialogTopBackground));
+        b.setMessage(AndroidUtilities.replaceTags(LocaleController.getString(R.string.SvipeMsgSyncPromptMessage)));
+        b.setRightAlignedButtons(true);
+        b.setPositiveButton(LocaleController.getString(R.string.SvipeMsgSyncAllow),
                 (d, w) -> svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_WITH_PARTNER, fromReAsk));
-        b.setNeutralButton(LocaleController.getString(R.string.SvipeMsgSyncSelfOnly),
+        b.setNegativeButton(LocaleController.getString(R.string.SvipeMsgSyncForMe),
                 (d, w) -> svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_SELF_ONLY, fromReAsk));
-        b.setNegativeButton(LocaleController.getString(R.string.SvipeMsgSyncOff),
+        b.setNeutralButton(LocaleController.getString(R.string.Decline),
                 (d, w) -> svipeMsgSyncApply(org.telegram.svipe.SvipeMessageSync.MODE_OFF, fromReAsk));
         showDialog(b.create());
     }
@@ -30520,6 +30533,10 @@ public class ChatActivity extends BaseFragment implements
         AlertsCreator.createDeleteMessagesAlert(this, currentUser, currentChat, currentEncryptedChat, chatInfo, mergeDialogId, finalSelectedObject, selectedMessagesIds, finalSelectedGroup, (int) getTopicId(), chatMode, null, () -> {
             hideActionMode();
             updatePinnedMessageView(true);
+            // Svipe: deleting message(s) in a 1:1 is a consent trigger too (like editing). The archive
+            // store only captures incoming deletes/own edits, so hook the delete action here directly;
+            // posted after the delete settles so the prompt isn't torn down with the action mode.
+            AndroidUtilities.runOnUIThread(this::svipeMsgSyncMaybePrompt, 250);
         }, hideDimAfter ? () -> dimBehindView(false) : null, themeDelegate);
     }
 

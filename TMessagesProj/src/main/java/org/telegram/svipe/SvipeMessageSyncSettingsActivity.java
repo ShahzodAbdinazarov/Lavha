@@ -151,6 +151,11 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
             boolean mute = !isMuted();
             SvipeConfig.setMsgSyncMutedUntil(currentAccount,
                     mute ? System.currentTimeMillis() + SvipeMsgSyncPrompt.ONE_MONTH_MS : 0L);
+            if (!mute) {
+                // Un-muting re-arms the big consent dialog, so it shows again on the next delete/edit.
+                SvipeConfig.setMsgSyncBigShown(currentAccount, false);
+                SvipeConfig.setMsgSyncNextBigAt(currentAccount, 0L);
+            }
             if (view instanceof TextCheckCell) {
                 ((TextCheckCell) view).setChecked(mute);
             }

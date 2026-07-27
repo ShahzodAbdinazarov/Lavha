@@ -166,6 +166,8 @@ public class AlertDialog extends Dialog implements Drawable.Callback, Notificati
     private OnButtonClickListener negative2ButtonListener;
     private CharSequence neutralButtonText;
     private OnButtonClickListener neutralButtonListener;
+    // Svipe: keep the neutral button in the right-hand group so three buttons read Decline | For me | Allow.
+    private boolean rightAlignedButtons;
     protected ViewGroup buttonsLayout;
     private LineProgressView lineProgressView;
     private TextView lineProgressViewPercent;
@@ -990,7 +992,22 @@ public class AlertDialog extends Dialog implements Drawable.Callback, Notificati
                                         child.layout(x, getPaddingTop(), x + child.getMeasuredWidth(), getPaddingTop() + child.getMeasuredHeight());
                                     }
                                 } else if (tag == Dialog.BUTTON_NEUTRAL) {
-                                    if (LocaleController.isRTL) {
+                                    if (rightAlignedButtons) {
+                                        // Opt-in: neutral joins the right-hand group, left of negative (Decline | For me | Allow).
+                                        View pos = findViewWithTag(Dialog.BUTTON_POSITIVE);
+                                        View neg = findViewWithTag(Dialog.BUTTON_NEGATIVE);
+                                        if (LocaleController.isRTL) {
+                                            int x = getPaddingLeft();
+                                            if (pos != null) x += pos.getMeasuredWidth() + dp(8);
+                                            if (neg != null) x += neg.getMeasuredWidth() + dp(8);
+                                            child.layout(x, getPaddingTop(), x + child.getMeasuredWidth(), getPaddingTop() + child.getMeasuredHeight());
+                                        } else {
+                                            int x = width - getPaddingRight() - child.getMeasuredWidth();
+                                            if (pos != null) x -= pos.getMeasuredWidth() + dp(8);
+                                            if (neg != null) x -= neg.getMeasuredWidth() + dp(8);
+                                            child.layout(x, getPaddingTop(), x + child.getMeasuredWidth(), getPaddingTop() + child.getMeasuredHeight());
+                                        }
+                                    } else if (LocaleController.isRTL) {
                                         child.layout(width - getPaddingRight() - child.getMeasuredWidth(), getPaddingTop(), width - getPaddingRight(), getPaddingTop() + child.getMeasuredHeight());
                                     } else {
                                         child.layout(getPaddingLeft(), getPaddingTop(), getPaddingLeft() + child.getMeasuredWidth(), getPaddingTop() + child.getMeasuredHeight());
@@ -1740,6 +1757,11 @@ public class AlertDialog extends Dialog implements Drawable.Callback, Notificati
 
         public Builder forceVerticalButtons() {
             alertDialog.verticalButtons = true;
+            return this;
+        }
+
+        public Builder setRightAlignedButtons(boolean value) {
+            alertDialog.rightAlignedButtons = value;
             return this;
         }
 

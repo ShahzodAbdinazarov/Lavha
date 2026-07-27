@@ -58,9 +58,10 @@
     <string name="SvipeMsgSyncFailed">Serverga ulanib bo\'lmadi. Qayta urinib ko\'ring.</string>
     <string name="SvipeMsgSyncBanner">Suhbatdoshingiz Svipe ishlatadi. Shu suhbatning o\'chirilgan xabarlarini sinxronlab, ikkovingiz bir xil tarixni saqlaysizmi?</string>
     <string name="SvipeMsgSyncPromptTitle">O\'chirilgan va tahrirlangan xabarlar sinxronlansinmi?</string>
-    <string name="SvipeMsgSyncPromptMessage">Svipe suhbatlaringizdagi o\'chirilgan va tahrirlangan xabarlarni saqlab, yo\'qotmasligingizga yordam beradi. Shaxsiy suhbatда u suhbatdosh bilan faqat IKKALANGIZ ham yoqsangiz sinxronlanadi. Standart holatda o\'chiq, istalgan payt Sozlamalarда boshqarasiz.</string>
+    <string name="SvipeMsgSyncPromptMessage">**Svipe** o\'chirgan yoki tahrirlagan xabarlaringizni saqlab, yo\'qotmasligingizga yordam beradi. **Ruxsat** — suhbatdosh bilan (faqat ikkalangiz ham yoqsangiz) va o\'z qurilmalaringiz aro sinxronlash. **O\'zimga** — faqat o\'z xabarlaringizni zaxiralash. **Rad etish** — sinxronlamaslik. Istalgan payt Sozlamalarda o\'zgartirasiz.</string>
     <string name="SvipeMsgSyncSnackbar">O\'chirilgan va tahrirlangan xabarlar sinxronlansinmi?</string>
     <string name="SvipeMsgSyncAllow">Ruxsat</string>
+    <string name="SvipeMsgSyncForMe">O\'zimga</string>
     <string name="SvipeMsgSyncGranted">Sinxron yoqildi — Sozlamalardan o\'zgartirasiz</string>
     <string name="SvipeMsgSyncRemind">Bir oy so\'ralmasin</string>
     <string name="SvipeMsgSyncRemindInfo">Yoqsangiz, bir oygacha sinxronlash umuman so\'ralmaydi.</string>
