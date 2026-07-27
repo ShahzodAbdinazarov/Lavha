@@ -33,6 +33,14 @@ public class SvipeMessageArchiveStore {
     public static final int MAX_PER_DIALOG = 2000;
     public static final long MAX_BYTES_PER_DIALOG = 32L * 1024 * 1024; // 32 MB
 
+    /** Media-pin outcomes (see {@link #planMediaPin}). */
+    public static final int PIN_NONE = 0;   // pin nothing — the inline blurred thumb still rides in the blob
+    public static final int PIN_FULL = 1;   // copy the whole cached media file
+    public static final int PIN_COVER = 2;  // store only a sharp still cover, never the multi-MB payload
+
+    /** Above this, an image is treated as an oversized "sent as file" payload and pinned as a cover, not in full. */
+    public static final long MAX_PHOTO_BYTES = 2L * 1024 * 1024; // 2 MB
+
     // ---- singleton ----
 
     private static volatile SvipeMessageArchiveStore instance;
@@ -98,6 +106,38 @@ public class SvipeMessageArchiveStore {
             this.bytes = bytes;
             this.mediaPath = mediaPath;
         }
+    }
+
+    /**
+     * Media-pin policy (owner-approved, plan §7). Keep photos and short audio/round messages in full,
+     * but for videos and files store only a sharp cover — never the multi-MB payload. Stickers and GIFs
+     * are public and re-fetchable by document id, so pin nothing. This bounds the on-disk archive: one
+     * 20 MB video used to eat two-thirds of a dialog's 32 MB budget and evict everything else; a cover
+     * costs tens of KB. Pure: takes classification booleans, returns a {@code PIN_*} code.
+     *
+     * @param hasMedia        the message carries non-empty media
+     * @param isPhoto         media is a photo (TL_messageMediaPhoto)
+     * @param isVoiceOrRound  media is a voice message or a round video note (small, kept in full)
+     * @param isStickerOrGif  media is a sticker, animated sticker, or GIF (pin nothing)
+     * @param canProduceCover a sharp cover is obtainable locally (a cached thumb, or a cached video to frame)
+     * @param photoBytes      size of the cached full media file in bytes (0 if not cached)
+     * @param maxPhotoBytes   {@link #MAX_PHOTO_BYTES}
+     */
+    public static int planMediaPin(boolean hasMedia,
+                                   boolean isPhoto,
+                                   boolean isVoiceOrRound,
+                                   boolean isStickerOrGif,
+                                   boolean canProduceCover,
+                                   long photoBytes,
+                                   long maxPhotoBytes) {
+        if (!hasMedia) return PIN_NONE;
+        if (isStickerOrGif) return PIN_NONE;                 // public, re-fetchable by document id
+        if (isVoiceOrRound) return PIN_FULL;                 // small and precious
+        if (isPhoto) {
+            if (photoBytes > 0 && photoBytes <= maxPhotoBytes) return PIN_FULL;
+            return canProduceCover ? PIN_COVER : PIN_NONE;   // oversized image (sent as file) -> cover
+        }
+        return canProduceCover ? PIN_COVER : PIN_NONE;       // video or any other document (file)
     }
 
     /** Next version index for a message id given the versions already stored for it. */

@@ -16,8 +16,10 @@ import static org.telegram.messenger.MessagesController.LOAD_FROM_UNREAD;
 
 import android.appwidget.AppWidgetManager;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.provider.MediaStore;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
@@ -59,6 +61,7 @@ import org.telegram.ui.EditWidgetActivity;
 import org.telegram.ui.Stories.StoriesController;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -14945,17 +14948,12 @@ public class MessagesStorage extends BaseController {
             }
             c.dispose();
 
-            // Pin media only if it is already cached — never triggers a download (R9). Synchronous so
-            // it completes before the surrounding delete pipeline removes the cached file.
+            // Pin media only from what is already cached — never triggers a download (R9). Synchronous so
+            // it completes before the surrounding delete pipeline removes the cached file. Videos and files
+            // keep only a sharp cover (not the multi-MB payload); see svipeCaptureMedia / planMediaPin.
             String mediaPath = null;
             try {
-                File src = getFileLoader().getPathToMessage(message);
-                if (src != null && src.exists() && src.length() > 0) {
-                    File dest = SvipeMessageArchiveStore.getInstance().mediaFileFor(currentAccount, dialogId, mid, version);
-                    if (dest != null && AndroidUtilities.copyFileSafe(src, dest)) {
-                        mediaPath = dest.getAbsolutePath();
-                    }
-                }
+                mediaPath = svipeCaptureMedia(message, dialogId, mid, version);
             } catch (Exception e) {
                 FileLog.e(e);
             }
@@ -14994,6 +14992,94 @@ public class MessagesStorage extends BaseController {
                 data.reuse();
             }
         }
+    }
+
+    /**
+     * Persist the archived copy of a message's media, applying the media-pin policy (plan §7): photos and
+     * short audio/round messages in full; videos and files as a sharp cover only; stickers/GIFs not at all.
+     * Reads only already-cached files — never starts a download (R9). Returns the pinned file path or null.
+     */
+    private String svipeCaptureMedia(TLRPC.Message message, long dialogId, int mid, int version) {
+        TLRPC.MessageMedia media = message.media;
+        if (media == null || media instanceof TLRPC.TL_messageMediaEmpty) {
+            return null;
+        }
+        boolean isPhoto = media instanceof TLRPC.TL_messageMediaPhoto;
+        TLRPC.Document doc = media.document;
+        boolean isVoiceOrRound = doc != null
+                && (MessageObject.isVoiceDocument(doc) || MessageObject.isRoundVideoDocument(doc));
+        boolean isStickerOrGif = doc != null
+                && (MessageObject.isStickerDocument(doc)
+                    || MessageObject.isAnimatedStickerDocument(doc)
+                    || MessageObject.isGifDocument(doc));
+        boolean isVideo = doc != null && MessageObject.isVideoDocument(doc);
+
+        File src = getFileLoader().getPathToMessage(message);
+        long fullBytes = (src != null && src.exists()) ? src.length() : 0;
+
+        // Resolve a locally-available sharp cover: a cached real (non-stripped) thumb, or a frame of a
+        // cached video. ignoreStripped=true skips the tiny blurred inline size that always rides in the blob.
+        ArrayList<TLRPC.PhotoSize> thumbs = doc != null ? doc.thumbs
+                : (isPhoto && media.photo != null ? media.photo.sizes : null);
+        File thumbFile = null;
+        if (thumbs != null && !thumbs.isEmpty()) {
+            TLRPC.PhotoSize cover = FileLoader.getClosestPhotoSizeWithSize(thumbs, AndroidUtilities.getPhotoSize(), false, null, true);
+            if (cover != null) {
+                File tf = getFileLoader().getPathToAttach(cover, true);
+                if (tf != null && tf.exists() && tf.length() > 0) {
+                    thumbFile = tf;
+                }
+            }
+        }
+        boolean videoCached = isVideo && src != null && src.exists() && src.length() > 0;
+        boolean canProduceCover = thumbFile != null || videoCached;
+
+        int plan = SvipeMessageArchiveStore.planMediaPin(true, isPhoto, isVoiceOrRound, isStickerOrGif,
+                canProduceCover, fullBytes, SvipeMessageArchiveStore.MAX_PHOTO_BYTES);
+        if (plan == SvipeMessageArchiveStore.PIN_NONE) {
+            return null;
+        }
+        File dest = SvipeMessageArchiveStore.getInstance().mediaFileFor(currentAccount, dialogId, mid, version);
+        if (dest == null) {
+            return null;
+        }
+        if (plan == SvipeMessageArchiveStore.PIN_FULL) {
+            if (src != null && src.exists() && src.length() > 0 && AndroidUtilities.copyFileSafe(src, dest)) {
+                return dest.getAbsolutePath();
+            }
+            return null;
+        }
+        return svipeExtractCover(thumbFile, videoCached ? src : null, dest);
+    }
+
+    /** Write a sharp cover to {@code dest}: prefer an already-cached thumb file, else a frame of the cached video. */
+    private String svipeExtractCover(File thumbFile, File videoSrc, File dest) {
+        if (thumbFile != null && AndroidUtilities.copyFileSafe(thumbFile, dest)) {
+            return dest.getAbsolutePath();
+        }
+        if (videoSrc != null) {
+            Bitmap bmp = null;
+            FileOutputStream fos = null;
+            try {
+                bmp = SendMessagesHelper.createVideoThumbnail(videoSrc.getAbsolutePath(), MediaStore.Video.Thumbnails.MINI_KIND);
+                if (bmp != null) {
+                    fos = new FileOutputStream(dest);
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 80, fos);
+                    fos.flush();
+                    return dest.getAbsolutePath();
+                }
+            } catch (Exception e) {
+                FileLog.e(e);
+            } finally {
+                if (fos != null) {
+                    try { fos.close(); } catch (Exception ignore) {}
+                }
+                if (bmp != null) {
+                    bmp.recycle();
+                }
+            }
+        }
+        return null;
     }
 
     /** Enforce the per-dialog count + byte caps, deleting the oldest rows and their pinned media. */

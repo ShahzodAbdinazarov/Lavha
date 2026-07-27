@@ -71,6 +71,69 @@ public class SvipeMessageArchiveStoreTest {
         assertEquals(keys(Arrays.asList(row(1, 1, 1000L, 40), row(2, 1, 2000L, 40))), keys(evict));
     }
 
+    // ---- media-pin policy (plan §7) ----
+
+    private static final long CAP = SvipeMessageArchiveStore.MAX_PHOTO_BYTES;
+
+    private static int pin(boolean hasMedia, boolean isPhoto, boolean isVoiceOrRound,
+                           boolean isStickerOrGif, boolean canCover, long photoBytes) {
+        return SvipeMessageArchiveStore.planMediaPin(hasMedia, isPhoto, isVoiceOrRound, isStickerOrGif, canCover, photoBytes, CAP);
+    }
+
+    @Test
+    public void pinNothingWhenNoMedia() {
+        assertEquals(SvipeMessageArchiveStore.PIN_NONE, pin(false, false, false, false, true, 0));
+    }
+
+    @Test
+    public void pinNothingForStickersAndGifs() {
+        // even when a cover could be produced, stickers/GIFs are public and re-fetchable by document id
+        assertEquals(SvipeMessageArchiveStore.PIN_NONE, pin(true, false, false, true, true, 0));
+    }
+
+    @Test
+    public void pinFullForVoiceOrRound() {
+        assertEquals(SvipeMessageArchiveStore.PIN_FULL, pin(true, false, true, false, false, 0));
+    }
+
+    @Test
+    public void pinFullForPhotoUnderCap() {
+        assertEquals(SvipeMessageArchiveStore.PIN_FULL, pin(true, true, false, false, false, CAP - 1));
+        assertEquals(SvipeMessageArchiveStore.PIN_FULL, pin(true, true, false, false, false, CAP)); // boundary inclusive
+    }
+
+    @Test
+    public void pinCoverForOversizedPhotoWhenCoverAvailable() {
+        assertEquals(SvipeMessageArchiveStore.PIN_COVER, pin(true, true, false, false, true, CAP + 1));
+    }
+
+    @Test
+    public void pinNothingForOversizedPhotoWithoutCover() {
+        assertEquals(SvipeMessageArchiveStore.PIN_NONE, pin(true, true, false, false, false, CAP + 1));
+    }
+
+    @Test
+    public void pinCoverForUncachedPhotoThatStillHasACover() {
+        // full file not on disk (0 bytes) but a smaller cached size can serve as the cover
+        assertEquals(SvipeMessageArchiveStore.PIN_COVER, pin(true, true, false, false, true, 0));
+    }
+
+    @Test
+    public void pinCoverForVideoWithCover() {
+        assertEquals(SvipeMessageArchiveStore.PIN_COVER, pin(true, false, false, false, true, 50L * 1024 * 1024));
+    }
+
+    @Test
+    public void pinNothingForVideoWithoutCover() {
+        assertEquals(SvipeMessageArchiveStore.PIN_NONE, pin(true, false, false, false, false, 50L * 1024 * 1024));
+    }
+
+    @Test
+    public void pinCoverForGenericFileWithCover() {
+        // a non-photo, non-video document (pdf/apk/music) is a "file" -> cover only
+        assertEquals(SvipeMessageArchiveStore.PIN_COVER, pin(true, false, false, false, true, 8L * 1024 * 1024));
+    }
+
     @Test
     public void trimHonorsWhicheverCapBitesHarder() {
         List<SvipeMessageArchiveStore.ArchiveRow> rows = Arrays.asList(
