@@ -1710,7 +1710,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 nextPlayer = null;
                 nextPlayerPos = -1;
             } else {
-                player = new VideoPlayer(false, false);
+                player = new VideoPlayer(true, false); // Svipe: pauseOther=true -> starting a reel pauses music, and music pauses the reel
                 player.setIsReels();
                 player.setLooping(true);
             }
@@ -2144,7 +2144,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         try {
             TLRPC.Document doc = item.mo.getDocument();
             if (doc == null) return;
-            VideoPlayer p = new VideoPlayer(false, false);
+            VideoPlayer p = new VideoPlayer(true, false); // Svipe: pauseOther=true -> mutual exclusion with music
             p.setIsReels();
             p.setLooping(true);
             // VideoPlayer NPEs if a state change arrives with no delegate — give the idle player
