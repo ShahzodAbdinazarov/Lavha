@@ -53,4 +53,36 @@ public class SvipeMessageSyncTest {
         assertFalse(SvipeMessageSync.matchesPeer(peer, new HashSet<>()));
         assertFalse(SvipeMessageSync.matchesPeer(peer, null));
     }
+
+    // ---- merge key (content-addressed, side-invariant) ----
+
+    @Test
+    public void mergeKeyIsSideInvariantForTheSameMessage() {
+        // Same author, date, text, media on both devices -> identical key (the mid differs, but is not used).
+        String ch = SvipeMessageSync.contentHash("see you at 8", 0);
+        assertEquals(SvipeMessageSync.mergeKey(1001, 1700, ch),
+                SvipeMessageSync.mergeKey(1001, 1700, ch));
+        assertTrue(SvipeMessageSync.mergeKey(1001, 1700, ch).matches("[0-9a-f]{64}"));
+    }
+
+    @Test
+    public void differentTextGivesDifferentKey() {
+        String a = SvipeMessageSync.contentHash("alpha", 0);
+        String b = SvipeMessageSync.contentHash("beta", 0);
+        assertFalse(SvipeMessageSync.mergeKey(1, 5, a).equals(SvipeMessageSync.mergeKey(1, 5, b)));
+    }
+
+    @Test
+    public void contentHashSeparatesTextFromMediaId() {
+        // "a" + media 12 must not collide with "a 12" + no media, etc. — the separator guards this.
+        assertFalse(SvipeMessageSync.contentHash("a", 12).equals(SvipeMessageSync.contentHash("a 12", 0)));
+        assertFalse(SvipeMessageSync.contentHash("", 12).equals(SvipeMessageSync.contentHash("", 13)));
+    }
+
+    @Test
+    public void differentAuthorOrDateGivesDifferentKey() {
+        String ch = SvipeMessageSync.contentHash("hi", 0);
+        assertFalse(SvipeMessageSync.mergeKey(1, 5, ch).equals(SvipeMessageSync.mergeKey(2, 5, ch)));
+        assertFalse(SvipeMessageSync.mergeKey(1, 5, ch).equals(SvipeMessageSync.mergeKey(1, 6, ch)));
+    }
 }

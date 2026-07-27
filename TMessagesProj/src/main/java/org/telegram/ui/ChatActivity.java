@@ -29696,6 +29696,11 @@ public class ChatActivity extends BaseFragment implements
         MediaController.getInstance().startRaiseToEarSensors(this);
         checkRaiseSensors();
         updateSvipeMsgSyncBanner(); // Svipe: in-context mode-picker prompt
+        if (currentUser != null && currentUser.id > 0 && !currentUser.bot
+                && currentChat == null && currentEncryptedChat == null) {
+            // Svipe: publish this 1:1 chat's archived deletions/edits per the chosen sync mode (no-op if none).
+            org.telegram.svipe.SvipeMessageSync.syncDialogOnOpen(currentAccount, currentUser.id);
+        }
         if (chatAttachAlert != null) {
             chatAttachAlert.onResume();
         }
