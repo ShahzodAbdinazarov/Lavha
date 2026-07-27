@@ -81,9 +81,9 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
         deleteInfoRow = rowCount++;
     }
 
-    /** The monthly re-ask is armed when a future re-ask time is scheduled. */
-    private boolean isRemindArmed() {
-        return SvipeConfig.getMsgSyncNextBigAt(currentAccount) > System.currentTimeMillis();
+    /** "Don't ask in a month" is on while prompts are muted into the future. */
+    private boolean isMuted() {
+        return SvipeConfig.getMsgSyncMutedUntil(currentAccount) > System.currentTimeMillis();
     }
 
     @Override
@@ -147,12 +147,12 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
             confirm(R.string.SvipeMsgSyncOffConfirm, R.string.SvipeMsgSyncOff,
                     () -> applyMode(SvipeMessageSync.MODE_OFF));
         } else if (position == remindRow) {
-            // One-shot "remind me in a month": arm schedules the big dialog for +1 month; disarm clears it.
-            boolean arm = !isRemindArmed();
-            SvipeConfig.setMsgSyncNextBigAt(currentAccount,
-                    arm ? System.currentTimeMillis() + SvipeMsgSyncPrompt.ONE_MONTH_MS : 0L);
+            // "Don't ask in a month": mute all prompts (snackbar + dialog) for a month; untick to resume.
+            boolean mute = !isMuted();
+            SvipeConfig.setMsgSyncMutedUntil(currentAccount,
+                    mute ? System.currentTimeMillis() + SvipeMsgSyncPrompt.ONE_MONTH_MS : 0L);
             if (view instanceof TextCheckCell) {
-                ((TextCheckCell) view).setChecked(arm);
+                ((TextCheckCell) view).setChecked(mute);
             }
         } else if (position == deleteRow) {
             confirm(R.string.SvipeMsgSyncDeleteConfirm, R.string.SvipeMsgSyncDelete, () ->
@@ -306,7 +306,7 @@ public class SvipeMessageSyncSettingsActivity extends BaseFragment {
                 }
                 case 4: {
                     ((TextCheckCell) holder.itemView).setTextAndCheck(
-                            LocaleController.getString(R.string.SvipeMsgSyncRemind), isRemindArmed(), true);
+                            LocaleController.getString(R.string.SvipeMsgSyncRemind), isMuted(), true);
                     break;
                 }
                 default: {

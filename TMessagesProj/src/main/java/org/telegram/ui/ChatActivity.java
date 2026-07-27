@@ -9742,6 +9742,7 @@ public class ChatActivity extends BaseFragment implements
                 org.telegram.svipe.SvipeConfig.getMsgSyncMode(currentAccount),
                 org.telegram.svipe.SvipeConfig.isMsgSyncBigShown(currentAccount),
                 org.telegram.svipe.SvipeConfig.getMsgSyncNextBigAt(currentAccount),
+                org.telegram.svipe.SvipeConfig.getMsgSyncMutedUntil(currentAccount),
                 now, snackbarToday);
         if (what == org.telegram.svipe.SvipeMsgSyncPrompt.BIG_DIALOG) {
             svipeMsgSyncShowBigDialog();

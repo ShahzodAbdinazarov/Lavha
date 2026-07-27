@@ -325,8 +325,8 @@
     <string name="SvipeMsgSyncSnackbar">Синхронизировать удалённые и изменённые сообщения?</string>
     <string name="SvipeMsgSyncAllow">Разрешить</string>
     <string name="SvipeMsgSyncGranted">Синхронизация включена — изменить можно в Настройках</string>
-    <string name="SvipeMsgSyncRemind">Напомнить через месяц</string>
-    <string name="SvipeMsgSyncRemindInfo">Спросим ещё раз через месяц — вдруг пригодится позже.</string>
+    <string name="SvipeMsgSyncRemind">Не спрашивать месяц</string>
+    <string name="SvipeMsgSyncRemindInfo">Включите, чтобы месяц не показывать запросы синхронизации.</string>
 
     <!-- In-app update: Svipe-branded title (the native AppUpdate key resolves to "Update Telegram"
          via Telegram's cloud langpack, so the title uses this custom key the langpack cannot override). -->

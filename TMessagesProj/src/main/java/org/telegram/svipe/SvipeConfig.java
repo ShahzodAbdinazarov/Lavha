@@ -196,6 +196,25 @@ public class SvipeConfig {
         }
     }
 
+    /** "Don't ask in a month": until this epoch ms, every sync prompt (snackbar + dialog) is suppressed. */
+    public static final String PREF_MSG_SYNC_MUTED_UNTIL = "svipe_msg_sync_muted_until";
+
+    public static long getMsgSyncMutedUntil(int account) {
+        try {
+            return MessagesController.getMainSettings(account).getLong(PREF_MSG_SYNC_MUTED_UNTIL, 0L);
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
+    public static void setMsgSyncMutedUntil(int account, long whenMs) {
+        try {
+            MessagesController.getMainSettings(account).edit().putLong(PREF_MSG_SYNC_MUTED_UNTIL, whenMs).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
     /** Epoch-day the nudge snackbar was last shown in this chat (for the once-per-chat-per-day rule). */
     public static long getMsgSyncSnackbarDay(int account, long dialogId) {
         try {
