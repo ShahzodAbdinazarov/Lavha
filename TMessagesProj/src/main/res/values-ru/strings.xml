@@ -302,9 +302,9 @@
     <string name="SvipeIntroStart">Начать свайпинг</string>
 
     <!-- Svipe terms & privacy disclosure (mandatory, shown once) -->
-    <string name="SvipeTermsTitle">Svipe — Условия и конфиденциальность</string>
-    <string name="SvipeTermsMessage">Svipe — независимое приложение на базе Telegram. Если оба собеседника в личном чате используют Svipe и оба включат это, Svipe сохранит удалённые и изменённые сообщения этого чата в вашем аккаунте, чтобы вы оба видели одну историю. По умолчанию выключено, охватывает только этих двух людей, никогда не группы и не секретные чаты, и вы в любой момент управляете этим в Настройках. Что мы собираем, зачем и как это защищено — читайте в **Политике конфиденциальности**.</string>
-    <string name="SvipeTermsAccept">Принять и продолжить</string>
+    <string name="SvipeTermsTitle">Условия Svipe обновлены</string>
+    <string name="SvipeTermsMessage">Svipe теперь может синхронизировать удалённые и изменённые сообщения в личных чатах — по желанию, по умолчанию выключено, управляется в Настройках. **Подробнее**</string>
+    <string name="SvipeTermsAccept">Продолжить</string>
 
     <!-- Svipe message sync (P2P deleted/edited archive) -->
     <string name="SvipeMsgSyncTitle">Синхронизация удалённых сообщений</string>

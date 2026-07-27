@@ -39,9 +39,9 @@
     <string name="SvipeIntroStart">Svayp qilishni boshlash</string>
 
     <!-- Svipe terms & privacy disclosure (mandatory, shown once) -->
-    <string name="SvipeTermsTitle">Svipe — Shartlar va maxfiylik</string>
-    <string name="SvipeTermsMessage">Svipe — Telegram asosidagi mustaqil ilova. Agar shaxsiy suhbatdagi ikkala odam ham Svipe ishlatsa va ikkalasi ham yoqsa, Svipe o\'sha suhbatning o\'chirilgan va tahrirlangan xabarlarini akkauntingizda saqlab, ikkovingiz bir xil tarixni ko\'rasiz. U standart holatda o\'chiq, faqat o\'sha ikki kishiga tegishli, hech qachon guruh yoki Maxfiy chatlarga emas, va uni istalgan payt Sozlamalarda boshqarasiz. Nimalarni to\'playmiz, nega va qanday himoyalanadi — **Maxfiylik siyosati**da o\'qing.</string>
-    <string name="SvipeTermsAccept">Qabul qilish va davom etish</string>
+    <string name="SvipeTermsTitle">Svipe shartlari yangilandi</string>
+    <string name="SvipeTermsMessage">Svipe endi shaxsiy suhbatlarda o\'chirilgan va tahrirlangan xabarlarni sinxronlashi mumkin — ixtiyoriy, standart holatda o\'chiq, Sozlamalarda boshqariladi. **Batafsil**</string>
+    <string name="SvipeTermsAccept">Davom etish</string>
 
     <!-- Svipe message sync (P2P deleted/edited archive) -->
     <string name="SvipeMsgSyncTitle">O\'chirilgan xabar sinxroni</string>

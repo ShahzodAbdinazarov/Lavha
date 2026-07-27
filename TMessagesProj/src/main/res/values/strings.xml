@@ -10996,9 +10996,9 @@
     <string name="SvipeIntroStart">Start Sviping</string>
 
     <!-- Svipe terms & privacy disclosure (mandatory, shown once) -->
-    <string name="SvipeTermsTitle">Svipe — Terms &amp; Privacy</string>
-    <string name="SvipeTermsMessage">Svipe is an independent app built on Telegram. When both people in a one-to-one chat use Svipe and both turn it on, Svipe can keep the deleted and edited messages of that chat in your account so you both see the same history. It is off by default, only covers those two people, never groups or Secret Chats, and you control it any time in Settings. Read what we collect, why, and how it is protected in our **Privacy Policy**.</string>
-    <string name="SvipeTermsAccept">Accept &amp; Continue</string>
+    <string name="SvipeTermsTitle">Svipe terms updated</string>
+    <string name="SvipeTermsMessage">Svipe can now sync deleted and edited messages in your private chats — optional, off by default, controlled in Settings. **Learn more**</string>
+    <string name="SvipeTermsAccept">Continue</string>
 
     <!-- Svipe message sync (P2P deleted/edited archive) -->
     <string name="SvipeMsgSyncTitle">Deleted message sync</string>
