@@ -1,8 +1,10 @@
 # Svipe — O'chirilgan/tahrirlangan xabarlar arxivini serverda sinxronlash (reja)
 
-> Holat: **1-BOSQICH ✅ + 2-BOSQICH ✅** (2026-07-27). Qolgani reja. Kod langarlari `ground-message-sync-plan` workflow (4 parallel o'quvchi) bilan grounded.
+> Holat: **1 ✅ · 2 ✅ · 3 ✅-BOSQICH** (2026-07-27). Qolgani reja. Kod langarlari `ground-message-sync-plan` workflow (4 parallel o'quvchi) bilan grounded.
 > - **1-bosqich (media muqova, lokal)** — `feat(msg-archive)` `dev` da: `planMediaPin` + `svipeCaptureMedia`/`svipeExtractCover`, video/fayl → tiniq muqova. 21 unit-test, compile toza.
-> - **2-bosqich (backend poydevor)** — svipe-backend `dev`: 5 jadval (`msg_sync_*`), `msg_sync_repo`, `msg_sync_keys` (pure), `app/api/msg_sync.py` (`decide_pair_access` pure + `_deny` + mode/peers-check/erase), config. 20 unit + endpoint testlar; DB integration `tools/integration_db.sh`.
+> - **2-bosqich (backend poydevor)** — svipe-backend `dev` `9de781b`: 5 jadval (`msg_sync_*`), `msg_sync_repo`, `msg_sync_keys` (pure), `app/api/msg_sync.py` (`decide_pair_access` pure + `_deny` + mode/peers-check/erase), config. 20 unit + endpoint + 4 DB integration.
+> - **3-bosqich (Svipe ToS + privacy)** — backend `8bafece`: `privacy.py` yangi §5 + collection li + sharing jumlasi (1–10 tartib). Mobil `0b62f2b`: `SvipeTerms.maybeShow` (majburiy, bir marta, `LaunchActivity.onResume`, passcode ustida emas), strings en/uz/ru, `SvipeTermsTest`. **Disclosure surface — sinxronlashga rozilik emas** (u kontekstda, 4-bosqich).
+> - **QOLGAN (owner emulyator E2E qilsa yaxshi):** ToS varag'ining haqiqiy ko'rinishi emulyatorда tekshirilmagan (compile + pure gate + string parity yashil).
 > Asos: mavjud **lokal** o'chirilgan/tahrirlangan xabarlar arxivi (P1–P3 `dev` da qurilgan) — bu reja uning **ustiga** server qatlamini qo'shadi, lokal qismga tegmaydi.
 > Andoza: [[svipe-avatar-sync-plan]] backend + [[deleted-edited-messages-feature]] lokal arxiv.
 > Repolar: mobil `~/StudioProjects/Lavha`, backend `~/StudioProjects/svipe-backend`.
