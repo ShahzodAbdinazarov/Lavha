@@ -638,6 +638,10 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
 
     private int drawScam;
 
+    private boolean drawMusicBadge;   // Svipe — channel is indexed for music (♪ badge before the name)
+    private int musicBadgeLeft;
+    private static Drawable svipeMusicBadgeDrawable;
+
     private boolean isSelected;
 
     private RectF rect = new RectF();
@@ -1291,6 +1295,7 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
         drawForwardIcon = false;
         drawGiftIcon = false;
         drawScam = 0;
+        drawMusicBadge = false;
         drawPinBackground = false;
         thumbsCount = 0;
         hasVideoThumb = false;
@@ -1474,6 +1479,8 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
                     long dialogBotVerificationIcon = 0;
                     if (chat != null) {
                         dialogBotVerificationIcon = DialogObject.getBotVerificationIcon(chat);
+                        drawMusicBadge = ChatObject.isChannel(chat) && !chat.megagroup
+                                && org.telegram.svipe.SvipeMusicIndex.isIndexed(chat.id);
                         if (chat.scam) {
                             drawScam = 1;
                             Theme.dialogs_scamDrawable.checkText();
@@ -2294,6 +2301,12 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
         }
         if (drawNameLock) {
             nameWidth -= dp(LocaleController.isRTL ? 8 : 4) + Theme.dialogs_lockDrawable.getIntrinsicWidth();
+        }
+        if (drawMusicBadge) { // Svipe — reserve a slot immediately before the name for the ♪ badge
+            int w = dp(4) + dp(14);
+            musicBadgeLeft = nameLeft;
+            nameLeft += w;
+            nameWidth -= w;
         }
         if (drawClock) {
             int w = Theme.dialogs_clockDrawable.getIntrinsicWidth() + dp(5);
@@ -4081,6 +4094,16 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
             int nameTop = dp(useForceThreeLines || SharedConfig.useThreeLinesLayout ? 10 : 14);
             if ((!(useForceThreeLines || SharedConfig.useThreeLinesLayout) || isForumCell()) && hasTags()) {
                 nameTop -= dp(isForumCell() ? 8 : 9);
+            }
+            if (drawMusicBadge && nameLayout != null) { // Svipe — ♪ badge just before an indexed channel's name
+                if (svipeMusicBadgeDrawable == null) {
+                    svipeMusicBadgeDrawable = getContext().getResources().getDrawable(R.drawable.svipe_music_note).mutate();
+                }
+                svipeMusicBadgeDrawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText, resourcesProvider), PorterDuff.Mode.SRC_IN));
+                int bw = dp(14);
+                int by = nameTop + Math.max(0, (nameLayout.getHeight() - bw) / 2);
+                svipeMusicBadgeDrawable.setBounds(musicBadgeLeft, by, musicBadgeLeft + bw, by + bw);
+                svipeMusicBadgeDrawable.draw(canvas);
             }
             if (nameLayout != null) {
                 if (nameLayoutEllipsizeByGradient && !nameLayoutFits) {

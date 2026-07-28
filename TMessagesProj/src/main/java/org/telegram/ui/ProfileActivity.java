@@ -11255,7 +11255,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         }
         if (svipeMusicBadgeDrawable[a] == null) {
             Drawable d = getContext().getResources().getDrawable(R.drawable.svipe_music_note).mutate();
-            int sz = AndroidUtilities.dp(18);
+            int sz = AndroidUtilities.dp(16);
             d.setBounds(0, 0, sz, sz);
             d.setColorFilter(new PorterDuffColorFilter(0xFFFFFFFF, PorterDuff.Mode.SRC_IN));
             svipeMusicBadgeDrawable[a] = d;
@@ -11289,6 +11289,9 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         org.telegram.svipe.SvipeMusic.channelIndexStatus(currentAccount, chatId, status ->
                 AndroidUtilities.runOnUIThread(() -> {
                     boolean indexed = "indexed".equals(status);
+                    if (indexed) {
+                        org.telegram.svipe.SvipeMusicIndex.markIndexed(chatId);
+                    }
                     if (indexed != svipeMusicIndexed) {
                         svipeMusicIndexed = indexed;
                         svipeMusicApplyBadge();

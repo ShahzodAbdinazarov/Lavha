@@ -19608,7 +19608,7 @@ public class ChatActivity extends BaseFragment implements
     private Drawable svipeMusicBadge() {
         if (svipeMusicBadgeDrawable == null) {
             Drawable d = getContext().getResources().getDrawable(R.drawable.svipe_music_note).mutate();
-            int sz = AndroidUtilities.dp(18);
+            int sz = AndroidUtilities.dp(14);
             d.setBounds(0, 0, sz, sz);
             d.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_actionBarDefaultTitle), PorterDuff.Mode.SRC_IN));
             svipeMusicBadgeDrawable = d;
@@ -19625,6 +19625,9 @@ public class ChatActivity extends BaseFragment implements
         org.telegram.svipe.SvipeMusic.channelIndexStatus(currentAccount, currentChat.id, status ->
                 AndroidUtilities.runOnUIThread(() -> {
                     boolean indexed = "indexed".equals(status);
+                    if (indexed && currentChat != null) {
+                        org.telegram.svipe.SvipeMusicIndex.markIndexed(currentChat.id);
+                    }
                     if (indexed != svipeMusicIndexed) {
                         svipeMusicIndexed = indexed;
                         updateTitleIcons();

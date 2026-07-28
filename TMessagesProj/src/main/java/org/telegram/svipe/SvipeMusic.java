@@ -534,6 +534,38 @@ public class SvipeMusic {
         });
     }
 
+    /** All channel ids currently indexed for music — SvipeMusicIndex caches this for the ♪ badge. */
+    public interface IndexedIdsCallback {
+        void onResult(java.util.List<Long> ids);
+    }
+
+    public static void indexedChannelIds(int account, IndexedIdsCallback cb) {
+        withToken(account, () -> cb.onResult(null),
+            token -> indexedChannelIdsRequest(account, token, false, cb));
+    }
+
+    private static void indexedChannelIdsRequest(int account, String token, boolean retried, IndexedIdsCallback cb) {
+        SvipeApi.get("/v1/music/channels/indexed", token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> cb.onResult(null),
+                    t2 -> indexedChannelIdsRequest(account, t2, true, cb));
+                return;
+            }
+            if (res == null) {
+                cb.onResult(null);
+                return;
+            }
+            java.util.List<Long> out = new java.util.ArrayList<>();
+            JSONArray arr = res.optJSONArray("channel_ids");
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) {
+                    out.add(arr.optLong(i));
+                }
+            }
+            cb.onResult(out);
+        });
+    }
+
     public static void song(int account, long songId, SongDetailCallback cb) {
         withToken(account, () -> cb.onResult(null, "auth"),
             token -> songRequest(account, songId, token, false, cb));

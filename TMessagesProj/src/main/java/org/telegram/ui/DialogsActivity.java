@@ -7122,6 +7122,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     @Override
     public void onResume() {
         super.onResume();
+        // Svipe: keep the music-indexed channel set warm + redraw ♪ badges when it changes.
+        org.telegram.svipe.SvipeMusicIndex.ensureLoaded(currentAccount);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeMusicIndexUpdated);
         if (dialogStoriesCell != null) {
             dialogStoriesCell.onResume();
         }
@@ -7340,6 +7343,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     @Override
     public void onPause() {
         super.onPause();
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeMusicIndexUpdated);
         if (storiesBulletin != null) {
             storiesBulletin.hide();
             storiesBulletin = null;
@@ -10694,6 +10698,10 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     @SuppressWarnings("unchecked")
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
+        if (id == NotificationCenter.svipeMusicIndexUpdated) { // Svipe — the ♪-indexed set changed
+            updateVisibleRows(MessagesController.UPDATE_MASK_CHAT_NAME);
+            return;
+        }
         if (id == NotificationCenter.dialogsNeedReload) {
             if (viewPages == null || dialogsListFrozen) {
                 return;
