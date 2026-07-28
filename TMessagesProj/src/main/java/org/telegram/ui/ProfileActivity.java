@@ -11254,11 +11254,12 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             svipeMusicBadgeDrawable = new Drawable[2];
         }
         if (svipeMusicBadgeDrawable[a] == null) {
-            Drawable d = new org.telegram.svipe.SvipeCharDrawable();
-            int sz = AndroidUtilities.dp(16);
-            d.setBounds(0, 0, sz, sz);
-            d.setColorFilter(new PorterDuffColorFilter(0xFFFFFFFF, PorterDuff.Mode.SRC_IN));
-            svipeMusicBadgeDrawable[a] = d;
+            final int idx = a;
+            // Track the name's live text colour (animates white<->key_profile_title, theme-dependent)
+            // so the ♪ badge stays visible in light mode and while the header expands/collapses.
+            svipeMusicBadgeDrawable[a] = new org.telegram.svipe.SvipeCharDrawable().colorSupplier(
+                    () -> nameTextView != null && nameTextView[idx] != null
+                            ? nameTextView[idx].getTextColor() : Color.WHITE);
         }
         return svipeMusicBadgeDrawable[a];
     }
