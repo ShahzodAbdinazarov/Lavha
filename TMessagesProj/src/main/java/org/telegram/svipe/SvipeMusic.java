@@ -1,6 +1,7 @@
 package org.telegram.svipe;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 import org.telegram.messenger.FileLog;
 
@@ -472,6 +473,65 @@ public class SvipeMusic {
                 }
                 cb.onResult(res == null ? 0 : res.optLong("song_id"));
             });
+    }
+
+    // ---------------- Music-channel index status + user request (badge + ⋮ action) ----------------
+
+    /** Server's verdict for a channel: "indexed" | "requested" | "rejected" | "none" (null on error). */
+    public interface ChannelStatusCallback {
+        void onResult(String status);
+    }
+
+    /** Result of a user index request: "requested" | "already_indexed" (error non-null on failure). */
+    public interface ChannelRequestCallback {
+        void onResult(String status, String error);
+    }
+
+    /** Is this Telegram channel indexed for Svipe music? Drives the note badge + the ⋮ action state. */
+    public static void channelIndexStatus(int account, long channelId, ChannelStatusCallback cb) {
+        withToken(account, () -> cb.onResult(null),
+            token -> channelIndexStatusRequest(account, channelId, token, false, cb));
+    }
+
+    private static void channelIndexStatusRequest(int account, long channelId, String token,
+                                                  boolean retried, ChannelStatusCallback cb) {
+        SvipeApi.get("/v1/music/channel/" + channelId + "/status", token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> cb.onResult(null),
+                    t2 -> channelIndexStatusRequest(account, channelId, t2, true, cb));
+                return;
+            }
+            cb.onResult(res == null ? null : res.optString("status", null));
+        });
+    }
+
+    /** Ask the server to index a public channel for music (the worker reviews it on its next pass). */
+    public static void requestChannelIndex(int account, long channelId, String username, String title,
+                                           ChannelRequestCallback cb) {
+        withToken(account, () -> cb.onResult(null, "auth"),
+            token -> requestChannelIndexCall(account, channelId, username, title, token, false, cb));
+    }
+
+    private static void requestChannelIndexCall(int account, long channelId, String username, String title,
+                                                String token, boolean retried, ChannelRequestCallback cb) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("username", username);
+            if (title != null) body.put("title", title);
+        } catch (JSONException ignore) {
+        }
+        SvipeApi.post("/v1/music/channel/" + channelId + "/request", body, token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> cb.onResult(null, "auth"),
+                    t2 -> requestChannelIndexCall(account, channelId, username, title, t2, true, cb));
+                return;
+            }
+            if (res == null) {
+                cb.onResult(null, err != null ? err : ("http " + code));
+                return;
+            }
+            cb.onResult(res.optString("status", "requested"), null);
+        });
     }
 
     public static void song(int account, long songId, SongDetailCallback cb) {

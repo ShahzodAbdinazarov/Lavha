@@ -10999,6 +10999,11 @@
     <string name="SvipeTermsTitle">Svipe terms updated</string>
     <string name="SvipeTermsMessage">Svipe has updated its Terms of Service and Privacy Policy. **Learn more**</string>
     <string name="SvipeTermsAccept">Continue</string>
+    <!-- Svipe music-channel indexing (badge + channel ⋮ action) -->
+    <string name="SvipeMusicIndexChannel">Index for music</string>
+    <string name="SvipeMusicIndexRequested">Request sent for review</string>
+    <string name="SvipeMusicAlreadyIndexed">Already in the music catalog</string>
+    <string name="SvipeMusicIndexFailed">Couldn\'t send the request</string>
 
     <!-- Svipe message sync (P2P deleted/edited archive) -->
     <string name="SvipeMsgSyncTitle">Deleted message sync</string>
