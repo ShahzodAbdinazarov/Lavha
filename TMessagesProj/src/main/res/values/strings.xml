@@ -10997,7 +10997,7 @@
 
     <!-- Svipe terms & privacy disclosure (mandatory, shown once) -->
     <string name="SvipeTermsTitle">Svipe terms updated</string>
-    <string name="SvipeTermsMessage">Svipe can now sync deleted and edited messages in your private chats — optional, off by default, controlled in Settings. **Learn more**</string>
+    <string name="SvipeTermsMessage">Svipe has updated its Terms of Service and Privacy Policy. **Learn more**</string>
     <string name="SvipeTermsAccept">Continue</string>
 
     <!-- Svipe message sync (P2P deleted/edited archive) -->

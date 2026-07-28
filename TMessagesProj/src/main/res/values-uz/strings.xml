@@ -40,7 +40,7 @@
 
     <!-- Svipe terms & privacy disclosure (mandatory, shown once) -->
     <string name="SvipeTermsTitle">Svipe shartlari yangilandi</string>
-    <string name="SvipeTermsMessage">Svipe endi shaxsiy suhbatlarda o\'chirilgan va tahrirlangan xabarlarni sinxronlashi mumkin — ixtiyoriy, standart holatda o\'chiq, Sozlamalarda boshqariladi. **Batafsil**</string>
+    <string name="SvipeTermsMessage">Svipe Xizmat ko\'rsatish shartlari va Maxfiylik siyosatini yangiladi. **Batafsil**</string>
     <string name="SvipeTermsAccept">Davom etish</string>
 
     <!-- Svipe message sync (P2P deleted/edited archive) -->

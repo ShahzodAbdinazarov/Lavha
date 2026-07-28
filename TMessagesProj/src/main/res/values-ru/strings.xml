@@ -303,7 +303,7 @@
 
     <!-- Svipe terms & privacy disclosure (mandatory, shown once) -->
     <string name="SvipeTermsTitle">Условия Svipe обновлены</string>
-    <string name="SvipeTermsMessage">Svipe теперь может синхронизировать удалённые и изменённые сообщения в личных чатах — по желанию, по умолчанию выключено, управляется в Настройках. **Подробнее**</string>
+    <string name="SvipeTermsMessage">Svipe обновил Условия использования и Политику конфиденциальности. **Подробнее**</string>
     <string name="SvipeTermsAccept">Продолжить</string>
 
     <!-- Svipe message sync (P2P deleted/edited archive) -->
