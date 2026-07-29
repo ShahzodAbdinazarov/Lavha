@@ -168,6 +168,8 @@
     <string name="SvipeReelsWatchHistory">Ko\'rish tarixi</string>
     <string name="SvipeBlockedChannels">Bloklangan kanallar</string>
     <string name="SvipeNoBlockedChannels">Bloklangan kanallar yo\'q</string>
+    <string name="SvipeNoListeningHistory">Tinglash tarixi hali yo\'q</string>
+    <string name="SvipeNoWatchHistory">Ko\'rish tarixi hali yo\'q</string>
     <string name="SvipeRecentSearches">So\'nggi qidiruvlar</string>
     <string name="SvipeClearSearchHistory">Qidiruv tarixini tozalash</string>
     <string name="SvipeNoSearchHistory">So\'nggi qidiruvlar yo\'q</string>

@@ -45,6 +45,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.telegram.svipe.SvipeApi;
 import org.telegram.svipe.SvipeAuth;
+import org.telegram.svipe.SvipeBlockedChannels;
 import org.telegram.svipe.SvipeFeedRetry;
 import org.telegram.svipe.SvipePreloadPlan;
 import org.telegram.svipe.SvipeQueuePlan;
@@ -202,6 +203,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     // the BLOCK_CHANNEL event makes it durable + cross-device (the backend then excludes them server-side).
     // Thread-safe: written on the UI thread (block/undo), read on background feed-load threads.
     private final java.util.Set<Long> blockedChannels = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    // Persistent twin of blockedChannels: survives app restarts and backs the "Blocked channels"
+    // management screen. The feed filters consult BOTH so a block made in a previous session still
+    // hides the channel on a cold start (blockedChannels alone is session-only).
+    private SvipeBlockedChannels svipeBlockedChannels;
 
     // Float bulletins (undo / "less of this" / copy-link) above the floating native bottom tab bar —
     // the exact anchor MainTabsActivity uses for its theme-change & account hints. Without a registered
@@ -487,6 +493,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         fragmentView = root;
         reelQueue = new SvipeReelQueue(account);
         watchedSet = new SvipeWatchedSet(account);
+        svipeBlockedChannels = new SvipeBlockedChannels(account);
         if (!playSeedIfPresent()) {
             restoreQueueThenPlay();
         }
@@ -808,7 +815,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             int total = 0, skipWatched = 0, skipDeser = 0, skipNoFile = 0, downloadedUnwatched = 0;
             for (SvipeReelQueue.Entry e : reelQueue.list()) {
                 total++;
-                if (watchedSet.isWatched(e.channelId, e.messageId) || blockedChannels.contains(e.channelId)) { skipWatched++; continue; } // never re-show watched/blocked
+                if (watchedSet.isWatched(e.channelId, e.messageId) || blockedChannels.contains(e.channelId) || (svipeBlockedChannels != null && svipeBlockedChannels.contains(e.channelId))) { skipWatched++; continue; } // never re-show watched/blocked (persistent blocks too)
                 if (e.downloaded) downloadedUnwatched++;
                 MessageObject mo = deserializeMessage(e.messageB64);
                 if (mo == null || mo.getDocument() == null) { skipDeser++; continue; }
@@ -991,7 +998,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                         int messageId = o.optInt("message_id");
                         // Never re-add what's already in the pager or already watched.
                         if (additive && containsItem(channelId, messageId)) continue;
-                        if ((watchedSet != null && watchedSet.isWatched(channelId, messageId)) || blockedChannels.contains(channelId)) continue;
+                        if ((watchedSet != null && watchedSet.isWatched(channelId, messageId)) || blockedChannels.contains(channelId) || (svipeBlockedChannels != null && svipeBlockedChannels.contains(channelId))) continue;
                         FeedItem it = new FeedItem();
                         it.channelId = channelId;
                         it.messageId = messageId;
@@ -2690,6 +2697,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         final int snapshotPos = currentPosition;
 
         blockedChannels.add(channelId);
+        if (svipeBlockedChannels != null) svipeBlockedChannels.add(channelId); // persist so the block survives restarts + shows in the management screen
         for (int i = items.size() - 1; i >= 0; i--) {
             if (items.get(i).channelId == channelId) items.remove(i);
         }
@@ -2709,6 +2717,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 getString(R.string.SvipeReelsChannelBlocked),
                 () -> { // undo — restore the feed exactly as it was
                     blockedChannels.remove(channelId);
+                    if (svipeBlockedChannels != null) svipeBlockedChannels.remove(channelId); // undo the persistent block too
                     items.clear();
                     items.addAll(snapshot);
                     adapter.notifyDataSetChanged();

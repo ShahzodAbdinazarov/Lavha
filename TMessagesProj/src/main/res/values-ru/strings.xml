@@ -433,6 +433,8 @@
     <string name="SvipeReelsWatchHistory">История просмотров</string>
     <string name="SvipeBlockedChannels">Заблокированные каналы</string>
     <string name="SvipeNoBlockedChannels">Нет заблокированных каналов</string>
+    <string name="SvipeNoListeningHistory">Пока нет истории прослушивания</string>
+    <string name="SvipeNoWatchHistory">Пока нет истории просмотров</string>
     <string name="SvipeRecentSearches">Недавние запросы</string>
     <string name="SvipeClearSearchHistory">Очистить историю поиска</string>
     <string name="SvipeNoSearchHistory">Нет недавних запросов</string>

@@ -11093,6 +11093,8 @@
     <string name="SvipeReelsWatchHistory">Watch history</string>
     <string name="SvipeBlockedChannels">Blocked channels</string>
     <string name="SvipeNoBlockedChannels">No blocked channels</string>
+    <string name="SvipeNoListeningHistory">No listening history yet</string>
+    <string name="SvipeNoWatchHistory">No watch history yet</string>
     <string name="SvipeRecentSearches">Recent searches</string>
     <string name="SvipeClearSearchHistory">Clear search history</string>
     <string name="SvipeNoSearchHistory">No recent searches</string>

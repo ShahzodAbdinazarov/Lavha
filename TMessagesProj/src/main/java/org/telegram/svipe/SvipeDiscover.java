@@ -188,6 +188,57 @@ public class SvipeDiscover {
         });
     }
 
+    /** ok==false on failure (network/auth/http). */
+    public interface EventCallback {
+        void onDone(boolean ok);
+    }
+
+    /**
+     * Unblock a reels channel: the twin of the BLOCK_CHANNEL event ReelsActivity posts on block. Sent
+     * to POST /v1/events exactly like ReelsActivity.sendEvent/postEvents, with event_type
+     * "UNBLOCK_CHANNEL" (message_id 0 — this is a channel-level action, not tied to one reel). One
+     * silent re-auth retry on 401, same as every other write here.
+     */
+    public static void unblockChannel(int account, long channelId, EventCallback cb) {
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                if (cb != null) cb.onDone(false);
+                return;
+            }
+            unblockRequest(account, channelId, token, false, cb);
+        });
+    }
+
+    private static void unblockRequest(int account, long channelId, String token, boolean retried, EventCallback cb) {
+        JSONObject batch = new JSONObject();
+        try {
+            JSONObject ev = new JSONObject();
+            ev.put("channel_id", channelId);
+            ev.put("message_id", 0);
+            ev.put("event_type", "UNBLOCK_CHANNEL");
+            JSONArray events = new JSONArray();
+            events.put(ev);
+            batch.put("events", events);
+        } catch (Exception e) {
+            if (cb != null) cb.onDone(false);
+            return;
+        }
+        SvipeApi.post("/v1/events", batch, token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                SvipeAuth.invalidateAccessToken(account);
+                SvipeAuth.ensureToken(account, t2 -> {
+                    if (t2 == null) {
+                        if (cb != null) cb.onDone(false);
+                        return;
+                    }
+                    unblockRequest(account, channelId, t2, true, cb);
+                });
+                return;
+            }
+            if (cb != null) cb.onDone(code >= 200 && code < 300);
+        });
+    }
+
     /** Parse a {items:[FeedItem]} array into Items; rows without a username are skipped (can't resolve). */
     private static void parseItems(JSONArray arr, List<Item> out) {
         if (arr == null) return;

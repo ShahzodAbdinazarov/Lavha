@@ -66,6 +66,15 @@ public class SvipeExploreGrid extends RecyclerListView {
         void onRecentTap(String query);
     }
 
+    /**
+     * Pluggable pager so the same grid can back a history screen, not just /v1/discover. When null the
+     * grid loads the explore feed as before; a settings screen (e.g. reels watch-history) sets one that
+     * routes to its own endpoint. {@code refresh} is honoured only if the endpoint supports it.
+     */
+    public interface PageLoader {
+        void load(int offset, int limit, boolean refresh, SvipeDiscover.Callback cb);
+    }
+
     private static final int SPAN_COUNT = 3;
     private static final int PAGE_SIZE = 60;
     private static final int SKELETON_COUNT = 15;   // ~5 rows of shimmer placeholders
@@ -102,6 +111,10 @@ public class SvipeExploreGrid extends RecyclerListView {
     // whose mode/query has since changed lands stale and is dropped instead of polluting the list.
     private int contentSeq;
 
+    // ---- pluggable pager (standalone history screens) ----
+    private PageLoader pageLoader;          // null -> default /v1/discover feed
+    private final boolean pullEnabled;      // pull-to-refresh only makes sense for the live explore feed
+
     // --- pull-to-refresh: native, drawn in dispatchDraw. The grid must stay a RecyclerListView
     // (DialogsActivity casts svipeExploreGrid to one), so we can't wrap it in a SwipeRefreshLayout
     // nor addView() an overlay (RecyclerView would reclaim that child on the next layout pass). ---
@@ -136,9 +149,20 @@ public class SvipeExploreGrid extends RecyclerListView {
     }
 
     public SvipeExploreGrid(Context context, int account) {
+        this(context, account, false);
+    }
+
+    /**
+     * @param standalone true when the grid is the whole screen of a plain BaseFragment (its ActionBar
+     *                   already reserves the top, and there is no bottom tab bar) — use tight insets and
+     *                   drop pull-to-refresh. false is the Search-section embedding (search bar on top,
+     *                   floating bottom tabs), which keeps the original insets + pull-to-refresh.
+     */
+    public SvipeExploreGrid(Context context, int account, boolean standalone) {
         super(context);
         this.account = account;
         this.history = new SvipeVideoSearchHistory(account);
+        this.pullEnabled = !standalone;
         setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
 
         layoutManager = new GridLayoutManager(context, SPAN_COUNT);
@@ -160,8 +184,8 @@ public class SvipeExploreGrid extends RecyclerListView {
         adapter = new GridAdapter();
         setAdapter(adapter);
 
-        final int top = AndroidUtilities.statusBarHeight + AndroidUtilities.dp(58);
-        final int bottom = AndroidUtilities.dp(96) + AndroidUtilities.navigationBarHeight;
+        final int top = standalone ? AndroidUtilities.dp(1) : AndroidUtilities.statusBarHeight + AndroidUtilities.dp(58);
+        final int bottom = (standalone ? AndroidUtilities.dp(1) : AndroidUtilities.dp(96)) + AndroidUtilities.navigationBarHeight;
         setPadding(AndroidUtilities.dp(1), top, AndroidUtilities.dp(1), bottom);
         setClipToPadding(false);
 
@@ -217,6 +241,19 @@ public class SvipeExploreGrid extends RecyclerListView {
         this.recentTapListener = listener;
     }
 
+    /** Route paging through a custom endpoint (e.g. reels watch-history) instead of /v1/discover. */
+    public void setPageLoader(PageLoader loader) {
+        this.pageLoader = loader;
+    }
+
+    private void requestPage(int offset, int limit, boolean refresh, SvipeDiscover.Callback cb) {
+        if (pageLoader != null) {
+            pageLoader.load(offset, limit, refresh, cb);
+        } else {
+            SvipeDiscover.load(account, null, offset, limit, refresh, cb);
+        }
+    }
+
     /** True while showing OUR video-search results (vs the browse grid) — the host uses it to log clicks. */
     public boolean svipeIsSearchActive() {
         return searchActive;
@@ -268,7 +305,7 @@ public class SvipeExploreGrid extends RecyclerListView {
         ensureBrowseLoaded();
     }
 
-    /** Trigger the first browse page load once (called by the host when the grid first becomes visible). */
+    /** Trigger the first page load once (called by the host when the grid first becomes visible). */
     public void ensureLoaded() {
         if (startedFirstLoad || searchActive) {
             return;
@@ -365,7 +402,7 @@ public class SvipeExploreGrid extends RecyclerListView {
             downY = e.getY();
             horizontalSwipe = false;
             // Only a candidate when resting at the very top and not already refreshing.
-            pullStartY = (!refreshing && !searchActive && !canScrollVertically(-1)) ? e.getY() : -1f;
+            pullStartY = (pullEnabled && !refreshing && !searchActive && !canScrollVertically(-1)) ? e.getY() : -1f;
         } else if (action == MotionEvent.ACTION_MOVE && !pulling && !horizontalSwipe) {
             // A horizontal-dominant drag belongs to the parent tab pager — bail before the
             // RecyclerView claims it, and re-allow the parent to intercept (the RV may have already
@@ -405,7 +442,7 @@ public class SvipeExploreGrid extends RecyclerListView {
             downX = e.getX();
             downY = e.getY();
             horizontalSwipe = false;
-            pullStartY = (!refreshing && !searchActive && !canScrollVertically(-1)) ? e.getY() : -1f;
+            pullStartY = (pullEnabled && !refreshing && !searchActive && !canScrollVertically(-1)) ? e.getY() : -1f;
         } else if (action == MotionEvent.ACTION_MOVE) {
             if (!pulling && !horizontalSwipe) {
                 final float adx = Math.abs(e.getX() - downX);
@@ -472,7 +509,7 @@ public class SvipeExploreGrid extends RecyclerListView {
         loading = true;          // block scroll-pagination until the swap completes
         startSpin();
         animatePullTo(PULL_THRESHOLD);   // settle at the resting position while loading
-        SvipeDiscover.load(account, null, 0, PAGE_SIZE, true, (result, next, error) -> {
+        requestPage(0, PAGE_SIZE, true, (result, next, error) -> {
             loading = false;
             refreshing = false;
             stopSpin();
@@ -655,7 +692,8 @@ public class SvipeExploreGrid extends RecyclerListView {
         if (searchActive) {
             SvipeDiscover.search(account, activeQuery, offset, PAGE_SIZE, cb);
         } else {
-            SvipeDiscover.load(account, null, offset, PAGE_SIZE, cb);
+            // Browse mode: honour an injected PageLoader (e.g. reels-history) when set, else /v1/discover.
+            requestPage(offset, PAGE_SIZE, false, cb);
         }
     }
 
