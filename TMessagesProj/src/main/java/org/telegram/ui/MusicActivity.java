@@ -484,8 +484,20 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 return;
             }
             searchFocused = hasFocus;
+            // Keep the X visible whenever the field is focused (even with no text) so search is
+            // always dismissable back to My Vibe.
+            fragmentSearchField.setCloseButtonVisible(hasFocus);
             if (!inSearchMode()) {
                 updateRows();
+            }
+        });
+        // X taps: clear the text if there is any, otherwise drop focus to leave search (return to My Vibe).
+        fragmentSearchField.setCloseButtonOnClickListener(() -> {
+            if (searchField.length() > 0) {
+                searchField.getText().clear();
+            } else {
+                searchField.clearFocus();
+                AndroidUtilities.hideKeyboard(searchField);
             }
         });
         // Real liquid-glass pill, exactly like DialogsActivity's search field. Falls back to the pill's
