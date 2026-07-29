@@ -11092,6 +11092,8 @@
     <string name="SvipeMusicListeningHistory">Listening history</string>
     <string name="SvipeReelsWatchHistory">Watch history</string>
     <string name="SvipeBlockedChannels">Blocked channels</string>
+    <string name="SvipeSettingsTitle">Svipe</string>
+    <string name="SvipeSettingsSubtitle">Music, reels, avatar &amp; sync</string>
     <string name="SvipeNoBlockedChannels">No blocked channels</string>
     <string name="SvipeNoListeningHistory">No listening history yet</string>
     <string name="SvipeNoWatchHistory">No watch history yet</string>

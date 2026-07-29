@@ -688,6 +688,10 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             items.add(UItem.asShadow(null));
         }
 
+        // Svipe: its own dedicated section, pinned above Account, opening every Svipe-specific setting.
+        items.add(SettingCell.Factory.of(100, 0xFF12C3FD, 0xFF1791FD, R.drawable.svipe_icon_monochrome, getString(R.string.SvipeSettingsTitle), getString(R.string.SvipeSettingsSubtitle)));
+        items.add(UItem.asShadow(null));
+
         items.add(SettingCell.Factory.of(1, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, getString(R.string.SettingsAccount), getString(R.string.SettingsAccountInfo)));
         items.add(SettingCell.Factory.of(2, IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.settings_chat, getString(R.string.SettingsChat), getString(R.string.SettingsChatInfo)));
         items.add(SettingCell.Factory.of(3, IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.settings_privacy, getString(R.string.SettingsPrivacySecurity), getString(R.string.SettingsPrivacySecurityInfo)));
@@ -809,6 +813,9 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             return;
         }
         switch (item.id) {
+            case 100:
+                presentSettingFragment(new org.telegram.svipe.SvipeSettingsActivity());
+                break;
             case 1:
                 presentSettingFragment(new UserInfoActivity());
                 break;

@@ -97,15 +97,6 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
     private int lastSeenRow;
     @Keep
     private int profilePhotoRow;
-    // Svipe: who may see MY photos in the shared archive of deleted profile photos. Sits next to
-    // Telegram's own profile-photo privacy because it is the same question, one layer further on.
-    @Keep
-    private int svipeAvatarArchiveRow;
-    private int svipeMsgSyncRow;
-    // Svipe reels/music: listening history, reels watch history, blocked reels channels.
-    private int svipeMusicHistoryRow;
-    private int svipeReelsHistoryRow;
-    private int svipeBlockedChannelsRow;
     @Keep
     private int bioRow;
     @Keep
@@ -428,16 +419,6 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
                 presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_CALLS));
             } else if (position == profilePhotoRow) {
                 presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_PHOTO));
-            } else if (position == svipeAvatarArchiveRow) { // Svipe
-                presentFragment(new org.telegram.svipe.SvipeAvatarSettingsActivity());
-            } else if (position == svipeMsgSyncRow) { // Svipe
-                presentFragment(new org.telegram.svipe.SvipeMessageSyncSettingsActivity());
-            } else if (position == svipeMusicHistoryRow) { // Svipe
-                presentFragment(new org.telegram.svipe.SvipeMusicHistoryActivity());
-            } else if (position == svipeReelsHistoryRow) { // Svipe
-                presentFragment(new org.telegram.svipe.SvipeReelsHistoryActivity());
-            } else if (position == svipeBlockedChannelsRow) { // Svipe
-                presentFragment(new org.telegram.svipe.SvipeBlockedChannelsActivity());
             } else if (position == bioRow) {
                 presentFragment(new PrivacyControlActivity(ContactsController.PRIVACY_RULES_TYPE_BIO));
             } else if (position == musicRow) {
@@ -755,11 +736,6 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
         phoneNumberRow = rowCount++;
         lastSeenRow = rowCount++;
         profilePhotoRow = rowCount++;
-        svipeAvatarArchiveRow = rowCount++; // Svipe
-        svipeMsgSyncRow = rowCount++; // Svipe
-        svipeMusicHistoryRow = rowCount++; // Svipe
-        svipeReelsHistoryRow = rowCount++; // Svipe
-        svipeBlockedChannelsRow = rowCount++; // Svipe
         forwardsRow = rowCount++;
         callsRow = rowCount++;
         groupsDetailRow = -1;
@@ -1045,10 +1021,6 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
             return position == passcodeRow || position == passwordRow || position == passkeysRow || position == blockedRow || position == sessionsRow || position == secretWebpageRow || position == webSessionsRow ||
-                    position == svipeAvatarArchiveRow || // Svipe: never waits on a Telegram privacy load
-                    position == svipeMsgSyncRow || // Svipe: same — instant, server-cached value
-                    position == svipeMusicHistoryRow || position == svipeReelsHistoryRow || position == svipeBlockedChannelsRow || // Svipe: open instantly
-
                     position == groupsRow && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_INVITE) ||
                     position == lastSeenRow && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_LASTSEEN) ||
                     position == callsRow && !getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_CALLS) ||
@@ -1153,20 +1125,6 @@ public class PrivacySettingsActivity extends BaseFragment implements Notificatio
                             value = formatRulesString(getAccountInstance(), ContactsController.PRIVACY_RULES_TYPE_PHOTO);
                         }
                         textCell.setTextAndValue(getString("PrivacyProfilePhoto", R.string.PrivacyProfilePhoto), value, true);
-                    } else if (position == svipeAvatarArchiveRow) { // Svipe
-                        textCell.setTextAndValue(getString(R.string.SvipeAvatarArchive),
-                                org.telegram.svipe.SvipeAvatarSettingsActivity.visibilityLabel(
-                                        org.telegram.svipe.SvipeConfig.getAvatarVisibility(currentAccount)), true);
-                    } else if (position == svipeMsgSyncRow) { // Svipe
-                        textCell.setTextAndValue(getString(R.string.SvipeMsgSyncTitle),
-                                org.telegram.svipe.SvipeMessageSyncSettingsActivity.modeLabel(
-                                        org.telegram.svipe.SvipeConfig.getMsgSyncMode(currentAccount)), true);
-                    } else if (position == svipeMusicHistoryRow) { // Svipe
-                        textCell.setText(getString(R.string.SvipeMusicListeningHistory), true);
-                    } else if (position == svipeReelsHistoryRow) { // Svipe
-                        textCell.setText(getString(R.string.SvipeReelsWatchHistory), true);
-                    } else if (position == svipeBlockedChannelsRow) { // Svipe
-                        textCell.setText(getString(R.string.SvipeBlockedChannels), true);
                     } else if (position == bioRow) {
                         if (getContactsController().getLoadingPrivacyInfo(ContactsController.PRIVACY_RULES_TYPE_BIO)) {
                             showLoading = true;

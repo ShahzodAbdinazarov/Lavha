@@ -167,6 +167,8 @@
     <string name="SvipeMusicListeningHistory">Tinglash tarixi</string>
     <string name="SvipeReelsWatchHistory">Ko\'rish tarixi</string>
     <string name="SvipeBlockedChannels">Bloklangan kanallar</string>
+    <string name="SvipeSettingsTitle">Svipe</string>
+    <string name="SvipeSettingsSubtitle">Musiqa, reels, avatar va sinxronlash</string>
     <string name="SvipeNoBlockedChannels">Bloklangan kanallar yo\'q</string>
     <string name="SvipeNoListeningHistory">Tinglash tarixi hali yo\'q</string>
     <string name="SvipeNoWatchHistory">Ko\'rish tarixi hali yo\'q</string>

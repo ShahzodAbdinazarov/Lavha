@@ -432,6 +432,8 @@
     <string name="SvipeMusicListeningHistory">История прослушивания</string>
     <string name="SvipeReelsWatchHistory">История просмотров</string>
     <string name="SvipeBlockedChannels">Заблокированные каналы</string>
+    <string name="SvipeSettingsTitle">Svipe</string>
+    <string name="SvipeSettingsSubtitle">Музыка, reels, аватар и синхронизация</string>
     <string name="SvipeNoBlockedChannels">Нет заблокированных каналов</string>
     <string name="SvipeNoListeningHistory">Пока нет истории прослушивания</string>
     <string name="SvipeNoWatchHistory">Пока нет истории просмотров</string>
