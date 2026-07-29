@@ -78,6 +78,7 @@ import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.PlayPauseDrawable;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.ScrollSlidingTextTabStrip;
+import org.telegram.ui.Components.ViewPagerFixed;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.DownscaleScrollableNoiseSuppressor;
 import org.telegram.ui.Components.blur3.RenderNodeWithHash;
@@ -155,14 +156,12 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
      * everything else: the hero recedes (scales down + fades) instead of scrolling away, and the
      * favourites list fades in from nothing.
      *
-     * The panel holds two tabs over ONE list: the strip only chooses which collection the single
-     * adapter reads from. A second RecyclerView would have to be threaded through the blur capture,
-     * the insets, the drag's listAtTop() and the scroll-to-top handler for no gain. */
+     * The panel holds three sub-tabs (Songs / Singers / Most listened) over a {@link ViewPagerFixed}:
+     * the strip and the pager are two views of the same selection. Swiping the pager drags the pages
+     * with the finger and snaps to the nearest neighbour on release, and the strip's underline tracks
+     * that drag; tapping a tab animates the pager to it. {@link #favTab} just mirrors the visible page. */
     private FavouritesPanel favPanel;
     private int favTab = FAV_TAB_SONGS;
-    // The gesture (by ACTION_DOWN time) whose horizontal swipe already switched a favourites sub-tab, so
-    // one continuous drag switches at most one sub-tab and never also spills to the outer pager.
-    private long favSwipeDownTime = -1;
     private final ArrayList<SvipeFavourite> favourites = new ArrayList<>();
     private final ArrayList<SvipeArtistFavourite> artistFavourites = new ArrayList<>();
     // Favourite key -> its entry in the CURRENT favQueue, so rows render as native audio cells.
@@ -609,8 +608,13 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         private static final float SNAP_AT = 0.35f;
 
         final ScrollSlidingTextTabStrip tabStrip;
-        final RecyclerListView innerListView;
-        private final FavAdapter favAdapter;
+        /** The three sub-tab pages (Songs / Singers / Most listened) as an interactive swipe pager. */
+        final ViewPagerFixed favPager;
+        // One list + adapter per page, indexed by FAV_TAB_* (== page position). Pages are created lazily
+        // by the pager (page 0 up front, 1/2 the first time they are swiped to), so entries stay null
+        // until then; every list-touching helper below skips the nulls.
+        private final RecyclerListView[] pageLists = new RecyclerListView[3];
+        private final FavAdapter[] pageAdapters = new FavAdapter[3];
 
         private final Drawable panelBackground;
         private final int touchSlop;
@@ -634,33 +638,39 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             panelBackground.setAlpha(0);
             setBackground(panelBackground);
 
-            innerListView = new RecyclerListView(context);
-            innerListView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
-            innerListView.setGlowColor(0);
-            innerListView.setClipToPadding(false);
-            innerListView.setVerticalScrollBarEnabled(false);
-            innerListView.setAlpha(0f);
-            innerListView.setAdapter(favAdapter = new FavAdapter());
-            innerListView.setOnItemClickListener((view, position) -> onFavouriteClick(position));
-            innerListView.setOnScrollListener(new RecyclerView.OnScrollListener() {
+            // The three sub-tabs are real pages behind a ViewPagerFixed (Telegram's own interactive
+            // tab pager, exactly as SharedMediaLayout uses it): the pages follow the finger, snap to the
+            // nearest neighbour on release and spring back below the threshold. We keep our own strip on
+            // top for the blur pill, so the pager runs WITHOUT its built-in TabsView and drives the strip
+            // by hand instead (see updateStripFromPager / onScrollEnd below).
+            favPager = new ViewPagerFixed(context) {
                 @Override
-                public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
-                    if (iBlur3Active && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && scrollableViewNoiseSuppressor != null) {
-                        scrollableViewNoiseSuppressor.onScrolled(dx, dy);
-                    }
-                    // Page the most-listened tab as its list nears the bottom.
-                    if (favTab == FAV_TAB_MOST_LISTENED && dy > 0 && !mostListenedLoading && !mostListenedEndReached) {
-                        RecyclerView.LayoutManager lm = recyclerView.getLayoutManager();
-                        if (lm instanceof LinearLayoutManager) {
-                            LinearLayoutManager llm = (LinearLayoutManager) lm;
-                            if (llm.findLastVisibleItemPosition() >= llm.getItemCount() - 5) {
-                                loadMostListened(true);
-                            }
-                        }
-                    }
+                public boolean canScrollHorizontally(int direction) {
+                    // The outer Search|Music|Profile pager decides who owns a horizontal swipe purely
+                    // through canParentTabsSlide(); its findScrollingChild() must NOT short-circuit that
+                    // by spotting a scrollable nested pager here (it only tests the backward direction,
+                    // which would dead-swipe forward-at-last-page). Report "no" and let the gate decide.
+                    return false;
                 }
-            });
-            addView(innerListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+                @Override
+                public void onTabAnimationUpdate(boolean manual) {
+                    super.onTabAnimationUpdate(manual);
+                    updateStripFromPager();     // underline follows the drag / settle
+                }
+
+                @Override
+                protected void onScrollEnd() {
+                    super.onScrollEnd();
+                    // Settled (or sprung back): make the strip and favTab match the page we landed on.
+                    int id = getCurrentPosition();
+                    tabStrip.selectTabWithId(id, 1f);
+                    setFavTab(id);
+                }
+            };
+            favPager.setAlpha(0f);
+            favPager.setAdapter(new FavPagerAdapter(this));
+            addView(favPager, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
             tabStrip = new ScrollSlidingTextTabStrip(context, getResourceProvider());
             tabStrip.setColors(Theme.key_profile_tabSelectedLine, Theme.key_profile_tabSelectedText, Theme.key_profile_tabText, Theme.key_profile_tabSelector);
@@ -675,14 +685,19 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             tabStrip.setDelegate(new ScrollSlidingTextTabStrip.ScrollSlidingTabStripDelegate() {
                 @Override
                 public void onPageSelected(int page, boolean forward) {
-                    // Data source only — the panel's travel, drag state and the hero's recede are
-                    // untouched, so switching tabs never moves the sheet.
-                    setFavTab(page);
+                    // A tab TAP: the strip animates its own underline; mirror it by gliding the pager to
+                    // that page. The panel's travel, drag state and the hero's recede are untouched, so
+                    // switching sub-tabs never moves the sheet. favTab is committed by the pager's
+                    // onScrollEnd once the page settles (ids ARE the FAV_TAB_* page positions).
+                    if (favPager != null && favPager.getCurrentPosition() != page) {
+                        favPager.scrollToPosition(page);
+                    }
                 }
 
                 @Override
                 public void onPageScrolled(float progress) {
-                    // No pager behind the strip; the list swaps outright on selection.
+                    // The pager drives the underline during a drag (updateStripFromPager); the strip's own
+                    // tap animation drives it on a tap. Nothing to move from here.
                 }
             });
             try {
@@ -707,13 +722,64 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             applyInsets();
         }
 
-        /** Rows start below the strip and clear the bottom tabs. */
+        /** Rows start below the strip and clear the bottom tabs — for every page that exists yet. */
         void applyInsets() {
-            innerListView.setPadding(0, panelHeaderHeight(), 0, listBottomPadding());
+            for (RecyclerListView list : pageLists) {
+                if (list != null) {
+                    list.setPadding(0, panelHeaderHeight(), 0, listBottomPadding());
+                }
+            }
         }
 
+        /** The list of the page currently on screen (the pager's front view), or null pre-layout. */
+        RecyclerListView currentList() {
+            View v = favPager != null ? favPager.getCurrentView() : null;
+            return v instanceof RecyclerListView ? (RecyclerListView) v : null;
+        }
+
+        /** Refresh one page's list (by FAV_TAB_* id), if it has been created. */
+        void notifyPage(int tabId) {
+            if (tabId >= 0 && tabId < pageAdapters.length && pageAdapters[tabId] != null) {
+                pageAdapters[tabId].notifyDataSetChanged();
+            }
+        }
+
+        /** Refresh every page that exists (e.g. playback state changed). */
         void notifyChanged() {
-            favAdapter.notifyDataSetChanged();
+            for (FavAdapter a : pageAdapters) {
+                if (a != null) {
+                    a.notifyDataSetChanged();
+                }
+            }
+        }
+
+        /**
+         * While the pager drags (or settles), slide the strip's underline from the current tab toward
+         * the neighbour the drag is revealing, by the same fraction the pages have travelled. Purely
+         * visual: {@link ScrollSlidingTextTabStrip#selectTabWithId} moves the indicator and only commits
+         * the strip's selection at a full 1f, which the pager's onScrollEnd guarantees on release.
+         */
+        void updateStripFromPager() {
+            if (favPager == null) {
+                return;
+            }
+            View cur = favPager.getCurrentView();
+            if (cur == null) {
+                return;
+            }
+            int width = cur.getMeasuredWidth();
+            if (width <= 0) {
+                return;
+            }
+            int nextPos = favPager.getNextPosition();
+            float tx = cur.getTranslationX();
+            if (nextPos == favPager.getCurrentPosition() || tx == 0f) {
+                return;     // nothing in flight
+            }
+            // ids == page positions, so nextPos doubles as the target tab id. Held just below 1f so an
+            // over-drag never commits the strip's selection mid-gesture (that would freeze the underline
+            // on a spring-back); onScrollEnd is the single authority that commits it to the final page.
+            tabStrip.selectTabWithId(nextPos, Math.min(0.999f, Math.abs(tx) / width));
         }
 
         boolean isOpen() {
@@ -764,7 +830,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             // The list is fully there at 40% of the travel, so a partial drag already reads as content
             // rather than as a mostly-blank sheet.
             float contentAlpha = Math.min(1f, progress / ALPHA_FULL_AT);
-            innerListView.setAlpha(contentAlpha);
+            favPager.setAlpha(contentAlpha);
             panelBackground.setAlpha((int) (contentAlpha * 255));
             invalidate();
 
@@ -793,9 +859,10 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             settleAnimator.start();
         }
 
-        /** True when the list is scrolled to its very top (so a downward drag closes the panel). */
+        /** True when the current page's list is scrolled to its very top (so a downward drag closes it). */
         private boolean listAtTop() {
-            return !innerListView.canScrollVertically(-1);
+            RecyclerListView cur = currentList();
+            return cur == null || !cur.canScrollVertically(-1);
         }
 
         /**
@@ -820,7 +887,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             return -1;
         }
 
-        /** Select a tab as if it had been tapped — the strip's delegate drives {@link #setFavTab}. */
+        /** Select a tab as if it had been tapped — the strip's delegate then glides the pager to it. */
         private void selectTab(int tabId) {
             ArrayList<Integer> ids = tabStrip.getTabIds();
             int position = ids.indexOf(tabId);
@@ -963,12 +1030,108 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     }
 
     /**
-     * Rows of the favourites panel for WHICHEVER tab is selected: a resolved audio cell, a plain card,
-     * an artist row, or the empty state. One adapter over two collections rather than two adapters —
-     * everything around the list (blur capture, insets, the drag's listAtTop(), scroll-to-top) is wired
-     * to the single innerListView, and {@link #favTab} is the only thing that varies.
+     * The three favourites pages behind the pager. Each page is its own vertical {@link RecyclerListView}
+     * bound to a {@link FavAdapter} fixed to that page's mode (Songs / Singers / Most listened), so the
+     * pages keep independent scroll state and all render, click, empty/loading and paging behaviour is the
+     * same code that drove the old single list — it just no longer swaps datasets under one view.
+     *
+     * <p>Each page position IS its FAV_TAB_* id, and each gets a distinct viewType so the pager caches one
+     * persistent list per tab (viewsByType) and reuses it across swipes. No TabsView is created; the strip
+     * on top is our own {@link ScrollSlidingTextTabStrip}.
+     */
+    private class FavPagerAdapter extends ViewPagerFixed.Adapter {
+
+        // The panel this pager belongs to. Passed in (not read off the MusicActivity favPanel field)
+        // because the pager's first page is created from inside the panel's own constructor, before that
+        // field has been assigned — so the field would still be null when page 0 registers itself.
+        private final FavouritesPanel panel;
+
+        FavPagerAdapter(FavouritesPanel panel) {
+            this.panel = panel;
+        }
+
+        @Override
+        public int getItemCount() {
+            return 3;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            return position;    // one persistent list per tab
+        }
+
+        @Override
+        public int getItemId(int position) {
+            return position;    // ids == FAV_TAB_* positions
+        }
+
+        @Override
+        public CharSequence getItemTitle(int position) {
+            // Unused (no TabsView; our own strip carries the titles), but kept meaningful.
+            if (position == FAV_TAB_SINGERS) return getString(R.string.SvipeFavouriteSingers);
+            if (position == FAV_TAB_MOST_LISTENED) return getString(R.string.SvipeMostListened);
+            return getString(R.string.SvipeFavouriteSongs);
+        }
+
+        @Override
+        public View createView(int viewType) {
+            final int mode = viewType;      // viewType == position == FAV_TAB_*
+            Context context = panel.favPager.getContext();
+            RecyclerListView list = new RecyclerListView(context);
+            list.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
+            list.setGlowColor(0);
+            list.setClipToPadding(false);
+            list.setVerticalScrollBarEnabled(false);
+            list.setPadding(0, panelHeaderHeight(), 0, listBottomPadding());
+            FavAdapter adapter = new FavAdapter(mode);
+            list.setAdapter(adapter);
+            list.setOnItemClickListener((view, position) -> onFavouriteClick(mode, position));
+            list.setOnScrollListener(new RecyclerView.OnScrollListener() {
+                @Override
+                public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+                    if (iBlur3Active && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && scrollableViewNoiseSuppressor != null) {
+                        scrollableViewNoiseSuppressor.onScrolled(dx, dy);
+                    }
+                    // Page the most-listened list as it nears the bottom.
+                    if (mode == FAV_TAB_MOST_LISTENED && dy > 0 && !mostListenedLoading && !mostListenedEndReached) {
+                        RecyclerView.LayoutManager lm = recyclerView.getLayoutManager();
+                        if (lm instanceof LinearLayoutManager) {
+                            LinearLayoutManager llm = (LinearLayoutManager) lm;
+                            if (llm.findLastVisibleItemPosition() >= llm.getItemCount() - 5) {
+                                loadMostListened(true);
+                            }
+                        }
+                    }
+                }
+            });
+            panel.pageLists[mode] = list;
+            panel.pageAdapters[mode] = adapter;
+            return list;
+        }
+
+        @Override
+        public void bindView(View view, int position, int viewType) {
+            // Data may have changed while the page was off-screen (or is loading on first reveal).
+            if (position == FAV_TAB_MOST_LISTENED) {
+                ensureMostListenedLoaded();
+            }
+            panel.notifyPage(position);
+        }
+    }
+
+    /**
+     * Rows of ONE favourites page: a resolved audio cell, a plain card, an artist row, a most-listened
+     * row, or the empty/loading state. The adapter is fixed to a {@link #mode} (a FAV_TAB_* id) at
+     * construction — one adapter per page — so it reads its own collection and never swaps.
      */
     private class FavAdapter extends RecyclerListView.SelectionAdapter {
+
+        /** Which page (FAV_TAB_*) this adapter renders — replaces the old shared favTab read. */
+        private final int mode;
+
+        FavAdapter(int mode) {
+            this.mode = mode;
+        }
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
@@ -986,13 +1149,13 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
         @Override
         public int getItemCount() {
-            if (favTab == FAV_TAB_MOST_LISTENED) {
+            if (mode == FAV_TAB_MOST_LISTENED) {
                 if (mostListened.isEmpty()) {
                     return 1;   // spinner while loading, else the empty sentence
                 }
                 return mostListened.size();
             }
-            if (favTab == FAV_TAB_SINGERS) {
+            if (mode == FAV_TAB_SINGERS) {
                 return artistFavourites.isEmpty() ? 1 : artistFavourites.size();
             }
             return favourites.isEmpty() ? 1 : favourites.size();
@@ -1000,13 +1163,13 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
         @Override
         public int getItemViewType(int position) {
-            if (favTab == FAV_TAB_MOST_LISTENED) {
+            if (mode == FAV_TAB_MOST_LISTENED) {
                 if (mostListened.isEmpty()) {
                     return mostListenedLoading ? ROW_FAV_LOADING : ROW_FAV_EMPTY;
                 }
                 return ROW_ML_SONG;
             }
-            if (favTab == FAV_TAB_SINGERS) {
+            if (mode == FAV_TAB_SINGERS) {
                 return artistFavourites.isEmpty() ? ROW_FAV_EMPTY : ROW_FAV_ARTIST;
             }
             if (favourites.isEmpty()) {
@@ -1061,10 +1224,9 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 return;
             }
             if (type == ROW_FAV_EMPTY) {
-                // One empty view serves every tab — only the sentence differs, so it is set here rather
-                // than baked in at create time: the view survives a tab switch by recycling.
-                int empty = favTab == FAV_TAB_SINGERS ? R.string.SvipeFavouriteSingersEmpty
-                        : favTab == FAV_TAB_MOST_LISTENED ? R.string.MusicSearchEmpty
+                // This page's own empty sentence.
+                int empty = mode == FAV_TAB_SINGERS ? R.string.SvipeFavouriteSingersEmpty
+                        : mode == FAV_TAB_MOST_LISTENED ? R.string.MusicSearchEmpty
                         : R.string.SvipeFavouritesEmpty;
                 ((TextView) holder.itemView).setText(getString(empty));
                 return;
@@ -1170,11 +1332,10 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     /* favourites data */
 
     /**
-     * Point the panel's one list at the other tab.
-     *
-     * <p>Deliberately touches nothing but the data source: the panel's translation, its drag state and
-     * the hero's recede are all driven by {@code progress}, which this never reads or writes, so a tab
-     * switch cannot move the sheet or interrupt a settle animation in flight.
+     * Record which favourites page is now on screen. Each page is its own list, so there is no dataset
+     * to swap or scroll here — this only mirrors the pager's selection and kicks off the most-listened
+     * load the first time that page appears. The pager's onScrollEnd (drag) and the strip's tab tap both
+     * drive this; the panel's translation, drag state and the hero's recede are untouched.
      */
     private void setFavTab(int tab) {
         if (favTab == tab) {
@@ -1183,12 +1344,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         favTab = tab;
         if (tab == FAV_TAB_MOST_LISTENED) {
             ensureMostListenedLoaded();
-        }
-        if (favPanel != null) {
-            favPanel.notifyChanged();
-            // The lists have unrelated lengths, so without this the incoming one inherits the outgoing
-            // one's scroll offset and can arrive already scrolled part-way down.
-            favPanel.innerListView.scrollToPosition(0);
         }
     }
 
@@ -1233,8 +1388,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void notifyMostListened() {
-        if (favPanel != null && favTab == FAV_TAB_MOST_LISTENED) {
-            favPanel.notifyChanged();
+        if (favPanel != null) {
+            favPanel.notifyPage(FAV_TAB_MOST_LISTENED);
         }
     }
 
@@ -1253,8 +1408,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private void rebuildArtistFavourites() {
         artistFavourites.clear();
         artistFavourites.addAll(SvipeArtistFavouritesSet.getInstance(currentAccount).list());
-        if (favPanel != null && favTab == FAV_TAB_SINGERS) {
-            favPanel.notifyChanged();
+        if (favPanel != null) {
+            favPanel.notifyPage(FAV_TAB_SINGERS);
         }
     }
 
@@ -1267,7 +1422,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         favourites.clear();
         favourites.addAll(SvipeFavouritesSet.getInstance(currentAccount).list());
         if (favPanel != null) {
-            favPanel.notifyChanged();
+            favPanel.notifyPage(FAV_TAB_SONGS);
         }
         resolveFavourites();
     }
@@ -1322,7 +1477,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             favResolvedMsgs.putAll(resolved);
             buildFavQueue(playable, owners);
             if (favPanel != null) {
-                favPanel.notifyChanged();
+                favPanel.notifyPage(FAV_TAB_SONGS);
             }
         });
     }
@@ -1341,8 +1496,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         }
     }
 
-    private void onFavouriteClick(int position) {
-        if (favTab == FAV_TAB_MOST_LISTENED) {
+    private void onFavouriteClick(int mode, int position) {
+        if (mode == FAV_TAB_MOST_LISTENED) {
             // A most-listened row opens the song page (same as a search song row), not inline playback.
             if (position >= 0 && position < mostListened.size()) {
                 SvipeMusic.ListenedSong s = mostListened.get(position);
@@ -1350,7 +1505,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             }
             return;
         }
-        if (favTab == FAV_TAB_SINGERS) {
+        if (mode == FAV_TAB_SINGERS) {
             if (position >= 0 && position < artistFavourites.size()) {
                 SvipeArtistFavourite a = artistFavourites.get(position);
                 presentFragment(new MusicArtistActivity(a.artistId, a.shownName()));
@@ -1377,7 +1532,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 favQueue.play(mo);
             }
             if (favPanel != null) {
-                favPanel.notifyChanged();
+                favPanel.notifyPage(FAV_TAB_SONGS);
             }
             return;
         }
@@ -2158,33 +2313,22 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
     @Override
     public boolean canParentTabsSlide(MotionEvent ev, boolean forward) {
-        // When the favourites panel is open, a horizontal swipe first moves BETWEEN its sub-tabs (Songs
-        // <-> Singers <-> Most listened) and only spills to the outer Search/Profile tabs at the edges.
-        // Nested order left->right: Search | <sub-tabs...> | Profile. `forward` (finger-left) heads right
-        // toward the next sub-tab (then Profile); backward (finger-right) heads left (then Search). N-tab
-        // generalization: step through the strip's own id list rather than hard-coding the two ends.
-        if (favPanel != null && favPanel.isOpen()) {
-            long dt = ev != null ? ev.getDownTime() : 0;
-            if (dt == favSwipeDownTime) {
-                return false;   // this gesture already switched a sub-tab -> keep the outer pager blocked
+        // Nested order left->right: Search | Songs Singers Most-listened | Profile. When the favourites
+        // panel is open the inner ViewPagerFixed owns the horizontal swipe and does the interactive
+        // follow+snap between its sub-tabs; the outer Search|Music|Profile pager only takes the swipe when
+        // the inner pager is already at its edge in that direction. Returning false here leaves the drag
+        // to the inner pager (which starts tracking via its own onInterceptTouchEvent); true hands it to
+        // the outer pager. `forward` = finger-left = toward the next page (then Profile).
+        if (favPanel != null && favPanel.isOpen() && favPanel.favPager != null) {
+            int pos = favPanel.favPager.getCurrentPosition();
+            int count = favPanel.favPager.adapter != null ? favPanel.favPager.adapter.getItemCount() : 3;
+            if (forward && pos < count - 1) {
+                return false;   // inner has a next sub-tab -> it consumes the swipe
             }
-            ArrayList<Integer> ids = favPanel.tabStrip.getTabIds();
-            int idx = ids.indexOf(favTab);
-            if (forward && idx >= 0 && idx < ids.size() - 1) {
-                int next = ids.get(idx + 1);
-                favSwipeDownTime = dt;
-                favPanel.selectTab(next);
-                setFavTab(next);
-                return false;
+            if (!forward && pos > 0) {
+                return false;   // inner has a previous sub-tab -> it consumes the swipe
             }
-            if (!forward && idx > 0) {
-                int prev = ids.get(idx - 1);
-                favSwipeDownTime = dt;
-                favPanel.selectTab(prev);
-                setFavTab(prev);
-                return false;
-            }
-            // Already on the edge sub-tab in this direction -> let the outer pager take over.
+            // At the inner edge in this direction -> let the outer pager slide to Search / Profile.
         }
         return true;
     }
@@ -2197,10 +2341,13 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             }
             return;
         }
-        // Home: unwind the favourites list, then close the panel, so a tab re-tap always lands back on
-        // the hero rather than on a half-open panel.
+        // Home: unwind the current favourites page, then close the panel, so a tab re-tap always lands
+        // back on the hero rather than on a half-open panel.
         if (favPanel != null) {
-            favPanel.innerListView.scrollToPosition(0);
+            RecyclerListView cur = favPanel.currentList();
+            if (cur != null) {
+                cur.scrollToPosition(0);
+            }
             favPanel.animateTo(false);
         }
     }
