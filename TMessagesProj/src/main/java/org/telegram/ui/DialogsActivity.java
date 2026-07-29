@@ -7604,13 +7604,6 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     protected void svipeOnExploreGridVisible() {
     }
 
-    /**
-     * Svipe Search: the Explore grid is the BROWSE state — show it ONLY while the search field is
-     * unfocused AND empty. Touching/focusing the field hides the grid so Telegram's native search
-     * landing (recent searches, top peers, suggested channels) shows underneath; typing then reveals
-     * the results. The grid only comes back when the user BACKs out of the search session (see
-     * {@link #svipeSearchEngaged}) — never on a transient blur such as opening a media viewer.
-     */
     /** Search-history query logging for the Svipe Search tab (debounced; call from onTextChanged). The
      *  session collapses variants; clearing the field ends the visit. Never runs on the Chats search. */
     private void svipeLogSearchQuery(String text) {
@@ -7634,16 +7627,45 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         AndroidUtilities.runOnUIThread(svipeSearchLogPending, 500);
     }
 
+    /**
+     * Svipe Search: the grid is ALWAYS on screen and its content follows the field. Empty + unfocused
+     * → the /v1/discover BROWSE grid; empty + focused → the recent-search rows above the browse grid;
+     * a typed query → OUR video results from /v1/discover/search (SvipeDiscover.search). The grid sits
+     * over the native chat-search pager, so this tab shows our videos, not dialog matches.
+     */
     private void svipeUpdateExploreGridVisibility() {
         if (!isSvipeSearchSection() || svipeExploreGrid == null || fragmentSearchField == null) {
             return;
         }
-        final boolean empty = fragmentSearchField.editText.getText().length() == 0;
-        final boolean show = empty && !svipeSearchEngaged;
-        svipeExploreGrid.setVisibility(show ? View.VISIBLE : View.GONE);
-        if (show) {
-            svipeOnExploreGridVisible();
+        svipeExploreGrid.setVisibility(View.VISIBLE);
+        final String text = fragmentSearchField.editText.getText().toString();
+        if (svipeExploreGrid instanceof org.telegram.ui.Components.SvipeExploreGrid) {
+            ((org.telegram.ui.Components.SvipeExploreGrid) svipeExploreGrid).svipeSetSearchState(text, svipeSearchEngaged);
         }
+        svipeOnExploreGridVisible();
+    }
+
+    /** Svipe Search: put a tapped recent query back into the field (which re-runs the video search). */
+    protected void svipeSetSearchText(String query) {
+        if (fragmentSearchField == null || query == null) {
+            return;
+        }
+        fragmentSearchField.editText.setText(query);
+        fragmentSearchField.editText.setSelection(query.length());
+    }
+
+    /**
+     * Svipe Search: a tapped video result — stamp the click on the active search visit so the server
+     * records query→click (same {@link org.telegram.svipe.SvipeSearchLog} session as the typed query).
+     * Kind "reel"; ref is the "username/messageId" of the tapped reel. No-op outside an active visit.
+     */
+    protected void svipeLogVideoResultClick(String query, org.telegram.svipe.SvipeDiscover.Item ref) {
+        if (!isSvipeSearchSection() || svipeSearchLog == null) {
+            return;
+        }
+        final String q = query != null ? query : svipeLastSearchText;
+        final String refStr = ref != null ? (ref.username + "/" + ref.messageId) : null;
+        svipeSearchLog.click(q, "reel", refStr, null);
     }
 
     private void showSearch(boolean show, boolean startFromDownloads, boolean animated) {

@@ -36,8 +36,18 @@ public class SvipeSearchActivity extends DialogsActivity {
     @Override
     protected View svipeCreateExploreGrid(Context context) {
         exploreGrid = new SvipeExploreGrid(context, currentAccount);
-        exploreGrid.setOnReelTapListener((items, position) ->
-                presentFragment(ReelsActivity.ofDiscoverSeed(items, position)));
+        exploreGrid.setOnReelTapListener((items, position) -> {
+            // A tapped SEARCH result is a query→click signal — log it before opening the reels player
+            // (browse-grid taps carry no query, so svipeLogVideoResultClick no-ops there).
+            if (exploreGrid.svipeIsSearchActive()) {
+                final org.telegram.svipe.SvipeDiscover.Item ref =
+                        position >= 0 && position < items.size() ? items.get(position) : null;
+                svipeLogVideoResultClick(exploreGrid.svipeActiveQuery(), ref);
+            }
+            presentFragment(ReelsActivity.ofDiscoverSeed(items, position));
+        });
+        // Tapping a recent search re-runs it by writing the query back into the search field.
+        exploreGrid.setOnRecentTapListener(this::svipeSetSearchText);
         return exploreGrid;
     }
 
