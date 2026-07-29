@@ -57,11 +57,13 @@ import org.telegram.svipe.SvipeFavouritesSet;
 import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.svipe.SvipeMusicResolver;
+import org.telegram.svipe.SvipeMusicSearchHistory;
 import org.telegram.svipe.SvipeMusicTelemetry;
 import org.telegram.svipe.SvipeSearchLog;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.GraySectionCell;
 import org.telegram.ui.Cells.SharedAudioCell;
 import org.telegram.ui.Cells.UserCell;
 import org.telegram.ui.Components.AudioPlayerAlert;
@@ -115,13 +117,23 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private static final int ROW_FAV_CARD = 9;   // not resolvable here (private source) -> lightweight card
     private static final int ROW_FAV_EMPTY = 10; // shared by both tabs; only the sentence differs
     private static final int ROW_FAV_ARTIST = 11; // a favourite singer -> native UserCell (profile person row)
+    private static final int ROW_ARTIST = 12;     // a canonical artist search result -> rounded-SQUARE cell
+    private static final int ROW_RECENT = 13;     // a recent-search query row (text + remove "x")
+    private static final int ROW_RECENT_HEADER = 14; // "Recent searches" + a "clear all" action
+    private static final int ROW_RECENT_EMPTY = 15;  // "No recent searches" centred sentence
+    private static final int ROW_ML_SONG = 16;    // a "most listened" song row (cover + listen-time label)
+    private static final int ROW_FAV_LOADING = 17; // spinner while the most-listened page loads
 
-    /** The panel's two tabs. Songs is index 0 and is what the panel opens on. */
+    /** The panel's tabs. Songs is index 0 and is what the panel opens on. */
     private static final int FAV_TAB_SONGS = 0;
     private static final int FAV_TAB_SINGERS = 1;
+    private static final int FAV_TAB_MOST_LISTENED = 2;
 
     private static final int SEARCH_MIN_CHARS = 2;
     private static final int SEARCH_PAGE = 50;
+    private static final int ARTIST_SEARCH_LIMIT = 6;   // fetched; only MAX_ARTIST_ROWS are shown
+    private static final int MAX_ARTIST_ROWS = 3;       // interleaved above the song results
+    private static final int MOST_LISTENED_PAGE = 50;
     private static final int PLAY_WINDOW = 60;
 
     private boolean hasMainTabs;
@@ -188,6 +200,9 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private String searchedQuery;
     // Search now returns canonical SONGS (1 card = 1 real song); tapping opens the version picker.
     private final ArrayList<SvipeMusic.Song> songResults = new ArrayList<>();
+    // Canonical artists matching the same query — interleaved above the songs (rounded-square rows), so
+    // the two kinds of result are told apart at a glance (song covers are circles, artist art is square).
+    private final ArrayList<SvipeMusic.Artist> artistResults = new ArrayList<>();
     private final ArrayList<SvipeMusic.Track> searchResults = new ArrayList<>();
     // Each result's default version resolved to a real audio MessageObject, so the row renders as a
     // native SharedAudioCell (album art + play/download + duration) exactly like the chats media search.
@@ -197,6 +212,17 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private boolean searchLoading;
     private boolean searchFailed;
     private Runnable pendingSearch;
+    // Local recent-search ledger (SvipeMusicSearchHistory) shown when the field is focused but empty.
+    private SvipeMusicSearchHistory searchHistory;
+    private boolean searchFocused;
+    // Song ids whose default version is being resolved on demand for an inline play (fallback rows).
+    private final HashSet<Long> songResolving = new HashSet<>();
+
+    // "Most listened" fav-panel tab, paged from the backend and cached for the process.
+    private final ArrayList<SvipeMusic.ListenedSong> mostListened = new ArrayList<>();
+    private boolean mostListenedLoading;
+    private boolean mostListenedLoaded;
+    private boolean mostListenedEndReached;
     // One per search visit: accumulates the query variants + the tapped result, reported to the backend
     // (search-history). Minted lazily on the first query, cleared when the field empties (visit over).
     private SvipeSearchLog musicSearchLog;
@@ -217,6 +243,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         SvipeMusic.Section section;
         SvipeMusic.Track track;
         SvipeMusic.Song song;
+        SvipeMusic.Artist artist;
+        String recentQuery;
 
         Row(int type) {
             this.type = type;
@@ -296,7 +324,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
              */
             @Override
             public boolean onInterceptTouchEvent(MotionEvent ev) {
-                if (inSearchMode() || favPanel == null) {
+                if (inSearchMode() || showingRecent() || favPanel == null) {
                     return super.onInterceptTouchEvent(ev);
                 }
                 int action = ev.getAction();
@@ -448,6 +476,16 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             }
         });
         searchField = fragmentSearchField.editText;
+        // Focused-but-empty shows the recent-search list (Telegram-native feel); blurring hides it again.
+        searchField.setOnFocusChangeListener((v, hasFocus) -> {
+            if (searchFocused == hasFocus) {
+                return;
+            }
+            searchFocused = hasFocus;
+            if (!inSearchMode()) {
+                updateRows();
+            }
+        });
         // Real liquid-glass pill, exactly like DialogsActivity's search field. Falls back to the pill's
         // own solid background when glass isn't active.
         if (iBlur3Active) {
@@ -610,6 +648,16 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                     if (iBlur3Active && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && scrollableViewNoiseSuppressor != null) {
                         scrollableViewNoiseSuppressor.onScrolled(dx, dy);
                     }
+                    // Page the most-listened tab as its list nears the bottom.
+                    if (favTab == FAV_TAB_MOST_LISTENED && dy > 0 && !mostListenedLoading && !mostListenedEndReached) {
+                        RecyclerView.LayoutManager lm = recyclerView.getLayoutManager();
+                        if (lm instanceof LinearLayoutManager) {
+                            LinearLayoutManager llm = (LinearLayoutManager) lm;
+                            if (llm.findLastVisibleItemPosition() >= llm.getItemCount() - 5) {
+                                loadMostListened(true);
+                            }
+                        }
+                    }
                 }
             });
             addView(innerListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
@@ -619,6 +667,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             tabStrip.setUseMinimalWidth(true);
             tabStrip.addTextTab(FAV_TAB_SONGS, getString(R.string.SvipeFavouriteSongs));
             tabStrip.addTextTab(FAV_TAB_SINGERS, getString(R.string.SvipeFavouriteSingers));
+            tabStrip.addTextTab(FAV_TAB_MOST_LISTENED, getString(R.string.SvipeMostListened));
             tabStrip.finishAddingTabs();
             // Songs is the default: the tab ids ARE the FAV_TAB_* indices, so the strip's id is the
             // adapter's mode and nothing has to map between them.
@@ -924,11 +973,11 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int type = holder.getItemViewType();
-            if (type == ROW_FAV_EMPTY) {
+            if (type == ROW_FAV_EMPTY || type == ROW_FAV_LOADING) {
                 return false;
             }
-            if (type == ROW_FAV_ARTIST) {
-                return true;    // an artist row always has a page to open
+            if (type == ROW_FAV_ARTIST || type == ROW_ML_SONG) {
+                return true;    // an artist / most-listened row always has a page to open
             }
             // Don't offer a ripple on a row whose tap could not do anything.
             int pos = holder.getAdapterPosition();
@@ -937,6 +986,12 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
         @Override
         public int getItemCount() {
+            if (favTab == FAV_TAB_MOST_LISTENED) {
+                if (mostListened.isEmpty()) {
+                    return 1;   // spinner while loading, else the empty sentence
+                }
+                return mostListened.size();
+            }
             if (favTab == FAV_TAB_SINGERS) {
                 return artistFavourites.isEmpty() ? 1 : artistFavourites.size();
             }
@@ -945,6 +1000,12 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
         @Override
         public int getItemViewType(int position) {
+            if (favTab == FAV_TAB_MOST_LISTENED) {
+                if (mostListened.isEmpty()) {
+                    return mostListenedLoading ? ROW_FAV_LOADING : ROW_FAV_EMPTY;
+                }
+                return ROW_ML_SONG;
+            }
             if (favTab == FAV_TAB_SINGERS) {
                 return artistFavourites.isEmpty() ? ROW_FAV_EMPTY : ROW_FAV_ARTIST;
             }
@@ -963,10 +1024,18 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 view = new SharedAudioCell(context, getResourceProvider());
             } else if (viewType == ROW_FAV_CARD) {
                 view = new FavouriteCell(context);
+            } else if (viewType == ROW_ML_SONG) {
+                view = new MostListenedCell(context);
             } else if (viewType == ROW_FAV_ARTIST) {
                 // The song page's artist row verbatim: UserCell is the profile's own person row and
                 // takes an explicit name/status, so it needs no peer behind it.
                 view = new UserCell(context, 6, 0, false, getResourceProvider());
+            } else if (viewType == ROW_FAV_LOADING) {
+                org.telegram.ui.Components.RadialProgressView progress = new org.telegram.ui.Components.RadialProgressView(context);
+                progress.setSize(dp(28));
+                FrameLayout wrap = new FrameLayout(context);
+                wrap.addView(progress, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER, 0, 24, 0, 24));
+                view = wrap;
             } else {
                 TextView tv = new TextView(context);
                 tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
@@ -982,11 +1051,22 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
             final int type = holder.getItemViewType();
+            if (type == ROW_FAV_LOADING) {
+                return;
+            }
+            if (type == ROW_ML_SONG) {
+                if (position < mostListened.size()) {
+                    ((MostListenedCell) holder.itemView).bind(mostListened.get(position));
+                }
+                return;
+            }
             if (type == ROW_FAV_EMPTY) {
-                // One empty view serves both tabs — only the sentence differs, so it is set here rather
+                // One empty view serves every tab — only the sentence differs, so it is set here rather
                 // than baked in at create time: the view survives a tab switch by recycling.
-                ((TextView) holder.itemView).setText(getString(favTab == FAV_TAB_SINGERS
-                        ? R.string.SvipeFavouriteSingersEmpty : R.string.SvipeFavouritesEmpty));
+                int empty = favTab == FAV_TAB_SINGERS ? R.string.SvipeFavouriteSingersEmpty
+                        : favTab == FAV_TAB_MOST_LISTENED ? R.string.MusicSearchEmpty
+                        : R.string.SvipeFavouritesEmpty;
+                ((TextView) holder.itemView).setText(getString(empty));
                 return;
             }
             if (type == ROW_FAV_ARTIST) {
@@ -1101,12 +1181,69 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             return;
         }
         favTab = tab;
+        if (tab == FAV_TAB_MOST_LISTENED) {
+            ensureMostListenedLoaded();
+        }
         if (favPanel != null) {
             favPanel.notifyChanged();
-            // The two lists have unrelated lengths, so without this the incoming one inherits the
-            // outgoing one's scroll offset and can arrive already scrolled part-way down.
+            // The lists have unrelated lengths, so without this the incoming one inherits the outgoing
+            // one's scroll offset and can arrive already scrolled part-way down.
             favPanel.innerListView.scrollToPosition(0);
         }
+    }
+
+    /** Load the first most-listened page the first time that tab is opened. */
+    private void ensureMostListenedLoaded() {
+        if (!mostListenedLoaded && !mostListenedLoading) {
+            loadMostListened(false);
+        }
+    }
+
+    /**
+     * Load a page of this user's most-listened songs. {@code more=false} loads the first page (and shows
+     * a spinner); {@code more=true} appends the next page as the list nears its bottom.
+     */
+    private void loadMostListened(boolean more) {
+        if (mostListenedLoading || (more && mostListenedEndReached)) {
+            return;
+        }
+        mostListenedLoading = true;
+        if (!more) {
+            notifyMostListened();   // swap the empty sentence for the spinner
+        }
+        final int offset = more ? mostListened.size() : 0;
+        SvipeMusic.mostListenedSongs(currentAccount, offset, MOST_LISTENED_PAGE, (items, next, error) -> {
+            mostListenedLoading = false;
+            if (items == null) {
+                // Leave what we have; a later tab re-open or scroll retries.
+                if (!more) {
+                    mostListenedLoaded = true;   // stop the spinner -> show the empty sentence
+                }
+                notifyMostListened();
+                return;
+            }
+            mostListenedLoaded = true;
+            if (!more) {
+                mostListened.clear();
+            }
+            mostListened.addAll(items);
+            mostListenedEndReached = next == null || items.isEmpty();
+            notifyMostListened();
+        });
+    }
+
+    private void notifyMostListened() {
+        if (favPanel != null && favTab == FAV_TAB_MOST_LISTENED) {
+            favPanel.notifyChanged();
+        }
+    }
+
+    /** Total listen-time as "Hh Mm" (or just "Mm" under an hour) for the most-listened label. */
+    private String formatListenTime(long totalMs) {
+        long minutes = Math.max(0, totalMs) / 60000L;
+        long h = minutes / 60;
+        long m = minutes % 60;
+        return h > 0 ? (h + "h " + m + "m") : (m + "m");
     }
 
     /**
@@ -1205,6 +1342,14 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void onFavouriteClick(int position) {
+        if (favTab == FAV_TAB_MOST_LISTENED) {
+            // A most-listened row opens the song page (same as a search song row), not inline playback.
+            if (position >= 0 && position < mostListened.size()) {
+                SvipeMusic.ListenedSong s = mostListened.get(position);
+                presentFragment(new MusicSongActivity(s.id, s.shownTitle()));
+            }
+            return;
+        }
         if (favTab == FAV_TAB_SINGERS) {
             if (position >= 0 && position < artistFavourites.size()) {
                 SvipeArtistFavourite a = artistFavourites.get(position);
@@ -1414,6 +1559,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         if (query.length() < SEARCH_MIN_CHARS) {
             searchedQuery = null;
             songResults.clear();
+            artistResults.clear();
             searchMo.clear();
             searchLoading = false;
             searchFailed = false;
@@ -1429,6 +1575,20 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void runSearch(String q) {
+        // Artists matching the same query — resolved in parallel and interleaved above the songs. Its
+        // own callback so a slow/failed artist lookup never holds up the song rows.
+        SvipeMusic.artistsSearch(currentAccount, q, 0, ARTIST_SEARCH_LIMIT, (items, next, error) -> {
+            if (!q.equals(query)) {
+                return;
+            }
+            artistResults.clear();
+            if (items != null) {
+                for (int i = 0; i < items.size() && artistResults.size() < MAX_ARTIST_ROWS; i++) {
+                    artistResults.add(items.get(i));
+                }
+            }
+            updateRows();
+        });
         SvipeMusic.songsSearch(currentAccount, q, 0, SEARCH_PAGE, (items, next, error) -> {
             if (!q.equals(query)) {
                 return;
@@ -1499,20 +1659,40 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void updateRows() {
-        // The list now only serves search; "home" is the full-screen VibeScreen, not a row list.
+        // The list serves search results AND the focused-but-empty recent-search list; "home" is the
+        // full-screen VibeScreen, not a row list.
         rows.clear();
         if (inSearchMode()) {
-            if (searchLoading) {
+            boolean empty = songResults.isEmpty() && artistResults.isEmpty();
+            if (searchLoading && empty) {
                 rows.add(new Row(ROW_LOADING));
-            } else if (searchFailed) {
+            } else if (searchFailed && empty) {
                 rows.add(new Row(ROW_RETRY));
-            } else if (songResults.isEmpty()) {
+            } else if (empty) {
                 rows.add(new Row(ROW_EMPTY));
             } else {
+                // Artists first, as a small rounded-square group, then the songs.
+                for (SvipeMusic.Artist a : artistResults) {
+                    Row r = new Row(ROW_ARTIST);
+                    r.artist = a;
+                    rows.add(r);
+                }
                 for (SvipeMusic.Song s : songResults) {
                     // Native audio row once the default version resolved; letter-cell fallback otherwise.
                     Row r = new Row(searchMo.containsKey(s.id) ? ROW_SONG_AUDIO : ROW_SONG);
                     r.song = s;
+                    rows.add(r);
+                }
+            }
+        } else if (showingRecent()) {
+            List<String> recents = history().getAll();
+            if (recents.isEmpty()) {
+                rows.add(new Row(ROW_RECENT_EMPTY));
+            } else {
+                rows.add(new Row(ROW_RECENT_HEADER));
+                for (String q : recents) {
+                    Row r = new Row(ROW_RECENT);
+                    r.recentQuery = q;
                     rows.add(r);
                 }
             }
@@ -1523,20 +1703,34 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         updateMode();
     }
 
+    /** The recent-search list stands in for the vibe home when the field is focused but not yet a query. */
+    private boolean showingRecent() {
+        return searchFocused && !inSearchMode();
+    }
+
+    private SvipeMusicSearchHistory history() {
+        if (searchHistory == null) {
+            searchHistory = new SvipeMusicSearchHistory(currentAccount);
+        }
+        return searchHistory;
+    }
+
     // Swap between the search list and the home scroller (vibe hero + favourites) based on whether a
     // query is active. The hero is a row of the home scroller now, so hiding that hides both.
     private void updateMode() {
-        boolean search = inSearchMode();
+        // The row list shows both real search results and the focused-but-empty recent list; the hero +
+        // favourites panel show only when neither is up.
+        boolean list = inSearchMode() || showingRecent();
         if (listView != null) {
-            listView.setVisibility(search ? View.VISIBLE : View.GONE);
+            listView.setVisibility(list ? View.VISIBLE : View.GONE);
         }
         if (vibeScreen != null) {
-            vibeScreen.setVisibility(search ? View.GONE : View.VISIBLE);
+            vibeScreen.setVisibility(list ? View.GONE : View.VISIBLE);
         }
         if (favPanel != null) {
-            favPanel.setVisibility(search ? View.GONE : View.VISIBLE);
+            favPanel.setVisibility(list ? View.GONE : View.VISIBLE);
         }
-        if (vibeScreen != null && !search) {
+        if (vibeScreen != null && !list) {
             vibeScreen.update();
         }
         // Home shows the dark immersive backdrop (light status-bar icons); search shows the opaque
@@ -1561,8 +1755,24 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         Row row = rows.get(position);
         if (row.type == ROW_TRACK) {
             onTrackTap(row);
+        } else if (row.type == ROW_RECENT) {
+            // Re-run a stored query: set the field text (which fires the debounced search).
+            if (row.recentQuery != null && searchField != null) {
+                searchField.setText(row.recentQuery);
+                searchField.setSelection(searchField.length());
+            }
+        } else if (row.type == ROW_ARTIST) {
+            if (row.artist != null) {
+                recordSearchHistory();
+                if (inSearchMode() && musicSearchLog != null) {
+                    musicSearchLog.click(searchedQuery, "artist", "artist:" + row.artist.id, row.artist.shownName());
+                }
+                presentFragment(new MusicArtistActivity(row.artist.id, row.artist.shownName()));
+            }
         } else if (row.type == ROW_SONG || row.type == ROW_SONG_AUDIO) {
             if (row.song != null) {
+                // A tapped result is a strong "found it" signal — remember the query locally too.
+                recordSearchHistory();
                 // Search-history: a tapped result means they found what they searched for. Tapping a
                 // Deezer placeholder is an even stronger demand signal (kind='deezer').
                 if (inSearchMode() && musicSearchLog != null) {
@@ -1583,6 +1793,107 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 loadHome();
             }
         }
+    }
+
+    /** Persist the committed query into the local recent-search ledger (deduped, most-recent first). */
+    private void recordSearchHistory() {
+        if (searchedQuery != null && !searchedQuery.isEmpty()) {
+            history().add(searchedQuery);
+        }
+    }
+
+    /**
+     * Inline play/pause for a SONG search row's cover, played through the tab's own search queue and
+     * MediaController — the "never played" search queue finally gets to play. Tapping the cover toggles
+     * this song; when it isn't the resolved default yet (a fallback row) its default version is resolved
+     * once, appended to the search queue and played.
+     */
+    private void playSongInline(SvipeMusic.Song s) {
+        if (s == null || !s.playable || s.defaultTrack == null) {
+            return;
+        }
+        MediaController mc = MediaController.getInstance();
+        MessageObject playing = mc.getPlayingMessageObject();
+        if (playing != null && isSamePlayingTrack(playing, s.defaultTrack)) {
+            if (mc.isMessagePaused()) {
+                mc.playMessage(playing);
+            } else {
+                mc.pauseMessage(playing);
+            }
+            notifySearchRows();
+            return;
+        }
+        MessageObject mo = searchMo.get(s.id);
+        if (mo != null && searchQueue != null) {
+            searchQueue.play(mo);
+            notifySearchRows();
+            return;
+        }
+        // Fallback row (default didn't resolve at search time): resolve just this one and play it.
+        if (songResolving.contains(s.id)) {
+            return;
+        }
+        songResolving.add(s.id);
+        final long sid = s.id;
+        final SvipeMusic.Track t = s.defaultTrack;
+        final ArrayList<SvipeMusic.Track> one = new ArrayList<>();
+        one.add(t);
+        SvipeMusicResolver.resolve(currentAccount, one, resolved -> {
+            songResolving.remove(sid);
+            if (searchQueue == null) {
+                searchQueue = new SvipeMusicQueue(currentAccount, SvipeMusicQueue.SOURCE_SEARCH, "", false);
+            }
+            searchQueue.appendResolved(one, resolved);
+            MessageObject built = searchQueue.messageForKey(t.key());
+            if (built != null) {
+                searchMo.put(sid, built);
+                searchQueue.play(built);
+            }
+            notifySearchRows();
+        });
+    }
+
+    /**
+     * Play/toggle a ROW_SONG_AUDIO cell's message from the search queue — wired to the native cell's own
+     * radial play control (setNeedPlayMessageListener), so the play button plays inline while the row
+     * body still opens the song page. Returns true so the cell adopts its playing state.
+     */
+    private boolean playSearchMo(MessageObject mo) {
+        if (mo == null || searchQueue == null) {
+            return false;
+        }
+        MediaController mc = MediaController.getInstance();
+        if (mc.isPlayingMessage(mo)) {
+            if (mc.isMessagePaused()) {
+                mc.playMessage(mo);
+            }
+            return true;
+        }
+        searchQueue.play(mo);
+        return true;
+    }
+
+    /** Same underlying channel post as this catalog track, whichever queue minted the playing copy. */
+    private boolean isSamePlayingTrack(MessageObject playing, SvipeMusic.Track t) {
+        if (playing == null || t == null) {
+            return false;
+        }
+        long dialogId = playing.getDialogId();
+        return dialogId < 0 && t.channelId != 0 && -dialogId == t.channelId && playing.getRealId() == t.messageId;
+    }
+
+    private void notifySearchRows() {
+        if (adapter != null) {
+            adapter.notifyDataSetChanged();
+        }
+    }
+
+    /** Artist row status line: the song count when known, else the plain "Artist" label. */
+    private String artistStatusForCount(int songCount) {
+        if (songCount > 0) {
+            return LocaleController.formatPluralString("SvipeMusicSongCount", songCount);
+        }
+        return getString(R.string.SvipeMusicArtist);
     }
 
     private void onVibeTap() {
@@ -1837,7 +2148,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         // Home = dark immersive aura -> want light (white) status-bar icons -> not a light bar. The
         // favourites panel never reaches the status bar (it rests under the search pill), so opening it
         // does not change this.
-        if (!inSearchMode()) {
+        if (!inSearchMode() && !showingRecent()) {
             return false;
         }
         return androidx.core.graphics.ColorUtils.calculateLuminance(getThemedColor(Theme.key_windowBackgroundWhite)) > 0.7f;
@@ -1847,25 +2158,30 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
     @Override
     public boolean canParentTabsSlide(MotionEvent ev, boolean forward) {
-        // When the favourites panel is open, a horizontal swipe first moves BETWEEN its sub-tabs
-        // (Songs <-> Singers) and only spills to the outer Search/Profile tabs at the edges. Nested
-        // order left->right: Search | Songs | Singers | Profile. `forward` (finger-left) heads right
-        // (toward Singers, then Profile); backward (finger-right) heads left (toward Songs, then Search).
+        // When the favourites panel is open, a horizontal swipe first moves BETWEEN its sub-tabs (Songs
+        // <-> Singers <-> Most listened) and only spills to the outer Search/Profile tabs at the edges.
+        // Nested order left->right: Search | <sub-tabs...> | Profile. `forward` (finger-left) heads right
+        // toward the next sub-tab (then Profile); backward (finger-right) heads left (then Search). N-tab
+        // generalization: step through the strip's own id list rather than hard-coding the two ends.
         if (favPanel != null && favPanel.isOpen()) {
             long dt = ev != null ? ev.getDownTime() : 0;
             if (dt == favSwipeDownTime) {
                 return false;   // this gesture already switched a sub-tab -> keep the outer pager blocked
             }
-            if (forward && favTab == FAV_TAB_SONGS) {
+            ArrayList<Integer> ids = favPanel.tabStrip.getTabIds();
+            int idx = ids.indexOf(favTab);
+            if (forward && idx >= 0 && idx < ids.size() - 1) {
+                int next = ids.get(idx + 1);
                 favSwipeDownTime = dt;
-                favPanel.selectTab(FAV_TAB_SINGERS);
-                setFavTab(FAV_TAB_SINGERS);
+                favPanel.selectTab(next);
+                setFavTab(next);
                 return false;
             }
-            if (!forward && favTab == FAV_TAB_SINGERS) {
+            if (!forward && idx > 0) {
+                int prev = ids.get(idx - 1);
                 favSwipeDownTime = dt;
-                favPanel.selectTab(FAV_TAB_SONGS);
-                setFavTab(FAV_TAB_SONGS);
+                favPanel.selectTab(prev);
+                setFavTab(prev);
                 return false;
             }
             // Already on the edge sub-tab in this direction -> let the outer pager take over.
@@ -1906,7 +2222,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int type = holder.getItemViewType();
-            return type == ROW_TRACK || type == ROW_RETRY || type == ROW_SONG || type == ROW_SONG_AUDIO;
+            return type == ROW_TRACK || type == ROW_RETRY || type == ROW_SONG || type == ROW_SONG_AUDIO
+                    || type == ROW_ARTIST || type == ROW_RECENT;
         }
 
         @NonNull
@@ -1925,9 +2242,19 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 view = new TrackCell(context);
             } else if (viewType == ROW_SONG) {
                 view = new SongCell(context);
+            } else if (viewType == ROW_ARTIST) {
+                view = new ArtistCell(context);
+            } else if (viewType == ROW_RECENT) {
+                view = new RecentCell(context);
+            } else if (viewType == ROW_RECENT_HEADER) {
+                view = new GraySectionCell(context, getResourceProvider());
             } else if (viewType == ROW_SONG_AUDIO) {
-                view = new SharedAudioCell(context, getResourceProvider());
-            } else if (viewType == ROW_EMPTY || viewType == ROW_RETRY) {
+                // The native cell's own radial play control plays inline; the row body opens the page.
+                SharedAudioCell cell = new SharedAudioCell(context, getResourceProvider());
+                cell.setCheckForButtonPress(true);
+                cell.setNeedPlayMessageListener(mo -> playSearchMo(mo));
+                view = cell;
+            } else if (viewType == ROW_EMPTY || viewType == ROW_RETRY || viewType == ROW_RECENT_EMPTY) {
                 TextView tv = new TextView(context);
                 tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
                 tv.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
@@ -1959,6 +2286,18 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 ((TrackCell) holder.itemView).bind(row.track);
             } else if (row.type == ROW_SONG) {
                 ((SongCell) holder.itemView).bind(row.song);
+            } else if (row.type == ROW_ARTIST) {
+                ((ArtistCell) holder.itemView).bind(row.artist);
+            } else if (row.type == ROW_RECENT) {
+                ((RecentCell) holder.itemView).bind(row.recentQuery);
+            } else if (row.type == ROW_RECENT_HEADER) {
+                ((GraySectionCell) holder.itemView).setText(getString(R.string.SvipeRecentSearches),
+                        getString(R.string.SvipeClearSearchHistory), v -> {
+                            history().clear();
+                            updateRows();
+                        });
+            } else if (row.type == ROW_RECENT_EMPTY) {
+                ((TextView) holder.itemView).setText(getString(R.string.SvipeNoSearchHistory));
             } else if (row.type == ROW_SONG_AUDIO) {
                 SharedAudioCell cell = (SharedAudioCell) holder.itemView;
                 MessageObject mo = searchMo.get(row.song.id);
@@ -1975,21 +2314,27 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
     /* cells */
 
-    // A canonical song row (search results): letter cover + title (+variant) + artist line + a
-    // version-count badge. Tapping opens the version picker (MusicSongActivity).
+    // A canonical song row (search results): a CIRCULAR cover with an inline play/pause overlay + title
+    // (+variant) + artist line + a version-count badge. Tapping the cover plays the song inline; tapping
+    // anywhere else on the row opens the version picker (MusicSongActivity). A trackless Deezer
+    // placeholder has no playable track, so it shows no play button and its cover is muted.
     private class SongCell extends FrameLayout {
+        private final FrameLayout cover;
         private final TextView letterView;
         private final BackupImageView coverImage;
+        private final ImageView playOverlay;
         private final TextView titleView;
         private final TextView subtitleView;
         private final TextView badgeView;
+        private SvipeMusic.Song song;
 
         SongCell(Context context) {
             super(context);
             setPadding(dp(16), dp(6), dp(12), dp(6));
 
-            FrameLayout cover = new FrameLayout(context);
-            cover.setBackground(Theme.createRoundRectDrawable(dp(10), getThemedColor(Theme.key_windowBackgroundGray)));
+            cover = new FrameLayout(context);
+            // Circular (radius = half the 48dp cover) — deliberately unlike the rounded-SQUARE artist art.
+            cover.setBackground(Theme.createRoundRectDrawable(dp(24), getThemedColor(Theme.key_windowBackgroundGray)));
             addView(cover, LayoutHelper.createFrame(48, 48, Gravity.LEFT | Gravity.CENTER_VERTICAL));
 
             letterView = new TextView(context);
@@ -2002,8 +2347,21 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             // The real Deezer album cover, drawn over the letter tile once a song is enriched; while it
             // is transparent (unset / loading) the letter shows through, so an unenriched row is unchanged.
             coverImage = new BackupImageView(context);
-            coverImage.setRoundRadius(dp(10));
+            coverImage.setRoundRadius(dp(24));
             cover.addView(coverImage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+            // Inline play/pause control over the circular cover; its own click plays the song inline while
+            // the rest of the row still opens the song page.
+            playOverlay = new ImageView(context);
+            playOverlay.setScaleType(ImageView.ScaleType.CENTER);
+            playOverlay.setBackground(Theme.createRoundRectDrawable(dp(24), 0x66000000));
+            playOverlay.setColorFilter(new PorterDuffColorFilter(0xFFFFFFFF, PorterDuff.Mode.MULTIPLY));
+            playOverlay.setOnClickListener(v -> {
+                if (song != null) {
+                    playSongInline(song);
+                }
+            });
+            cover.addView(playOverlay, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
             LinearLayout texts = new LinearLayout(context);
             texts.setOrientation(LinearLayout.VERTICAL);
@@ -2031,6 +2389,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         }
 
         void bind(SvipeMusic.Song s) {
+            song = s;
             String title = s.shownTitle() != null && !s.shownTitle().isEmpty() ? s.shownTitle() : getString(R.string.AudioUnknownTitle);
             if (s.variantLabel != null && !s.variantLabel.isEmpty()) {
                 title = title + " (" + s.variantLabel + ")";
@@ -2042,8 +2401,201 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             // A Deezer placeholder (catalog-missing) shows "+" (addable) instead of a version count.
             badgeView.setText(!s.playable ? "+" : (s.versionCount > 1 ? (s.versionCount + "  ›") : "›"));
 
+            // Playable songs get the inline play button; trackless placeholders are muted (no button).
+            boolean canPlay = s.playable && s.defaultTrack != null;
+            cover.setAlpha(canPlay ? 1f : 0.45f);
+            if (canPlay) {
+                playOverlay.setVisibility(VISIBLE);
+                MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+                boolean isPlaying = playing != null && isSamePlayingTrack(playing, s.defaultTrack)
+                        && !MediaController.getInstance().isMessagePaused();
+                playOverlay.setImageResource(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play);
+            } else {
+                playOverlay.setVisibility(GONE);
+            }
+
             // Real Deezer cover (small) when enriched; else clear it so the letter tile shows. Clearing is
             // required because cells are recycled — a stale cover must not bleed onto an unenriched song.
+            String coverUrl = s.coverSmallUrl != null && !s.coverSmallUrl.isEmpty() ? s.coverSmallUrl
+                    : (s.coverUrl != null && !s.coverUrl.isEmpty() ? s.coverUrl : null);
+            if (coverUrl != null) {
+                coverImage.setVisibility(VISIBLE);
+                coverImage.setImage(ImageLocation.getForPath(coverUrl), "48_48", (Drawable) null, null);
+            } else {
+                coverImage.setImageDrawable(null);
+                coverImage.setVisibility(GONE);
+            }
+        }
+    }
+
+    // A canonical artist row (search results): a rounded-SQUARE cover (letter tile + Deezer photo), the
+    // artist name, and a song-count status. The square art is deliberately unlike the circular song
+    // cover, so artists and songs are told apart at a glance. Tapping opens the artist page.
+    private class ArtistCell extends FrameLayout {
+        private final TextView letterView;
+        private final BackupImageView photoImage;
+        private final TextView titleView;
+        private final TextView subtitleView;
+
+        ArtistCell(Context context) {
+            super(context);
+            setPadding(dp(16), dp(6), dp(12), dp(6));
+            setBackground(Theme.getSelectorDrawable(false));
+
+            FrameLayout art = new FrameLayout(context);
+            art.setBackground(Theme.createRoundRectDrawable(dp(6), getThemedColor(Theme.key_windowBackgroundGray)));
+            addView(art, LayoutHelper.createFrame(48, 48, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+
+            letterView = new TextView(context);
+            letterView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+            letterView.setTypeface(AndroidUtilities.bold());
+            letterView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
+            letterView.setGravity(Gravity.CENTER);
+            art.addView(letterView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+            photoImage = new BackupImageView(context);
+            photoImage.setRoundRadius(dp(6));
+            art.addView(photoImage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+            LinearLayout texts = new LinearLayout(context);
+            texts.setOrientation(LinearLayout.VERTICAL);
+            addView(texts, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 76, 0, 16, 0));
+
+            titleView = new TextView(context);
+            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+            titleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
+            titleView.setSingleLine(true);
+            titleView.setEllipsize(TextUtils.TruncateAt.END);
+            texts.addView(titleView);
+
+            subtitleView = new TextView(context);
+            subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            subtitleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
+            subtitleView.setSingleLine(true);
+            subtitleView.setEllipsize(TextUtils.TruncateAt.END);
+            texts.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+        }
+
+        void bind(SvipeMusic.Artist a) {
+            String shown = a.shownName();
+            String name = shown != null && !shown.isEmpty() ? shown : getString(R.string.AudioUnknownArtist);
+            titleView.setText(name);
+            letterView.setText(name.isEmpty() ? "♪" : name.substring(0, 1).toUpperCase());
+            subtitleView.setText(artistStatusForCount(a.songCount));
+
+            String photo = a.photoUrl != null && !a.photoUrl.isEmpty() ? a.photoUrl : null;
+            if (photo != null) {
+                photoImage.setVisibility(VISIBLE);
+                photoImage.setImage(ImageLocation.getForPath(photo), "48_48", (Drawable) null, null);
+            } else {
+                photoImage.setImageDrawable(null);
+                photoImage.setVisibility(GONE);
+            }
+        }
+    }
+
+    // A recent-search query row: a history glyph, the query text, and a right-side "x" that removes just
+    // that entry. Tapping the row re-runs the query (see onRowClick / ROW_RECENT).
+    private class RecentCell extends FrameLayout {
+        private final TextView textView;
+        private String recentQuery;
+
+        RecentCell(Context context) {
+            super(context);
+            setBackground(Theme.getSelectorDrawable(false));
+
+            ImageView icon = new ImageView(context);
+            icon.setScaleType(ImageView.ScaleType.CENTER);
+            icon.setImageResource(R.drawable.msg_recent);
+            icon.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2), PorterDuff.Mode.MULTIPLY));
+            addView(icon, LayoutHelper.createFrame(24, 24, Gravity.LEFT | Gravity.CENTER_VERTICAL, 20, 0, 0, 0));
+
+            textView = new TextView(context);
+            textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+            textView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
+            textView.setSingleLine(true);
+            textView.setEllipsize(TextUtils.TruncateAt.END);
+            addView(textView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 56, 0, 52, 0));
+
+            ImageView remove = new ImageView(context);
+            remove.setScaleType(ImageView.ScaleType.CENTER);
+            remove.setImageResource(R.drawable.msg_close);
+            remove.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2), PorterDuff.Mode.MULTIPLY));
+            remove.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_listSelector), 1, dp(18)));
+            remove.setOnClickListener(v -> {
+                if (recentQuery != null) {
+                    history().remove(recentQuery);
+                    updateRows();
+                }
+            });
+            addView(remove, LayoutHelper.createFrame(36, 36, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 10, 0));
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(dp(48), MeasureSpec.EXACTLY));
+        }
+
+        void bind(String q) {
+            recentQuery = q;
+            textView.setText(q);
+        }
+    }
+
+    // A "most listened" song row (fav panel): a rounded-square cover, title, and a listen-time label
+    // ("Hh Mm • N plays"). Tapping opens the song page.
+    private class MostListenedCell extends FrameLayout {
+        private final TextView letterView;
+        private final BackupImageView coverImage;
+        private final TextView titleView;
+        private final TextView subtitleView;
+
+        MostListenedCell(Context context) {
+            super(context);
+            setPadding(dp(16), dp(6), dp(12), dp(6));
+            setBackground(Theme.getSelectorDrawable(false));
+
+            FrameLayout cover = new FrameLayout(context);
+            cover.setBackground(Theme.createRoundRectDrawable(dp(6), getThemedColor(Theme.key_windowBackgroundGray)));
+            addView(cover, LayoutHelper.createFrame(48, 48, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+
+            letterView = new TextView(context);
+            letterView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+            letterView.setTypeface(AndroidUtilities.bold());
+            letterView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
+            letterView.setGravity(Gravity.CENTER);
+            cover.addView(letterView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+            coverImage = new BackupImageView(context);
+            coverImage.setRoundRadius(dp(6));
+            cover.addView(coverImage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+            LinearLayout texts = new LinearLayout(context);
+            texts.setOrientation(LinearLayout.VERTICAL);
+            addView(texts, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 76, 0, 16, 0));
+
+            titleView = new TextView(context);
+            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+            titleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
+            titleView.setSingleLine(true);
+            titleView.setEllipsize(TextUtils.TruncateAt.END);
+            texts.addView(titleView);
+
+            subtitleView = new TextView(context);
+            subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            subtitleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
+            subtitleView.setSingleLine(true);
+            subtitleView.setEllipsize(TextUtils.TruncateAt.END);
+            texts.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+        }
+
+        void bind(SvipeMusic.ListenedSong s) {
+            String title = s.shownTitle() != null && !s.shownTitle().isEmpty() ? s.shownTitle() : getString(R.string.AudioUnknownTitle);
+            titleView.setText(title);
+            letterView.setText(title.isEmpty() ? "♪" : title.substring(0, 1).toUpperCase());
+            subtitleView.setText(LocaleController.formatString("SvipeListenTimeLabel", R.string.SvipeListenTimeLabel,
+                    formatListenTime(s.totalMs), s.plays));
+
             String cover = s.coverSmallUrl != null && !s.coverSmallUrl.isEmpty() ? s.coverSmallUrl
                     : (s.coverUrl != null && !s.coverUrl.isEmpty() ? s.coverUrl : null);
             if (cover != null) {
