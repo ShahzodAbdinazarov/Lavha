@@ -665,6 +665,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                     // through canParentTabsSlide(); its findScrollingChild() must NOT short-circuit that
                     // by spotting a scrollable nested pager here (it only tests the backward direction,
                     // which would dead-swipe forward-at-last-page). Report "no" and let the gate decide.
+                    // (Pairs with setAllowDisallowInterceptTouch(false) below, which is what actually lets
+                    // this pager start tracking a horizontal drag over its own RecyclerListView pages.)
                     return false;
                 }
 
@@ -683,6 +685,19 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                     setFavTab(id);
                 }
             };
+            // The pages are vertical RecyclerListViews. On EVERY touch a RecyclerListView calls
+            // requestDisallowInterceptTouchEvent(parent, false) on this pager (RecyclerListView#onTouchEvent),
+            // and ViewPagerFixed's requestDisallowInterceptTouchEvent override reacts to ANY such call while
+            // it is only tentatively tracking (maybeStartTracking && !startedTracking) by firing
+            // onTouchEvent(null), which wipes maybeStartTracking. The net effect: over a list page — most
+            // visibly in the empty area below a SHORT list, where the RecyclerView itself (not a row) handles
+            // the down and reaches that call immediately — the pager could never accumulate the slop to begin
+            // a horizontal drag, so a swipe there did nothing. SharedMediaLayout doesn't hit this (it isn't a
+            // ViewPagerFixed and tracks in its own onTouchEvent); CachedMediaLayout, which IS a ViewPagerFixed
+            // over RecyclerListView pages exactly like us, cures it the same way: opt out of that self-cancel.
+            // The disallow flag itself still propagates (super() runs), so a genuine vertical list scroll still
+            // locks this pager out — only the spurious "give up my drag" side-effect is removed.
+            favPager.setAllowDisallowInterceptTouch(false);
             favPager.setAlpha(0f);
             favPager.setAdapter(new FavPagerAdapter(this));
             addView(favPager, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
