@@ -11085,6 +11085,24 @@
     <string name="SvipeReelsSubscribe">Subscribe</string>
     <string name="SvipeReelsSubscribed">Subscribed ✓</string>
 
+    <!-- Svipe music & reels: history / most-listened / blocked channels / search history -->
+    <string name="SvipeMostListened">Most listened</string>
+    <string name="SvipeMostListenedSongs">Most listened songs</string>
+    <string name="SvipeMostListenedArtists">Most listened artists</string>
+    <string name="SvipeMusicListeningHistory">Listening history</string>
+    <string name="SvipeReelsWatchHistory">Watch history</string>
+    <string name="SvipeBlockedChannels">Blocked channels</string>
+    <string name="SvipeNoBlockedChannels">No blocked channels</string>
+    <string name="SvipeRecentSearches">Recent searches</string>
+    <string name="SvipeClearSearchHistory">Clear search history</string>
+    <string name="SvipeNoSearchHistory">No recent searches</string>
+    <string name="SvipeUnblock">Unblock</string>
+    <string name="SvipeUnblockChannel">Unblock channel</string>
+    <string name="SvipeUnblockChannelConfirm">Unblock this channel? Its videos can appear in your feed again.</string>
+    <string name="SvipeSearchArtistsAndTracks">Search artists and tracks</string>
+    <string name="SvipeSearchVideos">Search videos</string>
+    <string name="SvipeListenTimeLabel">%1$s • %2$d plays</string>
+
     <!-- Svipe self-update -->
     <string name="SvipeUpdateDownloading">Downloading update…</string>
     <string name="SvipeUpdateDownloadingProgress">Downloading… %1$d%%</string>

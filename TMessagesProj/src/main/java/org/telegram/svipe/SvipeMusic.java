@@ -132,6 +132,20 @@ public class SvipeMusic {
         public String nextOffset;
     }
 
+    /** A song on the "most listened" list: a Song carrying this user's cumulative listen-time
+     *  (total_ms) and completed-play count (plays) so the row can show a listen-time label. */
+    public static class ListenedSong extends Song {
+        public long totalMs;
+        public int plays;
+    }
+
+    /** An artist on the "most listened" list: an Artist carrying this user's cumulative listen-time
+     *  (total_ms, summed across their played songs) and completed-play count (plays). */
+    public static class ListenedArtist extends Artist {
+        public long totalMs;
+        public int plays;
+    }
+
     public static class DefaultAck {
         public long songId;
         public long defaultChannelId;
@@ -288,6 +302,10 @@ public class SvipeMusic {
     public interface ArtistsCallback { void onResult(List<Artist> items, String nextOffset, String error); }
     /** error==null on success; isFavourite is the state the SERVER now holds. */
     public interface ArtistFavouriteCallback { void onResult(long artistId, boolean isFavourite, String error); }
+    /** items==null on failure. nextOffset==null when there are no more pages. */
+    public interface ListenedSongsCallback { void onResult(List<ListenedSong> items, String nextOffset, String error); }
+    /** items==null on failure. nextOffset==null when there are no more pages. */
+    public interface ListenedArtistsCallback { void onResult(List<ListenedArtist> items, String nextOffset, String error); }
 
     public static void songsHome(int account, SongHomeCallback cb) {
         withToken(account, () -> cb.onResult(null, "auth"),
@@ -391,6 +409,72 @@ public class SvipeMusic {
     /** This user's favourite artists, newest first. Same {items, next_offset} shape as the songs. */
     public static void artistFavourites(int account, int offset, int limit, ArtistsCallback cb) {
         artistsListGet(account, "/v1/music/artist-favourites?limit=" + limit + "&offset=" + offset, cb);
+    }
+
+    /** Search canonical artists by name. Same {items, next_offset} artist shape as artist-favourites. */
+    public static void artistsSearch(int account, String query, int offset, int limit, ArtistsCallback cb) {
+        artistsListGet(account, "/v1/music/artists/search?q=" + urlEncode(query) + "&limit=" + limit + "&offset=" + offset, cb);
+    }
+
+    // ---------------- Listening history + most-listened ----------------
+
+    /** Recently-played tracks, newest first (settings "listening history"). Same TrackItem shape as liked(). */
+    public static void musicHistory(int account, int offset, int limit, TracksCallback cb) {
+        tracksGet(account, "/v1/music/history?limit=" + limit + "&offset=" + offset, cb);
+    }
+
+    /** This user's most-listened songs (longest cumulative listen-time first); each carries total_ms + plays. */
+    public static void mostListenedSongs(int account, int offset, int limit, ListenedSongsCallback cb) {
+        withToken(account, () -> cb.onResult(null, null, "auth"),
+            token -> listenedSongsRequest(account,
+                "/v1/music/most-listened/songs?limit=" + limit + "&offset=" + offset, token, false, cb));
+    }
+
+    private static void listenedSongsRequest(int account, String path, String token, boolean retried, ListenedSongsCallback cb) {
+        SvipeApi.get(path, token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> cb.onResult(null, null, "auth"), t2 -> listenedSongsRequest(account, path, t2, true, cb));
+                return;
+            }
+            if (res == null || !res.has("items")) { cb.onResult(null, null, err != null ? err : ("http " + code)); return; }
+            ArrayList<ListenedSong> out = new ArrayList<>();
+            JSONArray arr = res.optJSONArray("items");
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) {
+                    ListenedSong ls = parseListenedSong(arr.optJSONObject(i));
+                    if (ls != null) out.add(ls);
+                }
+            }
+            String next = res.isNull("next_offset") ? null : String.valueOf(res.optInt("next_offset"));
+            cb.onResult(out, next, null);
+        });
+    }
+
+    /** This user's most-listened artists (longest cumulative listen-time first); each carries total_ms + plays. */
+    public static void mostListenedArtists(int account, int offset, int limit, ListenedArtistsCallback cb) {
+        withToken(account, () -> cb.onResult(null, null, "auth"),
+            token -> listenedArtistsRequest(account,
+                "/v1/music/most-listened/artists?limit=" + limit + "&offset=" + offset, token, false, cb));
+    }
+
+    private static void listenedArtistsRequest(int account, String path, String token, boolean retried, ListenedArtistsCallback cb) {
+        SvipeApi.get(path, token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> cb.onResult(null, null, "auth"), t2 -> listenedArtistsRequest(account, path, t2, true, cb));
+                return;
+            }
+            if (res == null || !res.has("items")) { cb.onResult(null, null, err != null ? err : ("http " + code)); return; }
+            ArrayList<ListenedArtist> out = new ArrayList<>();
+            JSONArray arr = res.optJSONArray("items");
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) {
+                    ListenedArtist la = parseListenedArtist(arr.optJSONObject(i));
+                    if (la != null) out.add(la);
+                }
+            }
+            String next = res.isNull("next_offset") ? null : String.valueOf(res.optInt("next_offset"));
+            cb.onResult(out, next, null);
+        });
     }
 
     private static void artistsListGet(int account, String path, ArtistsCallback cb) {
@@ -765,6 +849,52 @@ public class SvipeMusic {
             if (fillTrack(dt, t)) s.defaultTrack = t;
         }
         return s;
+    }
+
+    /** A "most listened" song: the shared Song fields (parseSong copy convention, like parseSongDetail)
+     *  plus this user's total_ms / plays. */
+    private static ListenedSong parseListenedSong(JSONObject o) {
+        Song base = parseSong(o);
+        if (base == null) return null;
+        ListenedSong ls = new ListenedSong();
+        ls.id = base.id;
+        ls.title = base.title;
+        ls.variantLabel = base.variantLabel;
+        ls.artists.addAll(base.artists);
+        ls.versionCount = base.versionCount;
+        ls.artChannelId = base.artChannelId;
+        ls.artMessageId = base.artMessageId;
+        ls.defaultTrack = base.defaultTrack;
+        ls.shareUrl = base.shareUrl;
+        ls.displayTitle = base.displayTitle;
+        ls.displayArtist = base.displayArtist;
+        ls.coverUrl = base.coverUrl;
+        ls.coverSmallUrl = base.coverSmallUrl;
+        ls.artistPhotoUrl = base.artistPhotoUrl;
+        ls.playable = base.playable;
+        ls.deezerTrackId = base.deezerTrackId;
+        ls.previewUrl = base.previewUrl;
+        ls.totalMs = o.optLong("total_ms");
+        ls.plays = o.optInt("plays");
+        return ls;
+    }
+
+    /** A "most listened" artist: the shared Artist fields plus this user's total_ms / plays. */
+    private static ListenedArtist parseListenedArtist(JSONObject o) {
+        Artist base = parseArtist(o);
+        if (base == null) return null;
+        ListenedArtist la = new ListenedArtist();
+        la.id = base.id;
+        la.name = base.name;
+        la.role = base.role;
+        la.songCount = base.songCount;
+        la.artChannelId = base.artChannelId;
+        la.artMessageId = base.artMessageId;
+        la.displayName = base.displayName;
+        la.photoUrl = base.photoUrl;
+        la.totalMs = o.optLong("total_ms");
+        la.plays = o.optInt("plays");
+        return la;
     }
 
     private static SongDetail parseSongDetail(JSONObject o) {

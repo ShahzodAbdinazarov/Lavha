@@ -32,6 +32,12 @@ public class SvipeConfig {
     /** Persisted offline ready-queue (JSON blob) and the watched-reel ledger (JSON array). */
     public static final String PREF_REEL_QUEUE = "svipe_reel_queue";
     public static final String PREF_REEL_WATCHED = "svipe_reel_watched";
+    /** Persistent set of blocked reels channel ids (JSON array of longs) — SvipeBlockedChannels. */
+    public static final String PREF_REEL_BLOCKED_CHANNELS = "svipe_reel_blocked_channels";
+
+    /** Recent search queries (JSON array, most-recent-first) — the two search-history stores. */
+    public static final String PREF_MUSIC_SEARCH_HISTORY = "svipe_music_search_history";
+    public static final String PREF_VIDEO_SEARCH_HISTORY = "svipe_video_search_history";
 
     /** Favourite songs: the local store (JSON blob) + when it last reconciled with the backend. */
     public static final String PREF_MUSIC_FAVOURITES = "svipe_music_favourites";

@@ -425,6 +425,24 @@
     <string name="SvipeReelsSubscribe">Подписаться</string>
     <string name="SvipeReelsSubscribed">Вы подписаны ✓</string>
 
+    <!-- Svipe music & reels: history / most-listened / blocked channels / search history -->
+    <string name="SvipeMostListened">Часто прослушиваемое</string>
+    <string name="SvipeMostListenedSongs">Часто прослушиваемые треки</string>
+    <string name="SvipeMostListenedArtists">Часто прослушиваемые исполнители</string>
+    <string name="SvipeMusicListeningHistory">История прослушивания</string>
+    <string name="SvipeReelsWatchHistory">История просмотров</string>
+    <string name="SvipeBlockedChannels">Заблокированные каналы</string>
+    <string name="SvipeNoBlockedChannels">Нет заблокированных каналов</string>
+    <string name="SvipeRecentSearches">Недавние запросы</string>
+    <string name="SvipeClearSearchHistory">Очистить историю поиска</string>
+    <string name="SvipeNoSearchHistory">Нет недавних запросов</string>
+    <string name="SvipeUnblock">Разблокировать</string>
+    <string name="SvipeUnblockChannel">Разблокировать канал</string>
+    <string name="SvipeUnblockChannelConfirm">Разблокировать этот канал? Его видео снова смогут появляться в вашей ленте.</string>
+    <string name="SvipeSearchArtistsAndTracks">Поиск треков и исполнителей</string>
+    <string name="SvipeSearchVideos">Поиск видео</string>
+    <string name="SvipeListenTimeLabel">%1$s • %2$d прослуш.</string>
+
     <!-- Svipe self-update -->
     <string name="SvipeUpdateDownloading">Загрузка обновления…</string>
     <string name="SvipeUpdateDownloadingProgress">Загрузка… %1$d%%</string>

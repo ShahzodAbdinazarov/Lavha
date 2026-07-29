@@ -26,6 +26,18 @@ public class SvipeDiscover {
         void onResult(List<Item> items, Integer nextOffset, String error);
     }
 
+    /** A reels channel the user has blocked (the read behind a block-management screen). */
+    public static class BlockedChannel {
+        public long channelId;
+        public String title;
+        public String username;
+    }
+
+    public interface BlockedCallback {
+        /** items==null on failure. */
+        void onResult(List<BlockedChannel> items, String error);
+    }
+
     public static void load(int account, String category, int offset, int limit, Callback cb) {
         load(account, category, offset, limit, false, cb);
     }
@@ -71,23 +83,125 @@ public class SvipeDiscover {
                 return;
             }
             ArrayList<Item> out = new ArrayList<>();
+            parseItems(res.optJSONArray("items"), out);
+            Integer next = res.isNull("next_offset") ? null : Integer.valueOf(res.optInt("next_offset"));
+            cb.onResult(out, next, null);
+        });
+    }
+
+    /**
+     * Server-side reels/video search — the text twin of the grid. Same reference shape (FeedItem) as
+     * {@link #load}, so callers reuse the explore-grid renderer.
+     */
+    public static void search(int account, String query, int offset, int limit, Callback cb) {
+        String q;
+        try {
+            q = URLEncoder.encode(query == null ? "" : query, "UTF-8");
+        } catch (Exception e) {
+            q = "";
+        }
+        feedGet(account, "/v1/discover/search?q=" + q + "&limit=" + limit + "&offset=" + offset, cb);
+    }
+
+    /** Reels the user recently watched, newest first (the "watching history"). Same reference shape as the grid. */
+    public static void reelsHistory(int account, int offset, int limit, Callback cb) {
+        feedGet(account, "/v1/reels/history?limit=" + limit + "&offset=" + offset, cb);
+    }
+
+    /** Shared GET for the reference-list endpoints returning {items:[FeedItem], next_offset}. */
+    private static void feedGet(int account, String path, Callback cb) {
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                cb.onResult(null, null, "auth");
+                return;
+            }
+            feedRequest(account, path, token, false, cb);
+        });
+    }
+
+    private static void feedRequest(int account, String path, String token, boolean retried, Callback cb) {
+        SvipeApi.get(path, token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                SvipeAuth.invalidateAccessToken(account);
+                SvipeAuth.ensureToken(account, t2 -> {
+                    if (t2 == null) {
+                        cb.onResult(null, null, "auth");
+                        return;
+                    }
+                    feedRequest(account, path, t2, true, cb);
+                });
+                return;
+            }
+            if (res == null || !res.has("items")) {
+                cb.onResult(null, null, err != null ? err : ("http " + code));
+                return;
+            }
+            ArrayList<Item> out = new ArrayList<>();
+            parseItems(res.optJSONArray("items"), out);
+            Integer next = res.isNull("next_offset") ? null : Integer.valueOf(res.optInt("next_offset"));
+            cb.onResult(out, next, null);
+        });
+    }
+
+    /** The reels channels this user has blocked, newest first (channel_id + title + username). */
+    public static void reelsBlocked(int account, BlockedCallback cb) {
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                cb.onResult(null, "auth");
+                return;
+            }
+            blockedRequest(account, token, false, cb);
+        });
+    }
+
+    private static void blockedRequest(int account, String token, boolean retried, BlockedCallback cb) {
+        SvipeApi.get("/v1/reels/blocked", token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                SvipeAuth.invalidateAccessToken(account);
+                SvipeAuth.ensureToken(account, t2 -> {
+                    if (t2 == null) {
+                        cb.onResult(null, "auth");
+                        return;
+                    }
+                    blockedRequest(account, t2, true, cb);
+                });
+                return;
+            }
+            if (res == null || !res.has("items")) {
+                cb.onResult(null, err != null ? err : ("http " + code));
+                return;
+            }
+            ArrayList<BlockedChannel> out = new ArrayList<>();
             JSONArray arr = res.optJSONArray("items");
             if (arr != null) {
                 for (int i = 0; i < arr.length(); i++) {
                     JSONObject o = arr.optJSONObject(i);
                     if (o == null) continue;
-                    String username = o.isNull("username") ? null : o.optString("username", null);
-                    if (username == null || username.isEmpty()) continue;
-                    Item it = new Item();
-                    it.channelId = o.optLong("channel_id");
-                    it.messageId = o.optInt("message_id");
-                    it.username = username;
-                    it.topicId = o.isNull("topic_id") ? null : o.optInt("topic_id");
-                    out.add(it);
+                    BlockedChannel bc = new BlockedChannel();
+                    bc.channelId = o.optLong("channel_id");
+                    bc.title = o.isNull("title") ? null : o.optString("title", null);
+                    bc.username = o.isNull("username") ? null : o.optString("username", null);
+                    out.add(bc);
                 }
             }
-            Integer next = res.isNull("next_offset") ? null : Integer.valueOf(res.optInt("next_offset"));
-            cb.onResult(out, next, null);
+            cb.onResult(out, null);
         });
+    }
+
+    /** Parse a {items:[FeedItem]} array into Items; rows without a username are skipped (can't resolve). */
+    private static void parseItems(JSONArray arr, List<Item> out) {
+        if (arr == null) return;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.optJSONObject(i);
+            if (o == null) continue;
+            String username = o.isNull("username") ? null : o.optString("username", null);
+            if (username == null || username.isEmpty()) continue;
+            Item it = new Item();
+            it.channelId = o.optLong("channel_id");
+            it.messageId = o.optInt("message_id");
+            it.username = username;
+            it.topicId = o.isNull("topic_id") ? null : o.optInt("topic_id");
+            out.add(it);
+        }
     }
 }
