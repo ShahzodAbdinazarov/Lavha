@@ -61,6 +61,7 @@ import org.telegram.svipe.SvipeMusicSearchHistory;
 import org.telegram.svipe.SvipeMusicTelemetry;
 import org.telegram.svipe.SvipeSearchLog;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.GraySectionCell;
@@ -119,8 +120,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private static final int ROW_FAV_EMPTY = 10; // shared by both tabs; only the sentence differs
     private static final int ROW_FAV_ARTIST = 11; // a favourite singer -> native UserCell (profile person row)
     private static final int ROW_ARTIST = 12;     // a canonical artist search result -> rounded-SQUARE cell
-    private static final int ROW_RECENT = 13;     // a recent-search query row (text + remove "x")
-    private static final int ROW_RECENT_HEADER = 14; // "Recent searches" + a "clear all" action
+    // 13 was ROW_RECENT (a recent-search QUERY row); recents now reuse the ROW_SONG / ROW_ARTIST cells.
+    private static final int ROW_RECENT_HEADER = 14; // "Recent" + a "clear all" action
     private static final int ROW_RECENT_EMPTY = 15;  // "No recent searches" centred sentence
     private static final int ROW_ML_SONG = 16;    // a "most listened" song row (cover + listen-time label)
     private static final int ROW_FAV_LOADING = 17; // spinner while the most-listened page loads
@@ -243,7 +244,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         SvipeMusic.Track track;
         SvipeMusic.Song song;
         SvipeMusic.Artist artist;
-        String recentQuery;
+        // Non-null only for a recent-search row, so a tap / long-press can tell it from a live result.
+        SvipeMusicSearchHistory.Item recentItem;
 
         Row(int type) {
             this.type = type;
@@ -426,6 +428,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         listView.setClipToPadding(true);
         listView.setPadding(0, listTopPadding(), 0, listBottomPadding());
         listView.setOnItemClickListener((view, position) -> onRowClick(position));
+        listView.setOnItemLongClickListener((view, position) -> onRecentLongClick(position));
         listView.setOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrollStateChanged(@NonNull RecyclerView recyclerView, int newState) {
@@ -1840,14 +1843,24 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 }
             }
         } else if (showingRecent()) {
-            List<String> recents = history().getAll();
+            List<SvipeMusicSearchHistory.Item> recents = history().getAll();
             if (recents.isEmpty()) {
                 rows.add(new Row(ROW_RECENT_EMPTY));
             } else {
                 rows.add(new Row(ROW_RECENT_HEADER));
-                for (String q : recents) {
-                    Row r = new Row(ROW_RECENT);
-                    r.recentQuery = q;
+                // Recents render with the SAME cells the live results use: a recent song looks like a
+                // song (SongCell), a recent singer looks like a singer (ArtistCell). recentItem marks
+                // them so a tap re-opens the item and a long-press removes just that entry.
+                for (SvipeMusicSearchHistory.Item item : recents) {
+                    Row r;
+                    if (item.isSong()) {
+                        r = new Row(ROW_SONG);
+                        r.song = item.song;
+                    } else {
+                        r = new Row(ROW_ARTIST);
+                        r.artist = item.artist;
+                    }
+                    r.recentItem = item;
                     rows.add(r);
                 }
             }
@@ -1910,15 +1923,11 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         Row row = rows.get(position);
         if (row.type == ROW_TRACK) {
             onTrackTap(row);
-        } else if (row.type == ROW_RECENT) {
-            // Re-run a stored query: set the field text (which fires the debounced search).
-            if (row.recentQuery != null && searchField != null) {
-                searchField.setText(row.recentQuery);
-                searchField.setSelection(searchField.length());
-            }
         } else if (row.type == ROW_ARTIST) {
             if (row.artist != null) {
-                recordSearchHistory();
+                // Record the tapped RESULT (native-style): a fresh tap stores the item; a recent re-tap
+                // just floats it back to the top. Tapping opens the artist page, exactly like a live row.
+                history().add(row.artist);
                 if (inSearchMode() && musicSearchLog != null) {
                     musicSearchLog.click(searchedQuery, "artist", "artist:" + row.artist.id, row.artist.shownName());
                 }
@@ -1926,10 +1935,11 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             }
         } else if (row.type == ROW_SONG || row.type == ROW_SONG_AUDIO) {
             if (row.song != null) {
-                // A tapped result is a strong "found it" signal — remember the query locally too.
-                recordSearchHistory();
-                // Search-history: a tapped result means they found what they searched for. Tapping a
-                // Deezer placeholder is an even stronger demand signal (kind='deezer').
+                // Record the tapped RESULT as a recent item (fresh tap stores it; a recent re-tap floats
+                // it to the top). Opens the song page — same path as a live result.
+                history().add(row.song);
+                // Search-history (backend): a tapped result means they found what they searched for.
+                // Tapping a Deezer placeholder is an even stronger demand signal (kind='deezer').
                 if (inSearchMode() && musicSearchLog != null) {
                     musicSearchLog.click(searchedQuery, row.song.playable ? "song" : "deezer",
                             (row.song.playable ? "song:" : "deezer:") + Math.abs(row.song.id), row.song.shownTitle());
@@ -1950,11 +1960,36 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         }
     }
 
-    /** Persist the committed query into the local recent-search ledger (deduped, most-recent first). */
-    private void recordSearchHistory() {
-        if (searchedQuery != null && !searchedQuery.isEmpty()) {
-            history().add(searchedQuery);
+    /**
+     * A long-press on a recent-search row (a stored SONG or ARTIST) removes just that entry after a
+     * confirm — the per-item counterpart to the header's "clear all". Live result rows (no recentItem)
+     * ignore the long-press. Returns true when it consumed the gesture.
+     */
+    private boolean onRecentLongClick(int position) {
+        if (position < 0 || position >= rows.size()) {
+            return false;
         }
+        Row row = rows.get(position);
+        final SvipeMusicSearchHistory.Item item = row.recentItem;
+        if (item == null || getParentActivity() == null) {
+            return false;
+        }
+        String label = item.isSong()
+                ? (item.song != null ? item.song.shownTitle() : null)
+                : (item.artist != null ? item.artist.shownName() : null);
+        if (label == null || label.isEmpty()) {
+            label = getString(R.string.SvipeRecentSearches);
+        }
+        AlertDialog.Builder b = new AlertDialog.Builder(getParentActivity(), getResourceProvider());
+        b.setTitle(getString(R.string.ClearSearchSingleAlertTitle));
+        b.setMessage(LocaleController.formatString(R.string.ClearSearchSingleUserAlertText, label));
+        b.setPositiveButton(getString(R.string.ClearSearchRemove), (dialog, which) -> {
+            history().remove(item);
+            updateRows();
+        });
+        b.setNegativeButton(getString(R.string.Cancel), null);
+        showDialog(b.create());
+        return true;
     }
 
     /**
@@ -2370,7 +2405,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int type = holder.getItemViewType();
             return type == ROW_TRACK || type == ROW_RETRY || type == ROW_SONG || type == ROW_SONG_AUDIO
-                    || type == ROW_ARTIST || type == ROW_RECENT;
+                    || type == ROW_ARTIST;
         }
 
         @NonNull
@@ -2391,8 +2426,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 view = new SongCell(context);
             } else if (viewType == ROW_ARTIST) {
                 view = new ArtistCell(context);
-            } else if (viewType == ROW_RECENT) {
-                view = new RecentCell(context);
             } else if (viewType == ROW_RECENT_HEADER) {
                 view = new GraySectionCell(context, getResourceProvider());
             } else if (viewType == ROW_SONG_AUDIO) {
@@ -2435,8 +2468,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 ((SongCell) holder.itemView).bind(row.song);
             } else if (row.type == ROW_ARTIST) {
                 ((ArtistCell) holder.itemView).bind(row.artist);
-            } else if (row.type == ROW_RECENT) {
-                ((RecentCell) holder.itemView).bind(row.recentQuery);
             } else if (row.type == ROW_RECENT_HEADER) {
                 ((GraySectionCell) holder.itemView).setText(getString(R.string.SvipeRecentSearches),
                         getString(R.string.SvipeClearSearchHistory), v -> {
@@ -2638,54 +2669,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 photoImage.setImageDrawable(null);
                 photoImage.setVisibility(GONE);
             }
-        }
-    }
-
-    // A recent-search query row: a history glyph, the query text, and a right-side "x" that removes just
-    // that entry. Tapping the row re-runs the query (see onRowClick / ROW_RECENT).
-    private class RecentCell extends FrameLayout {
-        private final TextView textView;
-        private String recentQuery;
-
-        RecentCell(Context context) {
-            super(context);
-            setBackground(Theme.getSelectorDrawable(false));
-
-            ImageView icon = new ImageView(context);
-            icon.setScaleType(ImageView.ScaleType.CENTER);
-            icon.setImageResource(R.drawable.msg_recent);
-            icon.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2), PorterDuff.Mode.MULTIPLY));
-            addView(icon, LayoutHelper.createFrame(24, 24, Gravity.LEFT | Gravity.CENTER_VERTICAL, 20, 0, 0, 0));
-
-            textView = new TextView(context);
-            textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
-            textView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
-            textView.setSingleLine(true);
-            textView.setEllipsize(TextUtils.TruncateAt.END);
-            addView(textView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 56, 0, 52, 0));
-
-            ImageView remove = new ImageView(context);
-            remove.setScaleType(ImageView.ScaleType.CENTER);
-            remove.setImageResource(R.drawable.msg_close);
-            remove.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2), PorterDuff.Mode.MULTIPLY));
-            remove.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_listSelector), 1, dp(18)));
-            remove.setOnClickListener(v -> {
-                if (recentQuery != null) {
-                    history().remove(recentQuery);
-                    updateRows();
-                }
-            });
-            addView(remove, LayoutHelper.createFrame(36, 36, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 10, 0));
-        }
-
-        @Override
-        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(dp(48), MeasureSpec.EXACTLY));
-        }
-
-        void bind(String q) {
-            recentQuery = q;
-            textView.setText(q);
         }
     }
 

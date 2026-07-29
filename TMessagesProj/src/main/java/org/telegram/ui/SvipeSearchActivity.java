@@ -46,8 +46,6 @@ public class SvipeSearchActivity extends DialogsActivity {
             }
             presentFragment(ReelsActivity.ofDiscoverSeed(items, position));
         });
-        // Tapping a recent search re-runs it by writing the query back into the search field.
-        exploreGrid.setOnRecentTapListener(this::svipeSetSearchText);
         return exploreGrid;
     }
 

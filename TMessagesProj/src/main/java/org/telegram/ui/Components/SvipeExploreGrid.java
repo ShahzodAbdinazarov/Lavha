@@ -50,20 +50,16 @@ import java.util.Map;
  * Instagram-style Explore grid for the Search section. In the empty (no-query) state it BROWSES reel
  * references from GET /v1/discover; once the user types it SEARCHES OUR videos via
  * GET /v1/discover/search (same FeedItem reference shape, so the exact same reference→thumbnail
- * renderer + reels-open-on-tap is reused). Focusing the empty field shows the user's recent video
- * searches (a local {@link SvipeVideoSearchHistory} ledger) above the browse grid — tap to re-run,
- * X to remove, or clear the whole history. Resolves each reference to a Telegram message (batched per
+ * renderer + reels-open-on-tap is reused). Focusing the empty field shows the user's recently-tapped
+ * reels (a local {@link SvipeVideoSearchHistory} ledger, storing the tapped video REFERENCE, not the
+ * query) as the SAME reel thumbnails under a "Recent" header — tap re-opens that reel, long-press
+ * removes it, or clear the whole history. Resolves each reference to a Telegram message (batched per
  * channel) to render its video thumbnail, and pages on scroll.
  */
 public class SvipeExploreGrid extends RecyclerListView {
 
     public interface OnReelTapListener {
         void onReelTap(ArrayList<SvipeDiscover.Item> items, int position);
-    }
-
-    /** A recent-search chip was tapped — the host puts the query back into the search field (re-runs). */
-    public interface OnRecentTapListener {
-        void onRecentTap(String query);
     }
 
     /**
@@ -79,11 +75,11 @@ public class SvipeExploreGrid extends RecyclerListView {
     private static final int PAGE_SIZE = 60;
     private static final int SKELETON_COUNT = 15;   // ~5 rows of shimmer placeholders
     private static final int SEARCH_DEBOUNCE_MS = 350;
-    private static final int TYPE_PHOTO = 0;
+    private static final int TYPE_PHOTO = 0;      // a reel thumbnail — used for BOTH browse/search results and recents
     private static final int TYPE_SKELETON = 1;
     private static final int TYPE_RECENT_HEADER = 2;
-    private static final int TYPE_RECENT_ROW = 3;
-    private static final int TYPE_EMPTY = 4;
+    private static final int TYPE_EMPTY = 3;
+    // 3 was TYPE_RECENT_ROW (a recent-search QUERY text row); recents now reuse the reel-thumbnail cell.
 
     private final int account;
     private final GridLayoutManager layoutManager;
@@ -96,13 +92,15 @@ public class SvipeExploreGrid extends RecyclerListView {
     private boolean startedFirstLoad;
     private Integer nextOffset = 0;
     private OnReelTapListener tapListener;
-    private OnRecentTapListener recentTapListener;
 
     // ---- browse / search / recents mode ----
     // When searchActive: items hold /v1/discover/search results for activeQuery. Otherwise items hold
     // the /v1/discover browse grid, and showRecents toggles the recent-search rows on top of it.
     private final SvipeVideoSearchHistory history;
-    private final ArrayList<String> recentRows = new ArrayList<>();
+    // The recent references (most-recent first) and their resolved-thumbnail GridItems, shown IN PLACE
+    // of the browse grid while the empty field is focused. Kept parallel: recentItems[i] wraps recentRows[i].
+    private final ArrayList<SvipeDiscover.Item> recentRows = new ArrayList<>();
+    private final ArrayList<GridItem> recentItems = new ArrayList<>();
     private boolean searchActive;
     private String activeQuery;
     private boolean showRecents;
@@ -166,8 +164,8 @@ public class SvipeExploreGrid extends RecyclerListView {
         setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
 
         layoutManager = new GridLayoutManager(context, SPAN_COUNT);
-        // The recent-search rows (header + one row per query) and the no-results notice span the full
-        // width; the video cells keep their 3-up columns.
+        // The "Recent" header and the no-results notice span the full width; every video cell (browse,
+        // search result, or recent) keeps its 3-up column.
         layoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
             @Override
             public int getSpanSize(int position) {
@@ -177,7 +175,7 @@ public class SvipeExploreGrid extends RecyclerListView {
                 if (searchEmpty()) {
                     return SPAN_COUNT;
                 }
-                return position < recentHeaderCount() ? SPAN_COUNT : 1;
+                return position < recentHeaderRows() ? SPAN_COUNT : 1;
             }
         });
         setLayoutManager(layoutManager);
@@ -199,24 +197,48 @@ public class SvipeExploreGrid extends RecyclerListView {
         chipPaint.setShadowLayer(AndroidUtilities.dp(4), 0, AndroidUtilities.dp(1), 0x40000000);
 
         setOnItemClickListener((view, position) -> {
-            final int rc = recentHeaderCount();
-            if (rc > 0 && position < rc) {
-                // A recent-search row (position 0 is the header, handled by its own Clear button).
-                final int idx = position - 1;
-                if (idx >= 0 && idx < recentRows.size() && recentTapListener != null) {
-                    recentTapListener.onRecentTap(recentRows.get(idx));
-                }
+            if (tapListener == null) {
                 return;
             }
-            final int photoIndex = position - rc;
-            if (tapListener == null || photoIndex < 0 || photoIndex >= items.size()) {
+            if (hasRecents()) {
+                // Recents view: the "Recent" header at 0, then recent reel thumbnails. Tapping one
+                // re-OPENS that reel (seeded like a live result), never a re-search.
+                final int idx = position - recentHeaderRows();
+                if (idx < 0 || idx >= recentRows.size()) {
+                    return;
+                }
+                final ArrayList<SvipeDiscover.Item> single = new ArrayList<>(1);
+                single.add(recentRows.get(idx));
+                tapListener.onReelTap(single, 0);
                 return;
+            }
+            // Browse / search grid.
+            if (position < 0 || position >= items.size()) {
+                return;
+            }
+            // Record a tapped SEARCH RESULT as a recent (browse taps aren't results, so store nothing).
+            if (searchActive) {
+                history.add(items.get(position).ref);
             }
             final ArrayList<SvipeDiscover.Item> refs = new ArrayList<>(items.size());
             for (GridItem gi : items) {
                 refs.add(gi.ref);
             }
-            tapListener.onReelTap(refs, photoIndex);
+            tapListener.onReelTap(refs, position);
+        });
+
+        // Long-press a recent thumbnail to remove just that entry (the per-item counterpart to the
+        // header's Clear). Matches the original recents' immediate X-removal. No-op on browse/search.
+        setOnItemLongClickListener((view, position) -> {
+            if (!hasRecents()) {
+                return false;
+            }
+            final int idx = position - recentHeaderRows();
+            if (idx < 0 || idx >= recentRows.size()) {
+                return false;
+            }
+            removeRecent(recentRows.get(idx));
+            return true;
         });
 
         addOnScrollListener(new RecyclerView.OnScrollListener() {
@@ -235,10 +257,6 @@ public class SvipeExploreGrid extends RecyclerListView {
 
     public void setOnReelTapListener(OnReelTapListener listener) {
         this.tapListener = listener;
-    }
-
-    public void setOnRecentTapListener(OnRecentTapListener listener) {
-        this.recentTapListener = listener;
     }
 
     /** Route paging through a custom endpoint (e.g. reels watch-history) instead of /v1/discover. */
@@ -268,7 +286,7 @@ public class SvipeExploreGrid extends RecyclerListView {
      * Drive the grid from the search field. Called by the host on every text / focus change:
      * <ul>
      *   <li>non-empty query → SEARCH OUR videos (debounced) via {@code /v1/discover/search};</li>
-     *   <li>empty + focused → show the recent-search rows above the browse grid;</li>
+     *   <li>empty + focused → show the recently-tapped reels (thumbnails) in place of the browse grid;</li>
      *   <li>empty + unfocused → the plain browse grid.</li>
      * </ul>
      */
@@ -298,6 +316,7 @@ public class SvipeExploreGrid extends RecyclerListView {
             refreshRecentRows();
         } else {
             recentRows.clear();
+            recentItems.clear();
         }
         if (changed) {
             adapter.notifyDataSetChanged();
@@ -337,13 +356,14 @@ public class SvipeExploreGrid extends RecyclerListView {
         }
     }
 
-    /** Commit a query: record it in local history and load its first page of OUR video results. */
+    /** Commit a query: load its first page of OUR video results. Nothing is stored for the query
+     *  itself — only a tapped result later becomes a recent (see the item-click handler). */
     private void runSearch(String q) {
         searchActive = true;
         activeQuery = q;
         showRecents = false;
         recentRows.clear();
-        history.add(q);              // remember it for the recent-searches row
+        recentItems.clear();
         resetContent();
         loadPage();                  // loadPage routes to /v1/discover/search while searchActive
     }
@@ -360,15 +380,34 @@ public class SvipeExploreGrid extends RecyclerListView {
     private void refreshRecentRows() {
         recentRows.clear();
         recentRows.addAll(history.getAll());
+        // Wrap each stored reference in a GridItem and resolve its thumbnail exactly like a browse cell.
+        recentItems.clear();
+        for (SvipeDiscover.Item ref : recentRows) {
+            recentItems.add(new GridItem(ref));
+        }
+        if (!recentItems.isEmpty()) {
+            resolveThumbnails(new ArrayList<>(recentItems));
+        }
     }
 
     private boolean hasRecents() {
         return showRecents && !recentRows.isEmpty();
     }
 
-    /** Number of leading full-span rows: the "Recent searches" header + one row per recent query. */
-    private int recentHeaderCount() {
-        return hasRecents() ? recentRows.size() + 1 : 0;
+    /** 1 while the recents view is up (the single full-span "Recent" header), else 0. */
+    private int recentHeaderRows() {
+        return hasRecents() ? 1 : 0;
+    }
+
+    /** The GridItem list currently backing the reel thumbnails: recents when up, else browse/search. */
+    private List<GridItem> currentGrid() {
+        return hasRecents() ? recentItems : items;
+    }
+
+    /** The adapter position a resolved GridItem should notify at, or -1 if it isn't the visible grid. */
+    private int adapterPositionOf(GridItem gi) {
+        final int idx = currentGrid().indexOf(gi);
+        return idx < 0 ? -1 : recentHeaderRows() + idx;
     }
 
     /** A committed search that came back with nothing — show the single "no results" notice. */
@@ -402,7 +441,7 @@ public class SvipeExploreGrid extends RecyclerListView {
             downY = e.getY();
             horizontalSwipe = false;
             // Only a candidate when resting at the very top and not already refreshing.
-            pullStartY = (pullEnabled && !refreshing && !searchActive && !canScrollVertically(-1)) ? e.getY() : -1f;
+            pullStartY = (pullEnabled && !refreshing && !searchActive && !hasRecents() && !canScrollVertically(-1)) ? e.getY() : -1f;
         } else if (action == MotionEvent.ACTION_MOVE && !pulling && !horizontalSwipe) {
             // A horizontal-dominant drag belongs to the parent tab pager — bail before the
             // RecyclerView claims it, and re-allow the parent to intercept (the RV may have already
@@ -442,7 +481,7 @@ public class SvipeExploreGrid extends RecyclerListView {
             downX = e.getX();
             downY = e.getY();
             horizontalSwipe = false;
-            pullStartY = (pullEnabled && !refreshing && !searchActive && !canScrollVertically(-1)) ? e.getY() : -1f;
+            pullStartY = (pullEnabled && !refreshing && !searchActive && !hasRecents() && !canScrollVertically(-1)) ? e.getY() : -1f;
         } else if (action == MotionEvent.ACTION_MOVE) {
             if (!pulling && !horizontalSwipe) {
                 final float adx = Math.abs(e.getX() - downX);
@@ -679,11 +718,14 @@ public class SvipeExploreGrid extends RecyclerListView {
                 items.add(gi);
                 fresh.add(gi);
             }
-            if (wasSkeleton || before == 0) {
+            if (hasRecents()) {
+                // Browse/search loaded BEHIND the recents view — stage the data silently; it renders
+                // when the recents view is dismissed (that transition does a full notify).
+            } else if (wasSkeleton || before == 0) {
                 // The item count changes wholesale (skeleton/empty -> real size), so a full rebind.
                 adapter.notifyDataSetChanged();
             } else if (!fresh.isEmpty()) {
-                adapter.notifyItemRangeInserted(recentHeaderCount() + before, fresh.size());
+                adapter.notifyItemRangeInserted(recentHeaderRows() + before, fresh.size());
             }
             if (!fresh.isEmpty()) {
                 resolveThumbnails(fresh);
@@ -805,9 +847,10 @@ public class SvipeExploreGrid extends RecyclerListView {
                 if (mo != null && mo.getDocument() != null) {
                     gi.mo = mo;
                     gi.resolved = true;
-                    final int idx = items.indexOf(gi);
-                    if (idx >= 0) {
-                        adapter.notifyItemChanged(recentHeaderCount() + idx);
+                    // Notify only if this GridItem is in the CURRENTLY visible grid (recents or browse).
+                    final int pos = adapterPositionOf(gi);
+                    if (pos >= 0) {
+                        adapter.notifyItemChanged(pos);
                     }
                 }
             }
@@ -820,8 +863,7 @@ public class SvipeExploreGrid extends RecyclerListView {
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            final int type = holder.getItemViewType();
-            return type == TYPE_PHOTO || type == TYPE_RECENT_ROW;
+            return holder.getItemViewType() == TYPE_PHOTO;
         }
 
         @Override
@@ -832,9 +874,8 @@ public class SvipeExploreGrid extends RecyclerListView {
             if (searchEmpty()) {
                 return TYPE_EMPTY;
             }
-            final int rc = recentHeaderCount();
-            if (position < rc) {
-                return position == 0 ? TYPE_RECENT_HEADER : TYPE_RECENT_ROW;
+            if (position < recentHeaderRows()) {
+                return TYPE_RECENT_HEADER;
             }
             return TYPE_PHOTO;
         }
@@ -849,9 +890,6 @@ public class SvipeExploreGrid extends RecyclerListView {
                     break;
                 case TYPE_RECENT_HEADER:
                     view = new RecentHeaderView(ctx);
-                    break;
-                case TYPE_RECENT_ROW:
-                    view = new RecentRowView(ctx);
                     break;
                 case TYPE_EMPTY:
                     view = createEmptyView(ctx);
@@ -868,18 +906,11 @@ public class SvipeExploreGrid extends RecyclerListView {
         @Override
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
             final int type = holder.getItemViewType();
-            if (type == TYPE_RECENT_ROW) {
-                final int idx = position - 1;   // position 0 is the header
-                if (idx >= 0 && idx < recentRows.size()) {
-                    ((RecentRowView) holder.itemView).bind(recentRows.get(idx));
-                }
-                return;
-            }
             if (type != TYPE_PHOTO) {
-                return;   // skeleton / header / empty self-render, nothing to bind
+                return;   // skeleton / recent header / empty self-render, nothing to bind
             }
             PortraitImageView iv = (PortraitImageView) holder.itemView;
-            GridItem gi = items.get(position - recentHeaderCount());
+            GridItem gi = currentGrid().get(position - recentHeaderRows());
             if (gi.mo != null && gi.mo.getDocument() != null) {
                 TLRPC.Document doc = gi.mo.getDocument();
                 TLRPC.PhotoSize big = FileLoader.getClosestPhotoSizeWithSize(doc.thumbs, 320);
@@ -901,14 +932,14 @@ public class SvipeExploreGrid extends RecyclerListView {
             if (searchEmpty()) {
                 return 1;
             }
-            return recentHeaderCount() + items.size();
+            return recentHeaderRows() + currentGrid().size();
         }
     }
 
-    // ---- recent-search rows (shown above the browse grid when the empty field is focused) ----
+    // ---- recents (shown IN PLACE of the browse grid when the empty field is focused) ----
 
-    private void removeRecent(String query) {
-        history.remove(query);
+    private void removeRecent(SvipeDiscover.Item ref) {
+        history.remove(ref);
         refreshRecentRows();
         adapter.notifyDataSetChanged();
     }
@@ -916,6 +947,7 @@ public class SvipeExploreGrid extends RecyclerListView {
     private void clearHistory() {
         history.clear();
         recentRows.clear();
+        recentItems.clear();
         adapter.notifyDataSetChanged();
     }
 
@@ -944,47 +976,6 @@ public class SvipeExploreGrid extends RecyclerListView {
             clear.setPadding(AndroidUtilities.dp(10), AndroidUtilities.dp(6), AndroidUtilities.dp(10), AndroidUtilities.dp(6));
             clear.setOnClickListener(v -> clearHistory());
             addView(clear, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
-        }
-    }
-
-    /** Full-width recent-query row: the query on the left, an X on the right that removes just it. */
-    private class RecentRowView extends LinearLayout {
-        private final TextView text;
-        private String query;
-
-        RecentRowView(Context context) {
-            super(context);
-            setOrientation(HORIZONTAL);
-            setGravity(Gravity.CENTER_VERTICAL);
-            setBackground(Theme.getSelectorDrawable(false));
-            setPadding(AndroidUtilities.dp(15), 0, AndroidUtilities.dp(4), 0);
-            setMinimumHeight(AndroidUtilities.dp(48));
-
-            text = new TextView(context);
-            text.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-            text.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-            text.setSingleLine(true);
-            text.setEllipsize(TextUtils.TruncateAt.END);
-            addView(text, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, Gravity.CENTER_VERTICAL));
-
-            TextView remove = new TextView(context);
-            remove.setText("✕");
-            remove.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-            remove.setGravity(Gravity.CENTER);
-            remove.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-            remove.setBackground(Theme.getSelectorDrawable(false));
-            remove.setPadding(AndroidUtilities.dp(12), AndroidUtilities.dp(12), AndroidUtilities.dp(12), AndroidUtilities.dp(12));
-            remove.setOnClickListener(v -> {
-                if (query != null) {
-                    removeRecent(query);
-                }
-            });
-            addView(remove, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
-        }
-
-        void bind(String q) {
-            this.query = q;
-            text.setText(q);
         }
     }
 

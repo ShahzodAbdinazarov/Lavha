@@ -930,6 +930,90 @@ public class SvipeMusic {
         return d;
     }
 
+    // ---------------- Local recent-search serialization (SvipeMusicSearchHistory) ----------------
+    // A tapped SONG / ARTIST result is stored locally so the "recent searches" list renders with the
+    // SAME cells the live results use and a tap re-opens the item. These mirror the parse* field names
+    // above, so {@link #songFromJson} / {@link #artistFromJson} just delegate to the existing parsers.
+
+    public static JSONObject songToJson(Song s) {
+        if (s == null) return null;
+        try {
+            JSONObject o = new JSONObject();
+            o.put("id", s.id);
+            o.put("title", s.title);
+            if (s.variantLabel != null) o.put("variant_label", s.variantLabel);
+            o.put("version_count", s.versionCount);
+            o.put("art_channel_id", s.artChannelId);
+            o.put("art_message_id", s.artMessageId);
+            if (s.shareUrl != null) o.put("share_url", s.shareUrl);
+            if (s.displayTitle != null) o.put("display_title", s.displayTitle);
+            if (s.displayArtist != null) o.put("display_artist", s.displayArtist);
+            if (s.coverUrl != null) o.put("cover_url", s.coverUrl);
+            if (s.coverSmallUrl != null) o.put("cover_small_url", s.coverSmallUrl);
+            if (s.artistPhotoUrl != null) o.put("artist_photo_url", s.artistPhotoUrl);
+            o.put("playable", s.playable);
+            o.put("deezer_track_id", s.deezerTrackId);
+            if (s.previewUrl != null) o.put("preview_url", s.previewUrl);
+            JSONArray artists = new JSONArray();
+            for (Artist a : s.artists) {
+                JSONObject ao = artistToJson(a);
+                if (ao != null) artists.put(ao);
+            }
+            o.put("artists", artists);
+            if (s.defaultTrack != null) {
+                JSONObject dt = trackToJson(s.defaultTrack);
+                if (dt != null) o.put("default", dt);
+            }
+            return o;
+        } catch (JSONException e) {
+            FileLog.e(e);
+            return null;
+        }
+    }
+
+    public static Song songFromJson(JSONObject o) {
+        return parseSong(o);
+    }
+
+    public static JSONObject artistToJson(Artist a) {
+        if (a == null) return null;
+        try {
+            JSONObject o = new JSONObject();
+            o.put("id", a.id);
+            o.put("name", a.name);
+            o.put("role", a.role);
+            o.put("song_count", a.songCount);
+            o.put("art_channel_id", a.artChannelId);
+            o.put("art_message_id", a.artMessageId);
+            if (a.displayName != null) o.put("display_name", a.displayName);
+            if (a.photoUrl != null) o.put("photo_url", a.photoUrl);
+            return o;
+        } catch (JSONException e) {
+            FileLog.e(e);
+            return null;
+        }
+    }
+
+    public static Artist artistFromJson(JSONObject o) {
+        return parseArtist(o);
+    }
+
+    /** Serialize the reference-only fields fillTrack() reads back (username required to resolve/play). */
+    private static JSONObject trackToJson(Track t) throws JSONException {
+        if (t == null || t.username == null || t.username.isEmpty()) return null;
+        JSONObject o = new JSONObject();
+        o.put("channel_id", t.channelId);
+        o.put("message_id", t.messageId);
+        o.put("username", t.username);
+        if (t.title != null) o.put("title", t.title);
+        if (t.performer != null) o.put("performer", t.performer);
+        o.put("duration_s", t.durationS);
+        o.put("size", t.size);
+        o.put("has_thumb", t.hasThumb);
+        o.put("song_id", t.songId);
+        return o;
+    }
+
     private static String urlEncode(String s) {
         try {
             return URLEncoder.encode(s, "UTF-8");
