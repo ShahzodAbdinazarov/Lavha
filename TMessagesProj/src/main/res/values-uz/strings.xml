@@ -89,6 +89,7 @@
     <string name="MainTabsMusic">Musiqa</string>
     <string name="MainTabsReels">Reels</string>
     <string name="MainTabsSearch">Qidiruv</string>
+    <string name="MainTabsVideo">Video</string>
 
     <!-- Music tab -->
     <string name="MusicTabTitle">Musiqa</string>

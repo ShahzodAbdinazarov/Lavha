@@ -351,6 +351,7 @@
     <string name="MainTabsMusic">Музыка</string>
     <string name="MainTabsReels">Reels</string>
     <string name="MainTabsSearch">Поиск</string>
+    <string name="MainTabsVideo">Видео</string>
 
     <!-- Music tab -->
     <string name="MusicTabTitle">Музыка</string>

@@ -51,6 +51,7 @@ public class SvipeReelsHistoryActivity extends BaseFragment {
         fragmentView = root;
 
         grid = new SvipeExploreGrid(context, currentAccount, true);
+        grid.setFragment(this);   // the horizontal cards' ⋮ menu / share / report need a host fragment
         grid.setPageLoader((offset, limit, refresh, cb) ->
                 SvipeDiscover.reelsHistory(currentAccount, offset, limit, (items, next, error) -> {
                     if (offset == 0 && error == null && emptyView != null) {

@@ -33,6 +33,9 @@ public class SvipeDiscover {
         public int width;
         public int height;
         public int durationMs;
+        // Owned svipe.uz/<code> link the server attaches to every reference (attach_share_urls). The
+        // share sheet prefers it over the raw t.me link because it carries the install loop.
+        public String shareUrl;
 
         /** True for a horizontal/long-form entry. Unknown dimensions fall back to the vertical tile. */
         public boolean isLandscape() {
@@ -224,22 +227,39 @@ public class SvipeDiscover {
      * silent re-auth retry on 401, same as every other write here.
      */
     public static void unblockChannel(int account, long channelId, EventCallback cb) {
+        sendEvent(account, channelId, 0, "UNBLOCK_CHANNEL", cb);
+    }
+
+    /**
+     * Post ONE recsys event for a reference the user acted on outside the reels player — the explore
+     * grid's ⋮ menu (NOT_INTERESTED, BLOCK_CHANNEL) and channel unblocking.
+     *
+     * ReelsActivity has its own sendEvent/postEvents pair, but those are private and hang off the
+     * fragment's cached token, so they cannot serve the grid. Same wire contract as there:
+     * POST /v1/events with {"events":[{channel_id, message_id, event_type}]}, one silent re-auth
+     * retry on 401. {@code messageId} is 0 for channel-level actions, which carry no single post.
+     *
+     * Grid-originated events carry no {@code recommendation_id} — the grid's references don't come
+     * with one — so they land unattributed. That's the same as the pre-existing UNBLOCK_CHANNEL path.
+     */
+    public static void sendEvent(int account, long channelId, int messageId, String eventType, EventCallback cb) {
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {
                 if (cb != null) cb.onDone(false);
                 return;
             }
-            unblockRequest(account, channelId, token, false, cb);
+            eventRequest(account, channelId, messageId, eventType, token, false, cb);
         });
     }
 
-    private static void unblockRequest(int account, long channelId, String token, boolean retried, EventCallback cb) {
+    private static void eventRequest(int account, long channelId, int messageId, String eventType,
+                                     String token, boolean retried, EventCallback cb) {
         JSONObject batch = new JSONObject();
         try {
             JSONObject ev = new JSONObject();
             ev.put("channel_id", channelId);
-            ev.put("message_id", 0);
-            ev.put("event_type", "UNBLOCK_CHANNEL");
+            ev.put("message_id", messageId);
+            ev.put("event_type", eventType);
             JSONArray events = new JSONArray();
             events.put(ev);
             batch.put("events", events);
@@ -255,7 +275,7 @@ public class SvipeDiscover {
                         if (cb != null) cb.onDone(false);
                         return;
                     }
-                    unblockRequest(account, channelId, t2, true, cb);
+                    eventRequest(account, channelId, messageId, eventType, t2, true, cb);
                 });
                 return;
             }
@@ -281,6 +301,7 @@ public class SvipeDiscover {
             it.width = o.optInt("width", 0);
             it.height = o.optInt("height", 0);
             it.durationMs = o.optInt("duration_ms", 0);
+            it.shareUrl = o.isNull("share_url") ? null : o.optString("share_url", null);
             out.add(it);
         }
     }

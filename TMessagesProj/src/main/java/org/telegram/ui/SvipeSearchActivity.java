@@ -36,6 +36,9 @@ public class SvipeSearchActivity extends DialogsActivity {
     @Override
     protected View svipeCreateExploreGrid(Context context) {
         exploreGrid = new SvipeExploreGrid(context, currentAccount);
+        // Needed by the horizontal cards' ⋮ menu (ItemOptions routes the popup above the bottom tabs
+        // via the fragment), plus the share sheet and the report flow.
+        exploreGrid.setFragment(this);
         exploreGrid.setOnReelTapListener((items, position) -> {
             // A tapped SEARCH result is a query→click signal — log it before opening the reels player
             // (browse-grid taps carry no query, so svipeLogVideoResultClick no-ops there).

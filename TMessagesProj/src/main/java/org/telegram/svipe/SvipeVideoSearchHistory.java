@@ -131,6 +131,7 @@ public class SvipeVideoSearchHistory {
             if (ref.width > 0) o.put("width", ref.width);
             if (ref.height > 0) o.put("height", ref.height);
             if (ref.durationMs > 0) o.put("duration_ms", ref.durationMs);
+            if (ref.shareUrl != null) o.put("share_url", ref.shareUrl);
             return o;
         } catch (Exception ex) {
             FileLog.e(ex);
@@ -150,6 +151,7 @@ public class SvipeVideoSearchHistory {
         ref.width = o.optInt("width", 0);       // absent in entries stored before the mixed grid
         ref.height = o.optInt("height", 0);
         ref.durationMs = o.optInt("duration_ms", 0);
+        ref.shareUrl = o.isNull("share_url") ? null : o.optString("share_url", null);
         return ref;
     }
 }
