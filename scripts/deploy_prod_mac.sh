@@ -73,10 +73,62 @@ echo "== 7. restart (up -d alone does not re-read .env) =="
 rsh "cd /home/main/svipe-prod && docker compose up -d --force-recreate app" 2>&1 | tail -3
 
 echo "== 8. verify =="
-sleep 5
-echo "-- offer to a very old client (expect the new version_code/sha) --"
-curl -s "https://svipe.uz/api/app/update?version_code=1"; echo
+# Two defects this replaces, both seen for real on the 1.1.30 publish:
+#
+#  1. A blind `sleep 5` after --force-recreate. The app container needs tens of seconds, so every
+#     check below hit nginx before uvicorn was listening and printed "error code: 502".
+#  2. Worse: `curl -s` exits 0 on a 502, so the script printed the errors and still reported success.
+#     A publish that never took effect was indistinguishable from one that did.
+#
+# So: poll until the endpoint actually serves the version we just published (that is the readiness
+# gate AND the first assertion in one), then assert the rest and FAIL loudly on any mismatch.
+UPDATE_URL="https://svipe.uz/api/app/update"
+fail() { echo "!! $*"; exit 1; }
+
+echo "-- waiting for the app to serve the new metadata --"
+OFFER=""
+for i in $(seq 1 40); do
+  OFFER=$(curl -s --max-time 10 "$UPDATE_URL?version_code=1" || true)
+  if printf '%s' "$OFFER" | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+sys.exit(0 if d.get('version_code')==$VC else 1)
+" 2>/dev/null; then
+    echo "   ready after ${i}0s"
+    break
+  fi
+  [ "$i" = 40 ] && fail "the endpoint never served version_code=$VC (last response: ${OFFER:0:200})"
+  sleep 10
+done
+
+echo "-- offer to a very old client (expect available + the new version_code/sha) --"
+printf '%s' "$OFFER" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print(json.dumps(d, indent=1)[:600])
+bad=[]
+if not d.get('available'):            bad.append('available is false for an old client')
+if d.get('version_code')!=$VC:        bad.append(f\"version_code {d.get('version_code')} != $VC\")
+if d.get('version_name')!='$VN':      bad.append(f\"version_name {d.get('version_name')} != $VN\")
+if d.get('sha256')!='$SHA':           bad.append('sha256 does not match the APK we just uploaded')
+if d.get('size')!=$SIZE:              bad.append(f\"size {d.get('size')} != $SIZE\")
+if bad: print('!! ' + '; '.join(bad)); sys.exit(1)
+" || fail "the update offer does not describe the APK that was uploaded"
+
 echo "-- offer to the current build (expect no update) --"
-curl -s "https://svipe.uz/api/app/update?version_code=$VC"; echo
+curl -s --max-time 10 "$UPDATE_URL?version_code=$VC" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print(json.dumps(d))
+sys.exit(1 if d.get('available') else 0)
+" || fail "the app offers itself an update — every user would loop on the same version"
+
 echo "-- served file --"
-curl -sI https://svipe.uz/dl/svipe.apk | grep -iE "^HTTP|content-length"
+HEAD=$(curl -sI --max-time 20 https://svipe.uz/dl/svipe.apk)
+printf '%s' "$HEAD" | grep -iE "^HTTP|content-length"
+printf '%s' "$HEAD" | grep -qE "^HTTP/[0-9.]+ 200" || fail "the APK is not being served (see the status above)"
+SERVED=$(printf '%s' "$HEAD" | grep -i "^content-length" | grep -oE "[0-9]+" | tail -1)
+[ "$SERVED" = "$SIZE" ] || fail "served content-length $SERVED != the uploaded $SIZE"
+
+echo "== published: $VN (vc $VC), verified end to end =="
