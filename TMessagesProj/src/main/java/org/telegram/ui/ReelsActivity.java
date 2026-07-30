@@ -1706,11 +1706,17 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     }
 
     /**
-     * Anything at least this long is treated as LONG-FORM rather than a reel. The server caps
-     * /v1/feed at 5 minutes, so such an item can only have arrived as a seed from the Search tab's
-     * mixed video grid (which serves horizontal long-form up to an hour).
+     * Anything at least this long is treated as LONG-FORM rather than a reel. Such an item can only
+     * have arrived as a seed from the Video tab, since /v1/feed is capped at 5 minutes.
+     *
+     * MUST stay in sync with the server's ``longform_min_duration_ms`` (svipe-backend
+     * app/config.py) — that is the floor of the long-form pipe, so it is exactly the shortest clip
+     * that can reach this player from the Video tab. It was 5 min here while the server's floor was
+     * 3, which let every 3-5 minute horizontal video escape all three guards below: it looped, it
+     * got a full cacheType-0 pull after 3 seconds of dwell, and it was persisted into the 600 MB
+     * offline reels cushion.
      */
-    private static final long LONG_FORM_MIN_DURATION_MS = 5 * 60 * 1000L;
+    private static final long LONG_FORM_MIN_DURATION_MS = 3 * 60 * 1000L;
 
     /**
      * Long-form guard. Three reels behaviours are actively harmful for a 40-minute video and are
