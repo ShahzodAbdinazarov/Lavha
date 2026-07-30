@@ -445,6 +445,13 @@
     <string name="SvipeUnblockChannel">Разблокировать канал</string>
     <string name="SvipeUnblockChannelConfirm">Разблокировать этот канал? Его видео снова смогут появляться в вашей ленте.</string>
     <string name="SvipeSearchArtistsAndTracks">Поиск треков и исполнителей</string>
+    <string name="SvipeRelatedVideos">Похожие видео</string>
+    <string name="SvipeSharePromo">смотрите видео в telegram со svipe</string>
+    <string name="SvipeVideoAutoplay">Автовоспроизведение</string>
+    <string name="SvipeVideoUpNext">Далее</string>
+    <string name="SvipeVideoLoop">Повторять видео</string>
+    <string name="SvipeVideoDownload">Скачать</string>
+    <string name="SvipeVideoDownloaded">Скачано</string>
     <string name="SvipeSearchVideos">Поиск видео</string>
     <string name="SvipeListenTimeLabel">%1$s • %2$d прослуш.</string>
 

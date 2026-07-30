@@ -11108,6 +11108,15 @@
     <string name="SvipeSearchVideos">Search videos</string>
     <string name="SvipeListenTimeLabel">%1$s • %2$d plays</string>
 
+    <!-- Svipe long-form watch page -->
+    <string name="SvipeRelatedVideos">Related videos</string>
+    <string name="SvipeSharePromo">watch videos on telegram with svipe</string>
+    <string name="SvipeVideoAutoplay">Autoplay</string>
+    <string name="SvipeVideoUpNext">Up next</string>
+    <string name="SvipeVideoLoop">Loop video</string>
+    <string name="SvipeVideoDownload">Download</string>
+    <string name="SvipeVideoDownloaded">Downloaded</string>
+
     <!-- Svipe self-update -->
     <string name="SvipeUpdateDownloading">Downloading update…</string>
     <string name="SvipeUpdateDownloadingProgress">Downloading… %1$d%%</string>

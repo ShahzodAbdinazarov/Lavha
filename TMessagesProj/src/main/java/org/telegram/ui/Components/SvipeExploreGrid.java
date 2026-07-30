@@ -5,14 +5,8 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
-import android.graphics.Color;
-import android.graphics.LinearGradient;
-import android.graphics.Matrix;
-import android.graphics.PorterDuff;
 import android.graphics.Paint;
 import android.graphics.RectF;
-import android.graphics.Shader;
-import android.text.TextPaint;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -23,29 +17,24 @@ import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.LinearInterpolator;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import androidx.core.graphics.ColorUtils;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.FileLoader;
-import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
-import org.telegram.svipe.SvipeBlockedChannels;
 import org.telegram.svipe.SvipeDiscover;
 import org.telegram.svipe.SvipeVideoSearchHistory;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
-import org.telegram.ui.ReportBottomSheet;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.SvipeWideVideoCell;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -139,9 +128,6 @@ public class SvipeExploreGrid extends RecyclerListView {
     // 3 was TYPE_RECENT_ROW (a recent-search QUERY text row); recents now reuse the reel-thumbnail cell.
     private static final int TYPE_PHOTO_WIDE = 4;  // a HORIZONTAL/long-form video: full-width 16:9 card
     private static final int TYPE_SKELETON_WIDE = 5;
-    // Widest card we will draw. Beyond this a "horizontal" video is a letterboxed banner, so clamp and
-    // let the thumbnail crop instead of handing the row to a 30dp-tall sliver.
-    private static final float MAX_CARD_ASPECT = 2.4f;
 
     private final int account;
     private final GridLayoutManager layoutManager;
@@ -166,6 +152,28 @@ public class SvipeExploreGrid extends RecyclerListView {
      * need it too. Null until {@link #setFragment} is called; the menu is a no-op until then.
      */
     private BaseFragment fragment;
+
+    /**
+     * The wide cards' ⋮ menu owns its own actions, wording and events (see {@link SvipeWideVideoCell});
+     * the grid only supplies the host fragment and does the list surgery a removal implies, since the
+     * cell cannot know which of the pipes / recents lists a reference is sitting in.
+     */
+    private final SvipeWideVideoCell.Delegate cellDelegate = new SvipeWideVideoCell.Delegate() {
+        @Override
+        public BaseFragment fragment() {
+            return fragment;
+        }
+
+        @Override
+        public void onRefRemoved(SvipeDiscover.Item ref) {
+            removeRef(ref);
+        }
+
+        @Override
+        public void onChannelBlocked(long channelId) {
+            removeChannel(channelId);
+        }
+    };
 
     // ---- browse / search / recents mode ----
     // When searchActive: items hold /v1/discover/search results for activeQuery. Otherwise items hold
@@ -1345,7 +1353,9 @@ public class SvipeExploreGrid extends RecyclerListView {
                     view = createEmptyView(ctx);
                     break;
                 case TYPE_PHOTO_WIDE:
-                    view = new WideVideoCell(ctx);
+                    SvipeWideVideoCell wide = new SvipeWideVideoCell(ctx, account);
+                    wide.setDelegate(cellDelegate);
+                    view = wide;
                     break;
                 default:
                     view = new PortraitImageView(ctx);
@@ -1364,11 +1374,11 @@ public class SvipeExploreGrid extends RecyclerListView {
             }
             final GridItem gi = currentGrid().get(position - recentHeaderRows());
             if (type == TYPE_PHOTO_WIDE) {
-                ((WideVideoCell) holder.itemView).bind(gi);
+                ((SvipeWideVideoCell) holder.itemView).bind(gi.ref, gi.mo, chatHintFor(gi));
                 return;
             }
             PortraitImageView iv = (PortraitImageView) holder.itemView;
-            bindThumb(iv, gi, false);
+            SvipeWideVideoCell.bindThumb(iv, gi.mo, false);
         }
 
         @Override
@@ -1442,7 +1452,7 @@ public class SvipeExploreGrid extends RecyclerListView {
      * available — so a cell never flashes black while /v1/discover items are resolving their thumbs.
      */
     private static class PortraitImageView extends BackupImageView {
-        private final GridShimmer shimmer = new GridShimmer();
+        private final SvipeWideVideoCell.Shimmer shimmer = new SvipeWideVideoCell.Shimmer();
         private final RectF rect = new RectF();
 
         PortraitImageView(Context context) {
@@ -1467,207 +1477,16 @@ public class SvipeExploreGrid extends RecyclerListView {
         }
     }
 
-    /** Loads a resolved item's Telegram video thumbnail into a cell, or clears it if unresolved. */
-    private void bindThumb(BackupImageView iv, GridItem gi, boolean wide) {
-        if (gi.mo == null || gi.mo.getDocument() == null) {
-            iv.getImageReceiver().clearImage();
-            return;
-        }
-        TLRPC.Document doc = gi.mo.getDocument();
-        // A full-width card is ~3x the pixel width of a 3-up tile, so it needs the larger thumb and a
-        // matching filter or it renders visibly soft.
-        TLRPC.PhotoSize big = FileLoader.getClosestPhotoSizeWithSize(doc.thumbs, wide ? 1000 : 320);
-        TLRPC.PhotoSize small = FileLoader.getClosestPhotoSizeWithSize(doc.thumbs, 50);
-        final String filter = wide ? "720_720" : "240_240";
-        iv.setImage(
-                ImageLocation.getForDocument(big, doc), filter,
-                ImageLocation.getForDocument(small, doc), filter + "_b",
-                0, gi.mo);
-    }
-
     /**
-     * HORIZONTAL / long-form cell — the YouTube-shaped one: a full-width 16:9-ish card, then a
-     * metadata row of channel avatar + 2-line title + "channel · views · age" + a ⋮ overflow menu.
-     *
-     * Height discipline: the card's aspect comes off the /v1/discover REFERENCE (never the resolved
-     * Telegram document) and the two text lines are fixed at {@code setLines}, not {@code setMaxLines}.
-     * So the cell measures to its final height on the first layout pass and does not reflow when
-     * MTProto answers — the same rule {@link #isWideAt} follows for the span.
+     * The channel this grid resolved for a reference's @username, handed to the cell as a fallback for
+     * the MessagesController lookup: {@link #resolvedChats} is this grid's own warm cache and survives
+     * a refresh, so a channel keeps its avatar even if the controller has since dropped the chat.
      */
-    private class WideVideoCell extends LinearLayout {
-        private final WideThumbView thumb;
-        private final BackupImageView avatar;
-        private final TextView title;
-        private final TextView meta;
-        private GridItem item;
-
-        WideVideoCell(Context context) {
-            super(context);
-            setOrientation(VERTICAL);
-
-            thumb = new WideThumbView(context);
-            addView(thumb, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-            LinearLayout row = new LinearLayout(context);
-            row.setOrientation(HORIZONTAL);
-            row.setPadding(AndroidUtilities.dp(12), AndroidUtilities.dp(10), AndroidUtilities.dp(4), AndroidUtilities.dp(14));
-
-            avatar = new BackupImageView(context);
-            avatar.setRoundRadius(AndroidUtilities.dp(18));
-            row.addView(avatar, LayoutHelper.createLinear(36, 36, Gravity.TOP, 0, 0, 12, 0));
-
-            LinearLayout texts = new LinearLayout(context);
-            texts.setOrientation(VERTICAL);
-
-            title = new TextView(context);
-            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-            title.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-            // setLines, NOT setMaxLines: the row must occupy its full height even before the caption
-            // has resolved, or every card would grow by two lines mid-scroll.
-            title.setLines(2);
-            title.setEllipsize(TextUtils.TruncateAt.END);
-            title.setLineSpacing(AndroidUtilities.dp(1), 1f);
-            texts.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-            meta = new TextView(context);
-            meta.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
-            meta.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-            meta.setLines(1);
-            meta.setEllipsize(TextUtils.TruncateAt.END);
-            texts.addView(meta, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 3, 0, 0));
-
-            row.addView(texts, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, Gravity.TOP));
-
-            ImageView more = new ImageView(context);
-            more.setImageResource(R.drawable.msg_actions);
-            more.setColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), PorterDuff.Mode.SRC_IN);
-            more.setScaleType(ImageView.ScaleType.CENTER);
-            more.setBackground(Theme.createSelectorDrawable(
-                    Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_CIRCLE_20DP));
-            more.setOnClickListener(v -> showMore(v, item));
-            row.addView(more, LayoutHelper.createLinear(36, 36, Gravity.TOP));
-
-            addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+    private TLRPC.Chat chatHintFor(GridItem gi) {
+        if (gi.ref == null || gi.ref.username == null) {
+            return null;
         }
-
-        void bind(GridItem gi) {
-            item = gi;
-            thumb.bindRef(gi.ref);
-            bindThumb(thumb, gi, true);
-
-            final TLRPC.Chat chat = chatFor(gi.ref);
-            if (chat != null) {
-                avatar.setForUserOrChat(chat, new AvatarDrawable(chat));
-            } else {
-                // Not resolved yet: a letter avatar off the @username, so the row never shows a hole.
-                AvatarDrawable ad = new AvatarDrawable();
-                ad.setInfo(0, gi.ref.username, null);
-                avatar.setImageDrawable(ad);
-            }
-            title.setText(captionOf(gi.mo));
-            meta.setText(metaLine(gi, chat));
-        }
-    }
-
-    /** The channel behind a reference once it has resolved, else null. */
-    private TLRPC.Chat chatFor(SvipeDiscover.Item ref) {
-        if (ref == null) return null;
-        // resolveUsername already put the chats into MessagesController (see fetchMessagesForGroup),
-        // and channelId IS chat.id here — not the negated dialogId.
-        TLRPC.Chat chat = MessagesController.getInstance(account).getChat(ref.channelId);
-        if (chat == null && ref.username != null) {
-            chat = resolvedChats.get(ref.username.toLowerCase());
-        }
-        return chat;
-    }
-
-    /** Video caption, mirroring ReelsActivity's own caption fallback (caption, then message text). */
-    private static CharSequence captionOf(MessageObject mo) {
-        if (mo == null) return null;
-        if (mo.caption != null && mo.caption.length() > 0) {
-            return AndroidUtilities.replaceNewLines(mo.caption);
-        }
-        if (mo.messageOwner != null && mo.messageOwner.message != null && mo.messageOwner.message.length() > 0) {
-            return AndroidUtilities.replaceNewLines(mo.messageOwner.message);
-        }
-        return null;
-    }
-
-    /** "Channel · 2.7K views · 2 days ago" — each part dropped when unknown, so it never reads oddly. */
-    private CharSequence metaLine(GridItem gi, TLRPC.Chat chat) {
-        final ArrayList<String> parts = new ArrayList<>(3);
-        if (chat != null && chat.title != null) {
-            parts.add(chat.title);
-        } else if (gi.ref != null && gi.ref.username != null) {
-            parts.add("@" + gi.ref.username);
-        }
-        if (gi.mo != null && gi.mo.messageOwner != null) {
-            final int views = gi.mo.messageOwner.views;
-            if (views > 0) {
-                parts.add(String.format(
-                        LocaleController.getPluralString("Views", views),
-                        AndroidUtilities.formatWholeNumber(views, 0)));
-            }
-            final int date = gi.mo.messageOwner.date;
-            if (date > 0) {
-                final int now = ConnectionsManager.getInstance(account).getCurrentTime();
-                if (now > date) {
-                    parts.add(LocaleController.formatRelativeDate(now - date));
-                }
-            }
-        }
-        return TextUtils.join("  ·  ", parts);
-    }
-
-    /**
-     * The card's ⋮ menu. Deliberately the same four actions, wording and icons as the reels player's
-     * own overflow (ReelsActivity.showMore) — one action must not be called two different things in
-     * two places. Report is red, being the only irreversible/escalating one.
-     */
-    private void showMore(View anchor, GridItem gi) {
-        if (gi == null || gi.ref == null || fragment == null) {
-            return;
-        }
-        final SvipeDiscover.Item ref = gi.ref;
-        ItemOptions.makeOptions(fragment, anchor)
-                .setGravity(Gravity.RIGHT)
-                .add(R.drawable.msg_share, LocaleController.getString(R.string.SvipeReelsShare), () -> shareRef(gi))
-                .add(R.drawable.msg2_block2, LocaleController.getString(R.string.SvipeReelsNotInterested), () -> {
-                    SvipeDiscover.sendEvent(account, ref.channelId, ref.messageId, "NOT_INTERESTED", null);
-                    removeRef(ref);
-                    BulletinFactory.of(fragment).createSimpleBulletin(
-                            R.raw.chats_infotip,
-                            LocaleController.getString(R.string.SvipeReelsLessLikeThis)).show();
-                })
-                .add(R.drawable.msg_disable, LocaleController.getString(R.string.SvipeReelsBlockChannel), () -> {
-                    new SvipeBlockedChannels(account).add(ref.channelId);
-                    SvipeDiscover.sendEvent(account, ref.channelId, 0, "BLOCK_CHANNEL", null);
-                    removeChannel(ref.channelId);
-                    BulletinFactory.of(fragment).createSimpleBulletin(
-                            R.raw.chats_infotip,
-                            LocaleController.getString(R.string.SvipeReelsChannelBlocked)).show();
-                })
-                .add(R.drawable.msg_report, LocaleController.getString(R.string.ReportChat), true, () -> {
-                    if (gi.mo != null) {
-                        ReportBottomSheet.openMessage(fragment, gi.mo);
-                    }
-                })
-                .show();
-    }
-
-    /** Share a grid reference: the owned svipe.uz link when the feed carried one, else the t.me post. */
-    private void shareRef(GridItem gi) {
-        if (fragment == null || fragment.getParentActivity() == null || gi.ref == null) {
-            return;
-        }
-        String link = gi.ref.shareUrl;
-        if ((link == null || link.isEmpty()) && gi.ref.username != null) {
-            link = "https://t.me/" + gi.ref.username + "/" + gi.ref.messageId;
-        }
-        if (link == null || link.isEmpty()) {
-            return;
-        }
-        fragment.showDialog(new ShareAlert(fragment.getParentActivity(), null, link, false, link, false));
+        return resolvedChats.get(gi.ref.username.toLowerCase());
     }
 
     /**
@@ -1739,75 +1558,9 @@ public class SvipeExploreGrid extends RecyclerListView {
         return changed;
     }
 
-    /**
-     * The card image itself: a full-width thumbnail whose height follows the video's own aspect (so it
-     * is shown uncropped, unlike the portrait tiles which centre-crop), with a duration badge in the
-     * bottom-right corner.
-     */
-    private static class WideThumbView extends BackupImageView {
-        private final GridShimmer shimmer = new GridShimmer();
-        private final RectF rect = new RectF();
-        private final Paint badgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final TextPaint badgeText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        private float aspect = 16f / 9f;
-        private String duration;
-
-        WideThumbView(Context context) {
-            super(context);
-            badgePaint.setColor(0x99000000);
-            badgeText.setColor(Color.WHITE);
-            badgeText.setTextSize(AndroidUtilities.dp(11));
-            badgeText.setTypeface(AndroidUtilities.bold());
-        }
-
-        void bindRef(SvipeDiscover.Item ref) {
-            final float a = ref == null
-                    ? 16f / 9f
-                    : Math.min(MAX_CARD_ASPECT, Math.max(SvipeDiscover.LANDSCAPE_MIN_ASPECT, ref.aspect()));
-            final int seconds = ref == null ? 0 : ref.durationMs / 1000;
-            final String d = seconds > 0 ? AndroidUtilities.formatShortDuration(seconds) : null;
-            if (a != aspect) {
-                aspect = a;
-                requestLayout();
-            }
-            if (!TextUtils.equals(d, duration)) {
-                duration = d;
-                invalidate();
-            }
-        }
-
-        @Override
-        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-            final int width = MeasureSpec.getSize(widthMeasureSpec);
-            final int height = Math.max(1, Math.round(width / aspect));
-            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            if (!getImageReceiver().hasBitmapImage()) {
-                final float inset = AndroidUtilities.dp(1);
-                rect.set(inset, inset, getWidth() - inset, getHeight() - inset);
-                shimmer.draw(canvas, rect, AndroidUtilities.dp(3), this);
-            }
-            super.onDraw(canvas);
-            if (duration != null) {
-                final float pad = AndroidUtilities.dp(4);
-                final float margin = AndroidUtilities.dp(6);
-                final float tw = badgeText.measureText(duration);
-                final float th = badgeText.getTextSize();
-                final float right = getWidth() - margin;
-                final float bottom = getHeight() - margin;
-                rect.set(right - tw - pad * 2, bottom - th - pad * 1.6f, right, bottom);
-                canvas.drawRoundRect(rect, AndroidUtilities.dp(3), AndroidUtilities.dp(3), badgePaint);
-                canvas.drawText(duration, rect.left + pad, rect.bottom - pad * 0.8f, badgeText);
-            }
-        }
-    }
-
     /** No-data placeholder cell: pure shimmer, shown while {@code items} is still empty. */
     private static class SkeletonCell extends View {
-        private final GridShimmer shimmer = new GridShimmer();
+        private final SvipeWideVideoCell.Shimmer shimmer = new SvipeWideVideoCell.Shimmer();
         private final RectF rect = new RectF();
         private final boolean wide;
 
@@ -1832,48 +1585,4 @@ public class SvipeExploreGrid extends RecyclerListView {
         }
     }
 
-    /**
-     * Theme-aware grid shimmer: an opaque gray placeholder with a soft highlight band sweeping across.
-     * The highlight is derived from the theme (only ~9% lighter in dark mode, so it isn't garish; a
-     * stronger lift in light mode where contrast is naturally lower). Self-animates via invalidate().
-     */
-    private static class GridShimmer {
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Matrix matrix = new Matrix();
-        private LinearGradient gradient;
-        private int gradientWidth, base, highlight;
-        private float progress;
-        private long lastUpdate;
-
-        void draw(Canvas canvas, RectF rect, float rad, View view) {
-            final int b = Theme.getColor(Theme.key_windowBackgroundGray);
-            final boolean dark = (Color.red(b) * 0.299f + Color.green(b) * 0.587f + Color.blue(b) * 0.114f) < 128f;
-            final int h = ColorUtils.blendARGB(b, Color.WHITE, dark ? 0.09f : 0.45f);
-            final int w = AndroidUtilities.dp(200);
-            if (gradient == null || base != b || highlight != h || gradientWidth != w) {
-                base = b;
-                highlight = h;
-                gradientWidth = w;
-                gradient = new LinearGradient(0, 0, w, 0,
-                        new int[]{b, h, b}, new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP);
-                paint.setShader(gradient);
-            }
-            final long now = System.currentTimeMillis();
-            if (lastUpdate != 0) {
-                progress += (now - lastUpdate) / 1100f;
-                while (progress > 1f) {
-                    progress -= 1f;
-                }
-            }
-            lastUpdate = now;
-            final float x = (rect.width() + gradientWidth * 2f) * progress - gradientWidth;
-            matrix.reset();
-            matrix.setTranslate(rect.left + x, 0);
-            gradient.setLocalMatrix(matrix);
-            canvas.drawRoundRect(rect, rad, rad, paint);
-            if (view != null) {
-                view.invalidate();
-            }
-        }
-    }
 }

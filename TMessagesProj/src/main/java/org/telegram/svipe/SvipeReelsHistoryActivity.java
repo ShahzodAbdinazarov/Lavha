@@ -16,6 +16,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.SvipeExploreGrid;
 import org.telegram.ui.ReelsActivity;
+import org.telegram.ui.SvipeWatchActivity;
 
 /**
  * Settings "Reels watch history": the videos this user recently watched, newest first, as a
@@ -59,8 +60,16 @@ public class SvipeReelsHistoryActivity extends BaseFragment {
                     }
                     cb.onResult(items, next, error);
                 }));
-        grid.setOnReelTapListener((items, position) ->
-                presentFragment(ReelsActivity.ofDiscoverSeed(items, position)));
+        grid.setOnReelTapListener((items, position) -> {
+            final SvipeDiscover.Item ref = position >= 0 && position < items.size() ? items.get(position) : null;
+            // Same split as the Search section: long-form goes to the watch page, shorts to the reels
+            // player. History is mixed, so the branch has to be here too rather than in the grid.
+            if (ref != null && ref.isLongForm()) {
+                presentFragment(new SvipeWatchActivity(ref));
+            } else {
+                presentFragment(ReelsActivity.ofDiscoverSeed(items, position));
+            }
+        });
         root.addView(grid, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         emptyView = new TextView(context);

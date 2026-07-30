@@ -31,6 +31,14 @@ public class SvipeDiscover {
      */
     public static final float LANDSCAPE_MIN_ASPECT = 1.2f;
 
+    /**
+     * Where the long-form watch page takes over from the reels player. Mirrors the backend's
+     * {@code longform_min_duration_ms}, so a video the server considers long-form is one the client
+     * opens in the watch page. ReelsActivity carries the same threshold as a playback guard (no
+     * looping, no implicit full-file pull, never persisted to the offline reels queue).
+     */
+    public static final long LONG_FORM_MIN_DURATION_MS = 180_000L;
+
     public static class Item {
         public long channelId;
         public int messageId;
@@ -45,6 +53,14 @@ public class SvipeDiscover {
         // Owned svipe.uz/<code> link the server attaches to every reference (attach_share_urls). The
         // share sheet prefers it over the raw t.me link because it carries the install loop.
         public String shareUrl;
+        /**
+         * The id of the recommendation PAGE this reference arrived with, so an event about it can be
+         * attributed back to the ranking that served it. The reels feed carries one; the discover /
+         * long-form responses do not yet, so this stays null and their events land unattributed —
+         * read from the response the moment the server starts sending it, which is why nothing here
+         * has to change then.
+         */
+        public String recId;
 
         /** True for a horizontal/long-form entry. Unknown dimensions fall back to the vertical tile. */
         public boolean isLandscape() {
@@ -54,6 +70,18 @@ public class SvipeDiscover {
         /** Video aspect (w/h), or 16:9 when the server sent no dimensions. */
         public float aspect() {
             return width > 0 && height > 0 ? (float) width / height : 16f / 9f;
+        }
+
+        /**
+         * True for a video that belongs in the long-form watch page rather than the vertical reels
+         * player: the full-width cards of the /v1/videos pipe, plus anything long enough that reels'
+         * swipe-up-to-skip model stops making sense.
+         *
+         * <p>Decided off the server-sent fields the reference already carries, so routing a tap needs
+         * no MTProto round-trip — the tap has to open something immediately.
+         */
+        public boolean isLongForm() {
+            return isLandscape() || durationMs >= LONG_FORM_MIN_DURATION_MS;
         }
     }
 
@@ -122,7 +150,7 @@ public class SvipeDiscover {
                 return;
             }
             ArrayList<Item> out = new ArrayList<>();
-            parseItems(res.optJSONArray("items"), out);
+            parseItems(res.optJSONArray("items"), recIdOf(res), out);
             Integer next = res.isNull("next_offset") ? null : Integer.valueOf(res.optInt("next_offset"));
             cb.onResult(out, next, null);
         });
@@ -151,6 +179,38 @@ public class SvipeDiscover {
             }
         }
         feedGet(account, path.toString(), cb);
+    }
+
+    /**
+     * The watch page's RELATED list: more long-form videos to show under the one being watched.
+     *
+     * <p><b>Phase A (this build).</b> The seed is not on the wire yet — {@code GET /v1/videos} takes
+     * only {@code category/limit/offset/refresh}, and seeding {@code /v1/feed} instead is not an option
+     * because that endpoint hard-filters to short videos. So related = the same globally-ranked
+     * long-form pipe, minus the video being watched, which is exactly what the owner authorised as the
+     * interim source. Phase B (plan step 13) adds {@code seed_channel_id}/{@code seed_message_id} to
+     * /v1/videos with a seed-bearing cache key, and only the query string here changes.
+     *
+     * <p>{@code refresh} is deliberately absent: /v1/videos rotates the user's own Video-tab window on
+     * refresh, and opening a watch page must never reshuffle the tab the user came from.
+     */
+    public static void relatedVideos(int account, long seedChannelId, int seedMessageId,
+                                     int offset, int limit, Callback cb) {
+        feedGet(account, "/v1/videos?limit=" + limit + "&offset=" + offset, (items, next, error) -> {
+            if (items == null) {
+                cb.onResult(null, next, error);
+                return;
+            }
+            // Drop the seed itself. Server-side once Phase B lands (its keep() filter), here until then.
+            final ArrayList<Item> out = new ArrayList<>(items.size());
+            for (Item it : items) {
+                if (it.channelId == seedChannelId && it.messageId == seedMessageId) {
+                    continue;
+                }
+                out.add(it);
+            }
+            cb.onResult(out, next, null);
+        });
     }
 
     /**
@@ -201,7 +261,7 @@ public class SvipeDiscover {
                 return;
             }
             ArrayList<Item> out = new ArrayList<>();
-            parseItems(res.optJSONArray("items"), out);
+            parseItems(res.optJSONArray("items"), recIdOf(res), out);
             Integer next = res.isNull("next_offset") ? null : Integer.valueOf(res.optInt("next_offset"));
             cb.onResult(out, next, null);
         });
@@ -276,20 +336,37 @@ public class SvipeDiscover {
      * POST /v1/events with {"events":[{channel_id, message_id, event_type}]}, one silent re-auth
      * retry on 401. {@code messageId} is 0 for channel-level actions, which carry no single post.
      *
-     * Grid-originated events carry no {@code recommendation_id} — the grid's references don't come
-     * with one — so they land unattributed. That's the same as the pre-existing UNBLOCK_CHANNEL path.
+     * These carry no payload and no {@code recommendation_id}: they are bare actions, and the grid's
+     * references don't come with a recommendation id anyway ({@link Item#recId}). See the overload
+     * below for the measurement events the long-form player sends.
      */
     public static void sendEvent(int account, long channelId, int messageId, String eventType, EventCallback cb) {
+        sendEvent(account, channelId, messageId, eventType, null, null, cb);
+    }
+
+    /**
+     * The same event carrying a MEASUREMENT payload and the recommendation it came from — what the
+     * long-form watch player needs and the payload-less form above cannot express (watch time,
+     * buffering, time-to-first-frame). ReelsActivity has an equivalent private pair hanging off the
+     * fragment's cached token; this is the one every surface outside that fragment posts through, so
+     * there is exactly one auth + 401-retry idiom to get right.
+     *
+     * @param payload measurement fields, stored verbatim server-side; null for a bare action event
+     * @param recId   the recommendation page the reference arrived with, or null (unattributed)
+     */
+    public static void sendEvent(int account, long channelId, int messageId, String eventType,
+                                 JSONObject payload, String recId, EventCallback cb) {
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {
                 if (cb != null) cb.onDone(false);
                 return;
             }
-            eventRequest(account, channelId, messageId, eventType, token, false, cb);
+            eventRequest(account, channelId, messageId, eventType, payload, recId, token, false, cb);
         });
     }
 
     private static void eventRequest(int account, long channelId, int messageId, String eventType,
+                                     JSONObject payload, String recId,
                                      String token, boolean retried, EventCallback cb) {
         JSONObject batch = new JSONObject();
         try {
@@ -297,6 +374,8 @@ public class SvipeDiscover {
             ev.put("channel_id", channelId);
             ev.put("message_id", messageId);
             ev.put("event_type", eventType);
+            if (recId != null) ev.put("recommendation_id", recId);
+            if (payload != null) ev.put("payload", payload);
             JSONArray events = new JSONArray();
             events.put(ev);
             batch.put("events", events);
@@ -312,7 +391,7 @@ public class SvipeDiscover {
                         if (cb != null) cb.onDone(false);
                         return;
                     }
-                    eventRequest(account, channelId, messageId, eventType, t2, true, cb);
+                    eventRequest(account, channelId, messageId, eventType, payload, recId, t2, true, cb);
                 });
                 return;
             }
@@ -320,8 +399,17 @@ public class SvipeDiscover {
         });
     }
 
+    /**
+     * The recommendation id of a whole response page, or null. The reels feed sends one; the discover
+     * and long-form responses do not (yet) — reading it here rather than assuming means the client
+     * starts attributing their events the day the server adds the field.
+     */
+    private static String recIdOf(JSONObject res) {
+        return res == null || res.isNull("recommendation_id") ? null : res.optString("recommendation_id", null);
+    }
+
     /** Parse a {items:[FeedItem]} array into Items; rows without a username are skipped (can't resolve). */
-    private static void parseItems(JSONArray arr, List<Item> out) {
+    private static void parseItems(JSONArray arr, String recId, List<Item> out) {
         if (arr == null) return;
         for (int i = 0; i < arr.length(); i++) {
             JSONObject o = arr.optJSONObject(i);
@@ -339,6 +427,7 @@ public class SvipeDiscover {
             it.height = o.optInt("height", 0);
             it.durationMs = o.optInt("duration_ms", 0);
             it.shareUrl = o.isNull("share_url") ? null : o.optString("share_url", null);
+            it.recId = recId;
             out.add(it);
         }
     }

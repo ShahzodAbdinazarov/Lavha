@@ -52,6 +52,8 @@ import org.telegram.svipe.SvipeQueuePlan;
 import org.telegram.svipe.SvipeReelQueue;
 import org.telegram.svipe.SvipeWatchedSet;
 import org.telegram.svipe.SvipeWatchEvent;
+import org.telegram.svipe.video.SvipeRefResolver;
+import org.telegram.svipe.video.SvipeVideoLadder;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.StatsController;
@@ -265,7 +267,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private final HashMap<String, FeedItem> fileNameToItem = new HashMap<>(); // full-download completion lookup
     private final HashSet<Long> fullDownloadStarted = new HashSet<>();        // docIds with a cacheType-0 load in flight
 
-    private static class FeedItem {
+    private static class FeedItem implements SvipeRefResolver.Ref {
         long channelId;
         int messageId;
         String username;
@@ -288,6 +290,18 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         // Real comment availability, resolved via getDiscussionMessage (the message's isComments()
         // flag can be stale — true but with no actual discussion -> MSG_ID_INVALID). null=unknown.
         Boolean commentsAvailable;
+
+        // ---- SvipeRefResolver.Ref: the fields above ARE the resolve state, so nothing moved ----
+        @Override public long channelId() { return channelId; }
+        @Override public int messageId() { return messageId; }
+        @Override public String username() { return username; }
+        @Override public MessageObject message() { return mo; }
+        @Override public void setMessage(MessageObject m) { mo = m; }
+        @Override public TLRPC.Chat chat() { return chat; }
+        @Override public void setChat(TLRPC.Chat c) { chat = c; }
+        @Override public boolean isResolving() { return resolving; }
+        @Override public void setResolving(boolean r) { resolving = r; }
+        @Override public java.util.ArrayList<Runnable> resolveCallbacks() { return resolveCallbacks; }
     }
 
     public ReelsActivity(Bundle args) {
@@ -824,9 +838,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 // (or the original, for legacy entries) is fully on disk; playback pins exactly that
                 // cached file, so a "present" item is one the player can really play offline.
                 boolean present;
-                ArrayList<VideoPlayer.Quality> qs = qualitiesFor(mo);
+                ArrayList<VideoPlayer.Quality> qs = SvipeVideoLadder.qualitiesFor(account, mo);
                 if (qs != null) {
-                    present = cachedQualityOf(qs) != null;
+                    present = SvipeVideoLadder.cachedQualityOf(qs) != null;
                 } else {
                     File f = FileLoader.getInstance(account).getPathToAttach(mo.getDocument(), null, false, false);
                     present = f != null && f.exists();
@@ -1185,114 +1199,30 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
      * Resolve a feed item's channel + message over MTProto (2 round-trips) and cache the
      * MessageObject on the FeedItem. Reused for both the visible page (then play) and read-ahead
      * prefetch (no play). Idempotent: skips if already resolved or a resolve is in flight.
+     *
+     * {@link SvipeRefResolver} owns the round-trips and the in-flight-callback queue (shared with the
+     * long-form player); the reel-specific enrichment and the retry policy stay here.
      */
     private void resolveItem(final FeedItem item, final Runnable onResolved) {
-        if (item.mo != null && item.chat != null) { if (onResolved != null) onResolved.run(); return; }
-        // Queue-restored item: we already hold a playable MessageObject, only the chat is missing
-        // (needed for the action rail). Fill it with one resolveUsername round-trip — skip getMessages.
-        if (item.mo != null && item.chat == null) { resolveChatOnly(item, onResolved); return; }
-        // Full resolve (no mo yet). Queue the caller's callback so an already-in-flight resolve (e.g.
-        // one started by prefetch/read-ahead) still notifies THIS caller when it completes — otherwise
-        // playPosition's start-playback intent is silently dropped and the reel spins forever until a
-        // manual skip-and-back.
-        if (onResolved != null) item.resolveCallbacks.add(onResolved);
-        if (item.resolving) return;
-        item.resolving = true;
-        TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
-        req.username = item.username.toLowerCase();
-        ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
-            if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
-                onResolveFail(item, true); // transient network failure — retry
-                return;
-            }
-            TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
-            MessagesController.getInstance(account).putUsers(rp.users, false);
-            MessagesController.getInstance(account).putChats(rp.chats, false);
-            TLRPC.Chat chat = null;
-            if (rp.chats != null) {
-                for (int i = 0; i < rp.chats.size(); i++) {
-                    if (rp.chats.get(i).id == item.channelId) { chat = rp.chats.get(i); break; }
-                }
-                if (chat == null && !rp.chats.isEmpty()) chat = rp.chats.get(0);
-            }
-            if (chat == null) {
-                onResolveFail(item, false); // channel not found — give up
-                return;
-            }
-            final TLRPC.Chat fchat = chat;
-
-            TLRPC.TL_inputChannel inputChannel = new TLRPC.TL_inputChannel();
-            inputChannel.channel_id = chat.id;
-            inputChannel.access_hash = chat.access_hash;
-            TLRPC.TL_channels_getMessages gm = new TLRPC.TL_channels_getMessages();
-            gm.channel = inputChannel;
-            gm.id.add(item.messageId);
-            ConnectionsManager.getInstance(account).sendRequest(gm, (resp2, err2) -> {
-                if (err2 != null || !(resp2 instanceof TLRPC.messages_Messages)) {
-                    onResolveFail(item, true); // transient network failure — retry
-                    return;
-                }
-                TLRPC.messages_Messages mm = (TLRPC.messages_Messages) resp2;
-                MessagesController.getInstance(account).putUsers(mm.users, false);
-                MessagesController.getInstance(account).putChats(mm.chats, false);
-                if (mm.messages == null || mm.messages.isEmpty()) {
-                    onResolveFail(item, false); // message gone — give up
-                    return;
-                }
-                final MessageObject mo = new MessageObject(account, mm.messages.get(0), false, true);
-                TLRPC.Document doc = mo.getDocument();
-                if (doc == null || !MessageObject.isVideoDocument(doc)) {
-                    onResolveFail(item, false); // not a playable video — give up
-                    return;
-                }
-                AndroidUtilities.runOnUIThread(() -> {
-                    item.resolving = false;
-                    item.resolveAttempts = 0;
-                    item.mo = mo;
-                    item.chat = fchat;
-                    item.liked = isLiked(mo);
-                    item.likeCount = totalReactions(mo);
-                    preloadMedia(item);
-                    drainResolveCallbacks(item); // wakes playPosition's queued start-playback intent
-                });
-            });
-        });
+        SvipeRefResolver.resolve(account, item, onResolved, resolveDelegate);
     }
 
-    /** Fill only the missing {@code chat} on a queue-restored item (one resolveUsername round-trip). */
-    private void resolveChatOnly(final FeedItem item, final Runnable onResolved) {
-        if (item.resolving) return;
-        item.resolving = true;
-        TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
-        req.username = item.username.toLowerCase();
-        ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
-            AndroidUtilities.runOnUIThread(() -> {
-                item.resolving = false;
-                if (error == null && response instanceof TLRPC.TL_contacts_resolvedPeer) {
-                    TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
-                    MessagesController.getInstance(account).putUsers(rp.users, false);
-                    MessagesController.getInstance(account).putChats(rp.chats, false);
-                    if (rp.chats != null) {
-                        for (int i = 0; i < rp.chats.size(); i++) {
-                            if (rp.chats.get(i).id == item.channelId) { item.chat = rp.chats.get(i); break; }
-                        }
-                        if (item.chat == null && !rp.chats.isEmpty()) item.chat = rp.chats.get(0);
-                    }
-                }
-                if (onResolved != null) onResolved.run();
-            });
-        });
-    }
-
-    /** Run and clear every queued waiter for this item's resolve (safe on success or on give-up). */
-    private void drainResolveCallbacks(FeedItem item) {
-        if (item.resolveCallbacks.isEmpty()) return;
-        java.util.ArrayList<Runnable> cbs = new java.util.ArrayList<>(item.resolveCallbacks);
-        item.resolveCallbacks.clear();
-        for (int i = 0; i < cbs.size(); i++) {
-            try { cbs.get(i).run(); } catch (Exception e) { FileLog.e(e); }
+    private final SvipeRefResolver.Delegate resolveDelegate = new SvipeRefResolver.Delegate() {
+        @Override
+        public void onResolved(SvipeRefResolver.Ref ref) {
+            FeedItem item = (FeedItem) ref;
+            item.resolveAttempts = 0;
+            item.liked = isLiked(item.mo);
+            item.likeCount = totalReactions(item.mo);
+            preloadMedia(item);
         }
-    }
+
+        @Override
+        public void onFailed(SvipeRefResolver.Ref ref, boolean retryable) {
+            onResolveFail((FeedItem) ref, retryable);
+        }
+    };
+
 
     /**
      * A resolve attempt failed. A transient (network) failure for a reel someone is waiting on gets a
@@ -1316,7 +1246,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     }
                 }, RESOLVE_RETRY_DELAY_MS);
             } else {
-                drainResolveCallbacks(item); // give up cleanly so no queued play intent leaks
+                SvipeRefResolver.drainCallbacks(item); // give up cleanly so no queued play intent leaks
             }
         });
     }
@@ -1369,8 +1299,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     /** Is this item playable entirely from disk (ANY rendition or the original fully present)? */
     private boolean fileFullyPresent(FeedItem it) {
         if (it == null || it.mo == null) return false;
-        ArrayList<VideoPlayer.Quality> qualities = qualitiesFor(it.mo);
-        if (qualities != null) return cachedQualityOf(qualities) != null;
+        ArrayList<VideoPlayer.Quality> qualities = SvipeVideoLadder.qualitiesFor(account, it.mo);
+        if (qualities != null) return SvipeVideoLadder.cachedQualityOf(qualities) != null;
         TLRPC.Document doc = it.mo.getDocument();
         if (doc == null) return false;
         File f = FileLoader.getInstance(account).getPathToAttach(doc, null, false, false);
@@ -1420,12 +1350,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             }
             // The queue stores ONE file per reel: the target rendition when a ladder exists (~720p,
             // half the bytes of a 1080p source), the original document otherwise.
-            VideoPlayer.VideoUri target = targetRendition(qualitiesFor(it.mo));
+            VideoPlayer.VideoUri target = SvipeVideoLadder.targetRendition(SvipeVideoLadder.qualitiesFor(account, it.mo));
             TLRPC.Document doc = target != null ? target.document : it.mo.getDocument();
             if (doc == null) continue;
             // Never prefetch long-form into the offline cushion: one such file would consume a large
             // slice of MAX_QUEUE_BYTES and evict the reels the cushion exists for.
-            if (isLongForm(doc)) continue;
+            if (SvipeVideoLadder.isLongForm(doc)) continue;
             if (fileFullyPresent(it)) {
                 enqueueResolved(it, true); // already on disk — make sure it's persisted
                 have++;
@@ -1461,7 +1391,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (watchedSet != null && watchedSet.isWatched(it.channelId, it.messageId)) return;
         // The queue is the instant-cold-start cushion for REELS. Long-form entries only reach the
         // player as a Search-grid seed, are never worth a cold-start slot, and would blow the budget.
-        if (isLongForm(it.mo.getDocument())) return;
+        if (SvipeVideoLadder.isLongForm(it.mo.getDocument())) return;
         if (reelQueue.contains(it.channelId, it.messageId)) {
             if (downloaded) {
                 reelQueue.markDownloaded(it.channelId, it.messageId);
@@ -1480,7 +1410,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         e.recId = it.recId;
         // Persist the file the queue actually stores — the target rendition when a ladder exists.
         // sizeBytes drives the disk budget, so it must match the bytes really downloaded.
-        VideoPlayer.VideoUri target = targetRendition(qualitiesFor(it.mo));
+        VideoPlayer.VideoUri target = SvipeVideoLadder.targetRendition(SvipeVideoLadder.qualitiesFor(account, it.mo));
         TLRPC.Document doc = target != null ? target.document : it.mo.getDocument();
         e.documentId = doc != null ? doc.id : 0;
         e.sizeBytes = doc != null ? doc.size : 0;
@@ -1500,7 +1430,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (item == null || item.mo == null || item.preloadStarted) return;
         try {
             if (!item.preloadBypassGate && !DownloadController.getInstance(account).canPreloadStories()) return;
-            ArrayList<VideoPlayer.Quality> qualities = qualitiesFor(item.mo);
+            ArrayList<VideoPlayer.Quality> qualities = SvipeVideoLadder.qualitiesFor(account, item.mo);
             if (qualities != null) {
                 // Laddered reel: warm the HLS manifests (a few hundred bytes each — the player
                 // fetches the selected rung's playlist synchronously at prepare, so having them on
@@ -1515,7 +1445,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                         }
                     }
                 }
-                VideoPlayer.VideoUri target = targetRendition(qualities);
+                VideoPlayer.VideoUri target = SvipeVideoLadder.targetRendition(qualities);
                 if (target != null && target.document != null && !target.isCached()) {
                     FileLoader.getInstance(account).loadFile(target.document, item.mo, item.preloadPriority, 10);
                 }
@@ -1543,10 +1473,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             if (cur != null && cur.mo != null) {
                 TLRPC.Document cd = cur.mo.getDocument();
                 if (cd != null) protect.add(cd.id);
-                for (TLRPC.Document d : ladderDocsWithManifests(cur.mo)) protect.add(d.id);
+                for (TLRPC.Document d : SvipeVideoLadder.ladderDocsWithManifests(account, cur.mo)) protect.add(d.id);
             }
             // Under HLS any rung — or its manifest — may hold the in-flight op; cancel them all.
-            ArrayList<TLRPC.Document> docs = ladderDocsWithManifests(item.mo);
+            ArrayList<TLRPC.Document> docs = SvipeVideoLadder.ladderDocsWithManifests(account, item.mo);
             if (docs.isEmpty()) {
                 TLRPC.Document doc = item.mo.getDocument();
                 if (doc != null) docs.add(doc);
@@ -1569,7 +1499,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private void cancelReelStreams(FeedItem item) {
         if (item == null || item.mo == null) return;
         try {
-            ArrayList<TLRPC.Document> docs = ladderDocsWithManifests(item.mo);
+            ArrayList<TLRPC.Document> docs = SvipeVideoLadder.ladderDocsWithManifests(account, item.mo);
             if (docs.isEmpty()) {
                 TLRPC.Document d = item.mo.getDocument();
                 if (d != null) docs.add(d);
@@ -1588,156 +1518,6 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (h != null) h.showLoading(false);
     }
 
-    // ---------------- Telegram ABR ladder (multi-quality) helpers ----------------
-    // Popular channels' videos arrive with server-made renditions (480/720/1080) + per-rendition
-    // HLS manifests in media.alt_documents. Playing through VideoPlayer's qualities path gives
-    // Instagram-style adaptive streaming: ExoPlayer picks a rung the CURRENT bandwidth can sustain
-    // and switches mid-play, so a slowing connection degrades quality instead of buffering.
-
-    /**
-     * The quality ladder for a reel, or null when the message carries none (small channels) —
-     * callers then use the legacy single-document path. Recomputed per call: VideoUri cached-flags
-     * are resolved at build time, so a fresh call sees files downloaded since the last one.
-     *
-     * reference=0: inspection only (doc ids, sizes, cached-flags for priorities / cancels / budget /
-     * presence). A real MTProto file reference is minted ONLY on the playback path
-     * ({@link #playbackQualitiesFor}), because {@link FileLoader#getFileReference} inserts into a
-     * process-lifetime map that is never pruned — calling it in the per-swipe inspection loops would
-     * leak one MessageObject-retaining entry per call.
-     */
-    private ArrayList<VideoPlayer.Quality> qualitiesFor(MessageObject mo) {
-        return buildQualities(mo, 0);
-    }
-
-    /** Ladder built with a live file reference embedded in each stream URI — for preparePlayer only. */
-    private ArrayList<VideoPlayer.Quality> playbackQualitiesFor(MessageObject mo) {
-        return buildQualities(mo, FileLoader.getInstance(account).getFileReference(mo));
-    }
-
-    private ArrayList<VideoPlayer.Quality> buildQualities(MessageObject mo, int reference) {
-        if (mo == null || mo.messageOwner == null) return null;
-        TLRPC.MessageMedia media = mo.messageOwner.media;
-        if (!(media instanceof TLRPC.TL_messageMediaDocument) || media.alt_documents.isEmpty()) return null;
-        try {
-            // useFileDatabaseQueue=false — same flag the legacy VideoUri.of path uses here, so
-            // "cached" means exactly "the player can open it from disk right now".
-            ArrayList<VideoPlayer.Quality> q = VideoPlayer.getQualities(
-                    account, media.document, media.alt_documents, reference, false, false);
-            return q == null || q.isEmpty() ? null : q;
-        } catch (Exception e) {
-            FileLog.e(e);
-            return null;
-        }
-    }
-
-    /** Every doc a reel's playback touches — video rungs AND their HLS manifests — for cancels. */
-    private ArrayList<TLRPC.Document> ladderDocsWithManifests(MessageObject mo) {
-        ArrayList<VideoPlayer.Quality> qs = qualitiesFor(mo);
-        ArrayList<TLRPC.Document> docs = ladderVideoDocs(qs);
-        if (qs != null) {
-            for (VideoPlayer.Quality q : qs) {
-                for (VideoPlayer.VideoUri u : q.uris) {
-                    if (u.manifestDocument != null) docs.add(u.manifestDocument);
-                }
-            }
-        }
-        return docs;
-    }
-
-    /** Every playable rendition document of the ladder — the unit for priorities and cancels. */
-    private static ArrayList<TLRPC.Document> ladderVideoDocs(ArrayList<VideoPlayer.Quality> qualities) {
-        ArrayList<TLRPC.Document> docs = new ArrayList<>();
-        if (qualities == null) return docs;
-        for (VideoPlayer.Quality q : qualities) {
-            for (VideoPlayer.VideoUri u : q.uris) {
-                if (u.document != null) docs.add(u.document);
-            }
-        }
-        return docs;
-    }
-
-    /**
-     * The ONE file a reel is stored as (offline queue, Wi-Fi top-ups, dwell escalation): a rendition
-     * already on disk if any (never download a second copy of the same reel), else the highest rung
-     * at or below 720p — sharp on a phone at roughly half the bytes of a 1080p source — preferring
-     * the smaller file inside a rung (the more efficient codec), else the smallest rung available.
-     */
-    private static VideoPlayer.VideoUri targetRendition(ArrayList<VideoPlayer.Quality> qualities) {
-        if (qualities == null) return null;
-        VideoPlayer.VideoUri best = null, smallest = null;
-        for (VideoPlayer.Quality q : qualities) {
-            for (VideoPlayer.VideoUri u : q.uris) {
-                if (u.document == null) continue;
-                if (u.isCached()) return u;
-                if (smallest == null || u.size < smallest.size) smallest = u;
-                int p = Math.min(u.width, u.height);
-                if (p <= 720 + 55) { // the same rung tolerance Quality.p() uses
-                    int bp = best == null ? 0 : Math.min(best.width, best.height);
-                    if (best == null || bp < p || (bp == p && u.size < best.size)) {
-                        best = u;
-                    }
-                }
-            }
-        }
-        return best != null ? best : smallest;
-    }
-
-    /** The Quality wrapping a fully-cached rendition (pin it -> plays from disk, works offline), or null for AUTO. */
-    private static VideoPlayer.Quality cachedQualityOf(ArrayList<VideoPlayer.Quality> qualities) {
-        if (qualities == null) return null;
-        for (VideoPlayer.Quality q : qualities) {
-            for (VideoPlayer.VideoUri u : q.uris) {
-                if (u.isCached()) return q;
-            }
-        }
-        return null;
-    }
-
-    /** Width/height are known from the document long before the first frame — no layout jump. */
-    private static float videoAspect(TLRPC.Document doc) {
-        if (doc == null) return 0f;
-        for (int i = 0; i < doc.attributes.size(); i++) {
-            TLRPC.DocumentAttribute a = doc.attributes.get(i);
-            if (a instanceof TLRPC.TL_documentAttributeVideo && a.h > 0) {
-                return (float) a.w / a.h;
-            }
-        }
-        return 0f;
-    }
-
-    /**
-     * Anything at least this long is treated as LONG-FORM rather than a reel. Such an item can only
-     * have arrived as a seed from the Video tab, since /v1/feed is capped at 5 minutes.
-     *
-     * MUST stay in sync with the server's ``longform_min_duration_ms`` (svipe-backend
-     * app/config.py) — that is the floor of the long-form pipe, so it is exactly the shortest clip
-     * that can reach this player from the Video tab. It was 5 min here while the server's floor was
-     * 3, which let every 3-5 minute horizontal video escape all three guards below: it looped, it
-     * got a full cacheType-0 pull after 3 seconds of dwell, and it was persisted into the 600 MB
-     * offline reels cushion.
-     */
-    private static final long LONG_FORM_MIN_DURATION_MS = 3 * 60 * 1000L;
-
-    /**
-     * Long-form guard. Three reels behaviours are actively harmful for a 40-minute video and are
-     * switched off for these items:
-     *   - looping (a lecture must end, not restart);
-     *   - the "dwelled past MIN_WATCHED_MS -> pull the whole file" escalation in {@link #startPlayback}
-     *     (3 seconds of glancing would fetch hundreds of MB);
-     *   - offline-queue persistence, since one such file exceeds a large slice of the whole
-     *     {@link SvipeQueuePlan#MAX_QUEUE_BYTES} cushion and would evict every cached reel.
-     * Streaming playback and all watch telemetry are unaffected.
-     */
-    private static boolean isLongForm(TLRPC.Document doc) {
-        if (doc == null) return false;
-        for (int i = 0; i < doc.attributes.size(); i++) {
-            TLRPC.DocumentAttribute a = doc.attributes.get(i);
-            if (a instanceof TLRPC.TL_documentAttributeVideo) {
-                return (long) (a.duration * 1000.0) >= LONG_FORM_MIN_DURATION_MS;
-            }
-        }
-        return false;
-    }
 
     private void startPlayback(MessageObject mo, TLRPC.Document doc, int pos, FeedItem item) {
         // Async callers (resolve callbacks, the start checker, deferred recovery) can land after the
@@ -1747,12 +1527,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         ReelsHolder holder = holderAt(pos);
         if (holder == null) return;
         try {
-            float ar = videoAspect(doc);
+            float ar = SvipeVideoLadder.videoAspect(doc);
             if (ar > 0) holder.aspect.setAspectRatio(ar, 0);
 
             // A horizontal long-form entry seeded from the Search grid must not loop and must not be
-            // pulled down in full — see isLongForm.
-            final boolean longForm = isLongForm(doc);
+            // pulled down in full — see SvipeVideoLadder.isLongForm.
+            final boolean longForm = SvipeVideoLadder.isLongForm(doc);
             final boolean prepared = nextPlayer != null && nextPlayerPos == pos;
             VideoPlayer player;
             if (prepared) {
@@ -1773,9 +1553,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             // looping/seeking seamlessly while a skipped reel costs only the streamed prefix.
             // Real reference: this ladder feeds preparePlayer, whose stream URIs must carry a live
             // file reference (one getFileReference per played reel — legacy paid the same).
-            final ArrayList<VideoPlayer.Quality> qualities = playbackQualitiesFor(mo);
+            final ArrayList<VideoPlayer.Quality> qualities = SvipeVideoLadder.playbackQualitiesFor(account, mo);
             if (qualities != null) {
-                for (TLRPC.Document d : ladderVideoDocs(qualities)) {
+                for (TLRPC.Document d : SvipeVideoLadder.ladderVideoDocs(qualities)) {
                     FileStreamLoadOperation.setPriorityForDocument(d, FileLoader.PRIORITY_HIGH);
                 }
             } else {
@@ -1794,7 +1574,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                         if (qualities != null) {
                             full = boundPlayer.getCurrentDocument();
                             if (full == null) {
-                                VideoPlayer.VideoUri target = targetRendition(qualities);
+                                VideoPlayer.VideoUri target = SvipeVideoLadder.targetRendition(qualities);
                                 if (target != null) full = target.document;
                             }
                         }
@@ -1899,7 +1679,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     // Adaptive path: a fully-cached rendition is pinned (plays from disk, works
                     // offline); otherwise AUTO — ExoPlayer starts on a rung the bandwidth estimate
                     // sustains and adapts mid-play instead of buffering.
-                    VideoPlayer.Quality cached = cachedQualityOf(qualities);
+                    VideoPlayer.Quality cached = SvipeVideoLadder.cachedQualityOf(qualities);
                     FileLog.d("svipe: play pos=" + pos + " hls rungs=" + qualities.size()
                             + " source=" + (cached != null ? "LOCAL-cache" : "network-auto")
                             + " fromQueue=" + item.fromQueue);
@@ -2132,7 +1912,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         // tiny MANIFEST fetch — may own the wedged op; a surviving wedged manifest op would be
         // re-attached by the rebuild's playlist fetch and park it again. Reset all of them.
         try {
-            ArrayList<TLRPC.Document> ownDocs = ladderDocsWithManifests(item.mo);
+            ArrayList<TLRPC.Document> ownDocs = SvipeVideoLadder.ladderDocsWithManifests(account, item.mo);
             if (ownDocs.isEmpty()) ownDocs.add(doc);
             for (TLRPC.Document d : ownDocs) {
                 FileLoader.getInstance(account).cancelLoadFile(d);
@@ -2199,7 +1979,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             if (doc == null) return;
             VideoPlayer p = new VideoPlayer(true, false); // Svipe: pauseOther=true -> mutual exclusion with music
             p.setIsReels();
-            p.setLooping(!isLongForm(doc));
+            p.setLooping(!SvipeVideoLadder.isLongForm(doc));
             // VideoPlayer NPEs if a state change arrives with no delegate — give the idle player
             // a no-op one; startPlayback swaps in the real holder-bound delegate on use.
             p.setDelegate(new VideoPlayer.VideoPlayerDelegate() {
@@ -2219,12 +1999,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             // Buffer the next reel at NORMAL — fast enough to be ready by the swipe, but still below
             // the current reel's HIGH stream and above the LOW background full-downloads, so it never
             // starves what's playing. (Promotion in startPlayback re-maps everything to HIGH.)
-            ArrayList<VideoPlayer.Quality> qualities = playbackQualitiesFor(item.mo);
+            ArrayList<VideoPlayer.Quality> qualities = SvipeVideoLadder.playbackQualitiesFor(account, item.mo);
             if (qualities != null) {
-                for (TLRPC.Document d : ladderVideoDocs(qualities)) {
+                for (TLRPC.Document d : SvipeVideoLadder.ladderVideoDocs(qualities)) {
                     FileStreamLoadOperation.setPriorityForDocument(d, FileLoader.PRIORITY_NORMAL);
                 }
-                p.preparePlayer(qualities, cachedQualityOf(qualities));
+                p.preparePlayer(qualities, SvipeVideoLadder.cachedQualityOf(qualities));
             } else {
                 int reference = FileLoader.getInstance(account).getFileReference(item.mo);
                 VideoPlayer.VideoUri vu = VideoPlayer.VideoUri.of(account, doc, null, reference, false);

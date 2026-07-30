@@ -180,6 +180,13 @@
     <string name="SvipeUnblockChannel">Kanalni blokdan chiqarish</string>
     <string name="SvipeUnblockChannelConfirm">Bu kanal blokdan chiqarilsinmi? Uning videolari yana lentangizda ko\'rinishi mumkin.</string>
     <string name="SvipeSearchArtistsAndTracks">Qo\'shiq yoki ijrochini qidiring</string>
+    <string name="SvipeRelatedVideos">O\'xshash videolar</string>
+    <string name="SvipeSharePromo">svipe bilan telegramda video ko\'ring</string>
+    <string name="SvipeVideoAutoplay">Avtomatik ijro</string>
+    <string name="SvipeVideoUpNext">Keyingi video</string>
+    <string name="SvipeVideoLoop">Videoni takrorlash</string>
+    <string name="SvipeVideoDownload">Yuklab olish</string>
+    <string name="SvipeVideoDownloaded">Yuklab olindi</string>
     <string name="SvipeSearchVideos">Videolarni qidirish</string>
     <string name="SvipeListenTimeLabel">%1$s • %2$d marta</string>
 

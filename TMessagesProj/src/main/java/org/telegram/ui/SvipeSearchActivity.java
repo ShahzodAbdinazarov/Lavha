@@ -40,14 +40,20 @@ public class SvipeSearchActivity extends DialogsActivity {
         // via the fragment), plus the share sheet and the report flow.
         exploreGrid.setFragment(this);
         exploreGrid.setOnReelTapListener((items, position) -> {
-            // A tapped SEARCH result is a query→click signal — log it before opening the reels player
+            final org.telegram.svipe.SvipeDiscover.Item ref =
+                    position >= 0 && position < items.size() ? items.get(position) : null;
+            // A tapped SEARCH result is a query→click signal — log it before opening the player
             // (browse-grid taps carry no query, so svipeLogVideoResultClick no-ops there).
             if (exploreGrid.svipeIsSearchActive()) {
-                final org.telegram.svipe.SvipeDiscover.Item ref =
-                        position >= 0 && position < items.size() ? items.get(position) : null;
                 svipeLogVideoResultClick(exploreGrid.svipeActiveQuery(), ref);
             }
-            presentFragment(ReelsActivity.ofDiscoverSeed(items, position));
+            // A full-width long-form card opens the YouTube-shaped watch page; a vertical short keeps
+            // opening the reels player, seeded so its swipe feed continues from the tapped reel.
+            if (ref != null && ref.isLongForm()) {
+                presentFragment(new SvipeWatchActivity(ref));
+            } else {
+                presentFragment(ReelsActivity.ofDiscoverSeed(items, position));
+            }
         });
         return exploreGrid;
     }

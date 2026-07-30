@@ -307,6 +307,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
     public FrameLayout frameLayout;
     private FireworksOverlay fireworksOverlay;
     private BottomSheetTabsOverlay bottomSheetTabsOverlay;
+    // Svipe: the long-form video player's one and only surface. App-level so it outlives every
+    // fragment (mini player) and is never re-parented (inline/fullscreen/mini are pure geometry).
+    private org.telegram.svipe.video.SvipeVideoStage svipeVideoStage;
     public DrawerLayoutContainer drawerLayoutContainer;
     private PasscodeViewDialog passcodeDialog;
     private List<PasscodeView> overlayPasscodeViews = new ArrayList<>();
@@ -328,6 +331,11 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
 
     public FrameLayout getFrameLayout() {
         return frameLayout;
+    }
+
+    /** Svipe: the long-form player overlay, or null before onCreate finished. */
+    public org.telegram.svipe.video.SvipeVideoStage getSvipeVideoStage() {
+        return svipeVideoStage;
     }
 
     private Dialog localeDialog;
@@ -533,6 +541,11 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         frameLayout.addView(themeSwitchSunView, LayoutHelper.createFrame(48, 48));
         themeSwitchSunView.setVisibility(View.GONE);
         frameLayout.addView(bottomSheetTabsOverlay = new BottomSheetTabsOverlay(this));
+        // Svipe: above the fragment stack AND above the floating bottom tab bar, same window, no
+        // WindowManager permission — the precedent is bottomSheetTabsOverlay right above. It consumes
+        // only the touches that land on the player, so everything else falls through to the fragments.
+        frameLayout.addView(svipeVideoStage = new org.telegram.svipe.video.SvipeVideoStage(this),
+                LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         frameLayout.addView(fireworksOverlay = new FireworksOverlay(this) {
             {
                 setVisibility(GONE);
@@ -6777,6 +6790,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             PhotoViewer.getInstance().onPause();
         }
         StoryRecorder.onPause();
+        // Svipe: backgrounding pauses the long-form player — background audio playback is out of
+        // scope, and the position is kept so returning resumes where the user left off.
+        org.telegram.svipe.video.SvipeVideoPlayerController.getInstance().onActivityPause();
 
         if (VoIPFragment.getInstance() != null) {
             VoIPFragment.onPause();
@@ -6901,6 +6917,8 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         }
         Bulletin.removeDelegate(frameLayout);
         VideoAds.dropCache();
+        // Svipe: the player's TextureView dies with this activity, so nothing may outlive it.
+        org.telegram.svipe.video.SvipeVideoPlayerController.getInstance().onActivityDestroyed(svipeVideoStage);
 
         clearFragments();
         super.onDestroy();
@@ -7133,6 +7151,11 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         AndroidUtilities.resetTabletFlag();
         invalidateTabletMode();
         checkLayout();
+        // Svipe: AFTER checkDisplaySize + checkLayout, so the stage re-measures against the new
+        // window. It only recomputes its rects — the player's mode is never derived from the config.
+        if (svipeVideoStage != null) {
+            svipeVideoStage.onConfigurationChanged();
+        }
         PipRoundVideoView pipRoundVideoView = PipRoundVideoView.getInstance();
         if (pipRoundVideoView != null) {
             pipRoundVideoView.onConfigurationChanged();
@@ -8340,6 +8363,13 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         }
         if (bottomSheetTabsOverlay != null && bottomSheetTabsOverlay.isOpen) {
             if (invoked) bottomSheetTabsOverlay.onBackPressed();
+            return false;
+        }
+        // Svipe: back leaves the long-form player's fullscreen, and ONLY on an explicit mode check —
+        // never on a window-aspect guess, which is how PhotoViewer loses fullscreen on rotation.
+        if (org.telegram.svipe.video.SvipeVideoPlayerController.getInstance().getMode()
+                == org.telegram.svipe.video.SvipeVideoPlayerController.MODE_FULLSCREEN) {
+            if (invoked) org.telegram.svipe.video.SvipeVideoPlayerController.getInstance().handleBackPressed();
             return false;
         }
         if (!SearchTagsList.onBackPressedRenameTagAlert(invoked)) {
