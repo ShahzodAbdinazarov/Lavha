@@ -126,6 +126,11 @@ public class SvipeVideoSearchHistory {
             o.put("message_id", ref.messageId);
             o.put("username", ref.username);
             if (ref.topicId != null) o.put("topic_id", ref.topicId);
+            // Dimensions must round-trip: a recent entry renders in the same mixed-orientation grid,
+            // so dropping them here would demote every remembered horizontal video to a portrait tile.
+            if (ref.width > 0) o.put("width", ref.width);
+            if (ref.height > 0) o.put("height", ref.height);
+            if (ref.durationMs > 0) o.put("duration_ms", ref.durationMs);
             return o;
         } catch (Exception ex) {
             FileLog.e(ex);
@@ -142,6 +147,9 @@ public class SvipeVideoSearchHistory {
         ref.messageId = o.optInt("message_id");
         ref.username = username;
         ref.topicId = o.isNull("topic_id") ? null : o.optInt("topic_id");
+        ref.width = o.optInt("width", 0);       // absent in entries stored before the mixed grid
+        ref.height = o.optInt("height", 0);
+        ref.durationMs = o.optInt("duration_ms", 0);
         return ref;
     }
 }

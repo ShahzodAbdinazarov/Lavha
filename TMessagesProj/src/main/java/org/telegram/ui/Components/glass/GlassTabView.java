@@ -549,6 +549,8 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
         SETTINGS(R.raw.tab_settings),
         REELS(R.raw.tab_reels, R.raw.tab_reels_reverse),
         SEARCH(R.raw.tab_search),
+        /** YouTube-style play badge — the Svipe video/search tab (see scripts/gen_tab_video_icon.py). */
+        VIDEO(R.raw.tab_video),
 
         CHECKLIST(R.raw.tab_checklist, R.raw.tab_checklist_reverse),
         COLORS(R.raw.tab_colors, R.raw.tab_colors_reverse),

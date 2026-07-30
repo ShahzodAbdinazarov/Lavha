@@ -11,6 +11,7 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.text.TextPaint;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -80,6 +81,11 @@ public class SvipeExploreGrid extends RecyclerListView {
     private static final int TYPE_RECENT_HEADER = 2;
     private static final int TYPE_EMPTY = 3;
     // 3 was TYPE_RECENT_ROW (a recent-search QUERY text row); recents now reuse the reel-thumbnail cell.
+    private static final int TYPE_PHOTO_WIDE = 4;  // a HORIZONTAL/long-form video: full-width 16:9 card
+    private static final int TYPE_SKELETON_WIDE = 5;
+    // Widest card we will draw. Beyond this a "horizontal" video is a letterboxed banner, so clamp and
+    // let the thumbnail crop instead of handing the row to a 30dp-tall sliver.
+    private static final float MAX_CARD_ASPECT = 2.4f;
 
     private final int account;
     private final GridLayoutManager layoutManager;
@@ -164,18 +170,22 @@ public class SvipeExploreGrid extends RecyclerListView {
         setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
 
         layoutManager = new GridLayoutManager(context, SPAN_COUNT);
-        // The "Recent" header and the no-results notice span the full width; every video cell (browse,
-        // search result, or recent) keeps its 3-up column.
+        // The "Recent" header, the no-results notice and every HORIZONTAL video card span the full
+        // width; vertical reels keep their 3-up column. The server emits verticals in complete runs of
+        // SPAN_COUNT, so each run lands as one full row with no holes.
         layoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
             @Override
             public int getSpanSize(int position) {
                 if (showingSkeleton()) {
-                    return 1;
+                    return isWideSkeleton(position) ? SPAN_COUNT : 1;
                 }
                 if (searchEmpty()) {
                     return SPAN_COUNT;
                 }
-                return position < recentHeaderRows() ? SPAN_COUNT : 1;
+                if (position < recentHeaderRows()) {
+                    return SPAN_COUNT;
+                }
+                return isWideAt(position) ? SPAN_COUNT : 1;
             }
         });
         setLayoutManager(layoutManager);
@@ -402,6 +412,30 @@ public class SvipeExploreGrid extends RecyclerListView {
     /** The GridItem list currently backing the reel thumbnails: recents when up, else browse/search. */
     private List<GridItem> currentGrid() {
         return hasRecents() ? recentItems : items;
+    }
+
+    /**
+     * True when the video at this ADAPTER position is horizontal (a full-width card). Decided purely
+     * from the server-sent dimensions on the reference, so it is stable from the first layout pass —
+     * deriving it from the resolved Telegram document instead would make cells change span/height as
+     * MTProto resolves, reflowing the grid under the user's finger.
+     */
+    private boolean isWideAt(int position) {
+        final int idx = position - recentHeaderRows();
+        final List<GridItem> grid = currentGrid();
+        if (idx < 0 || idx >= grid.size()) {
+            return false;
+        }
+        final GridItem gi = grid.get(idx);
+        return gi.ref != null && gi.ref.isLandscape();
+    }
+
+    /**
+     * Shimmer placeholders mirror the real mix (one full-width card, then a 3-up row) so the skeleton
+     * doesn't re-flow into a different shape the moment the first page lands.
+     */
+    private static boolean isWideSkeleton(int position) {
+        return position % (1 + SPAN_COUNT) == 0;
     }
 
     /** The adapter position a resolved GridItem should notify at, or -1 if it isn't the visible grid. */
@@ -863,13 +897,14 @@ public class SvipeExploreGrid extends RecyclerListView {
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return holder.getItemViewType() == TYPE_PHOTO;
+            final int type = holder.getItemViewType();
+            return type == TYPE_PHOTO || type == TYPE_PHOTO_WIDE;
         }
 
         @Override
         public int getItemViewType(int position) {
             if (showingSkeleton()) {
-                return TYPE_SKELETON;
+                return isWideSkeleton(position) ? TYPE_SKELETON_WIDE : TYPE_SKELETON;
             }
             if (searchEmpty()) {
                 return TYPE_EMPTY;
@@ -877,7 +912,7 @@ public class SvipeExploreGrid extends RecyclerListView {
             if (position < recentHeaderRows()) {
                 return TYPE_RECENT_HEADER;
             }
-            return TYPE_PHOTO;
+            return isWideAt(position) ? TYPE_PHOTO_WIDE : TYPE_PHOTO;
         }
 
         @Override
@@ -886,13 +921,19 @@ public class SvipeExploreGrid extends RecyclerListView {
             final View view;
             switch (viewType) {
                 case TYPE_SKELETON:
-                    view = new SkeletonCell(ctx);
+                    view = new SkeletonCell(ctx, false);
+                    break;
+                case TYPE_SKELETON_WIDE:
+                    view = new SkeletonCell(ctx, true);
                     break;
                 case TYPE_RECENT_HEADER:
                     view = new RecentHeaderView(ctx);
                     break;
                 case TYPE_EMPTY:
                     view = createEmptyView(ctx);
+                    break;
+                case TYPE_PHOTO_WIDE:
+                    view = new WideImageView(ctx);
                     break;
                 default:
                     view = new PortraitImageView(ctx);
@@ -906,18 +947,27 @@ public class SvipeExploreGrid extends RecyclerListView {
         @Override
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
             final int type = holder.getItemViewType();
-            if (type != TYPE_PHOTO) {
+            if (type != TYPE_PHOTO && type != TYPE_PHOTO_WIDE) {
                 return;   // skeleton / recent header / empty self-render, nothing to bind
             }
-            PortraitImageView iv = (PortraitImageView) holder.itemView;
+            BackupImageView iv = (BackupImageView) holder.itemView;
             GridItem gi = currentGrid().get(position - recentHeaderRows());
+            if (type == TYPE_PHOTO_WIDE) {
+                // The card's height comes from the video's own aspect, so bind it BEFORE setImage:
+                // requestLayout during bind is what keeps the row height right on a recycled holder.
+                ((WideImageView) iv).bindRef(gi.ref);
+            }
             if (gi.mo != null && gi.mo.getDocument() != null) {
                 TLRPC.Document doc = gi.mo.getDocument();
-                TLRPC.PhotoSize big = FileLoader.getClosestPhotoSizeWithSize(doc.thumbs, 320);
+                // A full-width card is ~3x the pixel width of a 3-up tile, so it needs the larger
+                // thumb and a matching filter or it renders visibly soft.
+                final boolean wide = type == TYPE_PHOTO_WIDE;
+                TLRPC.PhotoSize big = FileLoader.getClosestPhotoSizeWithSize(doc.thumbs, wide ? 1000 : 320);
                 TLRPC.PhotoSize small = FileLoader.getClosestPhotoSizeWithSize(doc.thumbs, 50);
+                final String filter = wide ? "720_720" : "240_240";
                 iv.setImage(
-                        ImageLocation.getForDocument(big, doc), "240_240",
-                        ImageLocation.getForDocument(small, doc), "240_240_b",
+                        ImageLocation.getForDocument(big, doc), filter,
+                        ImageLocation.getForDocument(small, doc), filter + "_b",
                         0, gi.mo);
             } else {
                 iv.getImageReceiver().clearImage();
@@ -1020,19 +1070,92 @@ public class SvipeExploreGrid extends RecyclerListView {
         }
     }
 
-    /** No-data placeholder cell (3:2): pure shimmer, shown while {@code items} is still empty. */
-    private static class SkeletonCell extends View {
+    /**
+     * HORIZONTAL / long-form cell: a full-width card whose height follows the video's own aspect (so
+     * the thumbnail is shown uncropped, unlike the portrait tiles which centre-crop), with a
+     * YouTube-style duration badge in the bottom-right corner.
+     *
+     * The aspect comes off the /v1/discover reference, not the resolved Telegram document, so the row
+     * measures correctly on the very first layout pass and never jumps when MTProto answers.
+     */
+    private static class WideImageView extends BackupImageView {
         private final GridShimmer shimmer = new GridShimmer();
         private final RectF rect = new RectF();
+        private final Paint badgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final TextPaint badgeText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        private float aspect = 16f / 9f;
+        private String duration;
 
-        SkeletonCell(Context context) {
+        WideImageView(Context context) {
             super(context);
+            badgePaint.setColor(0x99000000);
+            badgeText.setColor(Color.WHITE);
+            badgeText.setTextSize(AndroidUtilities.dp(11));
+            badgeText.setTypeface(AndroidUtilities.bold());
+        }
+
+        void bindRef(SvipeDiscover.Item ref) {
+            final float a = ref == null
+                    ? 16f / 9f
+                    : Math.min(MAX_CARD_ASPECT, Math.max(SvipeDiscover.LANDSCAPE_MIN_ASPECT, ref.aspect()));
+            final int seconds = ref == null ? 0 : ref.durationMs / 1000;
+            final String d = seconds > 0 ? AndroidUtilities.formatShortDuration(seconds) : null;
+            if (a != aspect) {
+                aspect = a;
+                requestLayout();
+            }
+            if (!TextUtils.equals(d, duration)) {
+                duration = d;
+                invalidate();
+            }
         }
 
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             final int width = MeasureSpec.getSize(widthMeasureSpec);
-            setMeasuredDimension(width, Math.round(width * 3f / 2f));
+            final int height = Math.max(1, Math.round(width / aspect));
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            if (!getImageReceiver().hasBitmapImage()) {
+                final float inset = AndroidUtilities.dp(1);
+                rect.set(inset, inset, getWidth() - inset, getHeight() - inset);
+                shimmer.draw(canvas, rect, AndroidUtilities.dp(3), this);
+            }
+            super.onDraw(canvas);
+            if (duration != null) {
+                final float pad = AndroidUtilities.dp(4);
+                final float margin = AndroidUtilities.dp(6);
+                final float tw = badgeText.measureText(duration);
+                final float th = badgeText.getTextSize();
+                final float right = getWidth() - margin;
+                final float bottom = getHeight() - margin;
+                rect.set(right - tw - pad * 2, bottom - th - pad * 1.6f, right, bottom);
+                canvas.drawRoundRect(rect, AndroidUtilities.dp(3), AndroidUtilities.dp(3), badgePaint);
+                canvas.drawText(duration, rect.left + pad, rect.bottom - pad * 0.8f, badgeText);
+            }
+        }
+    }
+
+    /** No-data placeholder cell: pure shimmer, shown while {@code items} is still empty. */
+    private static class SkeletonCell extends View {
+        private final GridShimmer shimmer = new GridShimmer();
+        private final RectF rect = new RectF();
+        private final boolean wide;
+
+        SkeletonCell(Context context, boolean wide) {
+            super(context);
+            this.wide = wide;
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            final int width = MeasureSpec.getSize(widthMeasureSpec);
+            // Wide placeholders stand in for a 16:9 card, narrow ones for a 2:3 portrait tile.
+            final float ratio = wide ? 9f / 16f : 3f / 2f;
+            setMeasuredDimension(width, Math.round(width * ratio));
         }
 
         @Override

@@ -1423,6 +1423,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             VideoPlayer.VideoUri target = targetRendition(qualitiesFor(it.mo));
             TLRPC.Document doc = target != null ? target.document : it.mo.getDocument();
             if (doc == null) continue;
+            // Never prefetch long-form into the offline cushion: one such file would consume a large
+            // slice of MAX_QUEUE_BYTES and evict the reels the cushion exists for.
+            if (isLongForm(doc)) continue;
             if (fileFullyPresent(it)) {
                 enqueueResolved(it, true); // already on disk — make sure it's persisted
                 have++;
@@ -1456,6 +1459,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private void enqueueResolved(FeedItem it, boolean downloaded) {
         if (reelQueue == null || it == null || it.mo == null || it.mo.messageOwner == null) return;
         if (watchedSet != null && watchedSet.isWatched(it.channelId, it.messageId)) return;
+        // The queue is the instant-cold-start cushion for REELS. Long-form entries only reach the
+        // player as a Search-grid seed, are never worth a cold-start slot, and would blow the budget.
+        if (isLongForm(it.mo.getDocument())) return;
         if (reelQueue.contains(it.channelId, it.messageId)) {
             if (downloaded) {
                 reelQueue.markDownloaded(it.channelId, it.messageId);
@@ -1699,6 +1705,34 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         return 0f;
     }
 
+    /**
+     * Anything at least this long is treated as LONG-FORM rather than a reel. The server caps
+     * /v1/feed at 5 minutes, so such an item can only have arrived as a seed from the Search tab's
+     * mixed video grid (which serves horizontal long-form up to an hour).
+     */
+    private static final long LONG_FORM_MIN_DURATION_MS = 5 * 60 * 1000L;
+
+    /**
+     * Long-form guard. Three reels behaviours are actively harmful for a 40-minute video and are
+     * switched off for these items:
+     *   - looping (a lecture must end, not restart);
+     *   - the "dwelled past MIN_WATCHED_MS -> pull the whole file" escalation in {@link #startPlayback}
+     *     (3 seconds of glancing would fetch hundreds of MB);
+     *   - offline-queue persistence, since one such file exceeds a large slice of the whole
+     *     {@link SvipeQueuePlan#MAX_QUEUE_BYTES} cushion and would evict every cached reel.
+     * Streaming playback and all watch telemetry are unaffected.
+     */
+    private static boolean isLongForm(TLRPC.Document doc) {
+        if (doc == null) return false;
+        for (int i = 0; i < doc.attributes.size(); i++) {
+            TLRPC.DocumentAttribute a = doc.attributes.get(i);
+            if (a instanceof TLRPC.TL_documentAttributeVideo) {
+                return (long) (a.duration * 1000.0) >= LONG_FORM_MIN_DURATION_MS;
+            }
+        }
+        return false;
+    }
+
     private void startPlayback(MessageObject mo, TLRPC.Document doc, int pos, FeedItem item) {
         // Async callers (resolve callbacks, the start checker, deferred recovery) can land after the
         // fragment paused or died — never start audio/video in the background or on a dead fragment.
@@ -1710,16 +1744,20 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             float ar = videoAspect(doc);
             if (ar > 0) holder.aspect.setAspectRatio(ar, 0);
 
+            // A horizontal long-form entry seeded from the Search grid must not loop and must not be
+            // pulled down in full — see isLongForm.
+            final boolean longForm = isLongForm(doc);
             final boolean prepared = nextPlayer != null && nextPlayerPos == pos;
             VideoPlayer player;
             if (prepared) {
                 player = nextPlayer;
                 nextPlayer = null;
                 nextPlayerPos = -1;
+                player.setLooping(!longForm);
             } else {
                 player = new VideoPlayer(true, false); // Svipe: pauseOther=true -> starting a reel pauses music, and music pauses the reel
                 player.setIsReels();
-                player.setLooping(true);
+                player.setLooping(!longForm);
             }
             // This reel owns the bandwidth now: stream reads at HIGH so playback, loops and seeks
             // stay smooth. Under HLS every rung the selector may pick must be HIGH — the stream
@@ -1738,7 +1776,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_HIGH);
             }
             final VideoPlayer boundPlayer = player;
-            AndroidUtilities.runOnUIThread(() -> {
+            // Long-form streams only: there are no loops to serve from disk, and completing a
+            // 40-minute file after 3 seconds of dwell would be hundreds of MB for a glance.
+            if (!longForm) AndroidUtilities.runOnUIThread(() -> {
                 if (currentPosition == pos && currentPlayer == boundPlayer) {
                     try {
                         // Complete the file that is ACTUALLY streaming (same doc => FileLoader merges
@@ -2153,7 +2193,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             if (doc == null) return;
             VideoPlayer p = new VideoPlayer(true, false); // Svipe: pauseOther=true -> mutual exclusion with music
             p.setIsReels();
-            p.setLooping(true);
+            p.setLooping(!isLongForm(doc));
             // VideoPlayer NPEs if a state change arrives with no delegate — give the idle player
             // a no-op one; startPlayback swaps in the real holder-bound delegate on use.
             p.setDelegate(new VideoPlayer.VideoPlayerDelegate() {

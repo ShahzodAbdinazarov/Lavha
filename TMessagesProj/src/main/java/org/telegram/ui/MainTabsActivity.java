@@ -281,7 +281,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         tabs = new GlassTabView[6];
         tabs[INDEX_CHATS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.CHATS, R.string.MainTabsChats);
         tabs[INDEX_REELS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.REELS, R.string.MainTabsReels);
-        tabs[INDEX_SEARCH] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.SEARCH, R.string.MainTabsSearch);
+        // Svipe: the Search tab's empty state is a mixed video feed (horizontal long-form +
+        // vertical reels), so it wears a YouTube-style play badge instead of a magnifier.
+        tabs[INDEX_SEARCH] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.VIDEO, R.string.MainTabsSearch);
         tabs[INDEX_MUSIC] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.MUSIC, R.string.MainTabsMusic);
         tabs[INDEX_CALLS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.CALLS, R.string.MainTabsCalls);
         tabs[INDEX_PROFILE] = GlassTabView.createAvatar(context, resourceProvider, currentAccount, R.string.MainTabsProfile);

@@ -14,11 +14,35 @@ import java.util.List;
  */
 public class SvipeDiscover {
 
+    /**
+     * A video counts as HORIZONTAL once its width exceeds its height by this factor. Mirrors the
+     * backend's {@code discover_landscape_min_aspect} — 1.2 rather than a bare w>h so a near-square
+     * upload (which crops fine into a portrait tile) stays on the vertical side. Keep the two in sync:
+     * the server mixes the feed by this rule, the client lays it out by this rule.
+     */
+    public static final float LANDSCAPE_MIN_ASPECT = 1.2f;
+
     public static class Item {
         public long channelId;
         public int messageId;
         public String username;
         public Integer topicId;
+        // Pixel size + length as the server knows them, so a cell can be measured BEFORE the Telegram
+        // message is resolved over MTProto (the grid is mixed-orientation: full-width 16:9 cards for
+        // horizontal long-form, 3-up portrait tiles for vertical reels). 0 = the server didn't say.
+        public int width;
+        public int height;
+        public int durationMs;
+
+        /** True for a horizontal/long-form entry. Unknown dimensions fall back to the vertical tile. */
+        public boolean isLandscape() {
+            return width > 0 && height > 0 && width >= height * LANDSCAPE_MIN_ASPECT;
+        }
+
+        /** Video aspect (w/h), or 16:9 when the server sent no dimensions. */
+        public float aspect() {
+            return width > 0 && height > 0 ? (float) width / height : 16f / 9f;
+        }
     }
 
     public interface Callback {
@@ -252,6 +276,11 @@ public class SvipeDiscover {
             it.messageId = o.optInt("message_id");
             it.username = username;
             it.topicId = o.isNull("topic_id") ? null : o.optInt("topic_id");
+            // Absent on an older server build -> 0 -> the item renders as a vertical tile, exactly the
+            // pre-mixed-grid behaviour.
+            it.width = o.optInt("width", 0);
+            it.height = o.optInt("height", 0);
+            it.durationMs = o.optInt("duration_ms", 0);
             out.add(it);
         }
     }
