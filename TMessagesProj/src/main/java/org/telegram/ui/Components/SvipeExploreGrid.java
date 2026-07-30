@@ -770,11 +770,14 @@ public class SvipeExploreGrid extends RecyclerListView {
                 items.add(gi);
                 fresh.add(gi);
             }
+            // Guarantee complete 3-up rows before anything is measured (see closeVerticalRows).
+            final boolean regrouped = closeVerticalRows(items, before);
             if (hasRecents()) {
                 // Browse/search loaded BEHIND the recents view — stage the data silently; it renders
                 // when the recents view is dismissed (that transition does a full notify).
-            } else if (wasSkeleton || before == 0) {
+            } else if (wasSkeleton || before == 0 || regrouped) {
                 // The item count changes wholesale (skeleton/empty -> real size), so a full rebind.
+                // A regroup also moved already-bound positions, so the range insert would be wrong.
                 adapter.notifyDataSetChanged();
             } else if (!fresh.isEmpty()) {
                 adapter.notifyItemRangeInserted(recentHeaderRows() + before, fresh.size());
@@ -1282,6 +1285,8 @@ public class SvipeExploreGrid extends RecyclerListView {
         changed |= dropWhere(recentItems, gi -> gi.ref == ref);
         if (changed) {
             recentRows.remove(ref);
+            // Removing one tile out of a 3-up row would leave a hole; re-close the runs.
+            closeVerticalRows(items, 0);
             adapter.notifyDataSetChanged();
         }
     }
@@ -1300,8 +1305,77 @@ public class SvipeExploreGrid extends RecyclerListView {
                     recentRows.remove(i);
                 }
             }
+            closeVerticalRows(items, 0);
             adapter.notifyDataSetChanged();
         }
+    }
+
+    private static boolean isWide(GridItem gi) {
+        return gi != null && gi.ref != null && gi.ref.isLandscape();
+    }
+
+    /**
+     * Make every vertical run a whole number of 3-up rows, so the grid never shows a half-filled row.
+     *
+     * The server already interleaves in exact runs (one horizontal, then {@code SPAN_COUNT} verticals),
+     * but the client cannot assume that survives: {@link SvipeDiscover} drops references with no public
+     * username (it has nothing to resolve), and the ⋮ menu removes items outright. Either leaves a run
+     * of 1, 2, 4… and GridLayoutManager then puts a lone tile on its own row with visible gaps beside
+     * it — exactly the artefact this closes.
+     *
+     * The fix is ratio-AGNOSTIC on purpose: it does not impose 1:3, it only rounds each vertical run
+     * down to a multiple of {@code SPAN_COUNT} and pushes the remainder to the front of the NEXT
+     * vertical run. Relative order within each orientation is preserved, the server keeps owning the
+     * mix, and remainders cascade forward until they land in a complete row. Two adjacent horizontal
+     * cards are fine — both are full-span, so neither can leave a gap.
+     *
+     * @param from the index the caller last considered stable; scanning starts at the run containing
+     *             it so an append doesn't reshuffle rows the user is already looking at.
+     * @return true if anything moved, i.e. the caller must do a full rebind rather than a range insert.
+     */
+    private static boolean closeVerticalRows(ArrayList<GridItem> list, int from) {
+        // Rewind to the start of the run that `from` falls in: a run can only be repaired as a whole.
+        int start = Math.max(0, Math.min(from, list.size()));
+        while (start > 0 && !isWide(list.get(start - 1))) {
+            start--;
+        }
+        boolean moved = false;
+        final ArrayList<GridItem> carry = new ArrayList<>();   // remainder waiting for the next run
+        int i = start;
+        while (i < list.size()) {
+            if (isWide(list.get(i))) {
+                i++;
+                continue;
+            }
+            // Collect this vertical run.
+            final int runStart = i;
+            while (i < list.size() && !isWide(list.get(i))) {
+                i++;
+            }
+            final ArrayList<GridItem> run = new ArrayList<>(carry);
+            run.addAll(list.subList(runStart, i));
+            carry.clear();
+            final int keep = (run.size() / SPAN_COUNT) * SPAN_COUNT;
+            if (keep != run.size() || run.size() != i - runStart) {
+                moved = true;
+            }
+            for (int k = run.size() - 1; k >= keep; k--) {
+                carry.add(0, run.remove(k));
+            }
+            // Splice the (possibly shorter) run back in.
+            final int oldLen = i - runStart;
+            for (int k = 0; k < oldLen; k++) {
+                list.remove(runStart);
+            }
+            list.addAll(runStart, run);
+            i = runStart + run.size();
+        }
+        // Whatever is still carried has no following run to join — it is the tail, where a partial row
+        // is unavoidable in any grid. Put it back at the end so nothing is lost.
+        if (!carry.isEmpty()) {
+            list.addAll(carry);
+        }
+        return moved;
     }
 
     private interface GridItemFilter {
