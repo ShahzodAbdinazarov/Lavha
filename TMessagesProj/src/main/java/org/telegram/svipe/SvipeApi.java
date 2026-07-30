@@ -16,6 +16,27 @@ import java.net.URL;
  */
 public class SvipeApi {
 
+    /**
+     * Capability level this build declares to the backend, sent on EVERY request.
+     *
+     * Not a version code — deliberately. The backend does not care which release this is, only which
+     * server-visible behaviours the build can handle, and the two are not the same thing (an afat APK
+     * reports versionCode {@code 72*10+abi} while the Play bundle reports {@code 72}, so version
+     * numbers are not even comparable across our own artifacts).
+     *
+     * Bump this ONLY when the client gains a capability the server must know about, and gate the new
+     * server behaviour behind it. Builds already in users' hands send a lower level (or, before this
+     * header existed, none at all) and must keep getting the old behaviour.
+     *
+     *   1 — implicit: any build predating this header.
+     *   2 — mixed-orientation discover grid: can lay out horizontal/16:9 entries and guards long-form
+     *       playback (no looping, no full-file download, never persisted to the offline queue).
+     *       Serving long-form to a level-1 build would loop a 40-minute video forever and pull the
+     *       whole file down after 3 seconds of dwell.
+     */
+    public static final int CLIENT_LEVEL = 2;
+    public static final String CLIENT_LEVEL_HEADER = "X-Svipe-Client";
+
     public interface JsonCallback {
         void run(JSONObject result, int httpCode, String error);
     }
@@ -151,6 +172,7 @@ public class SvipeApi {
                 conn.setConnectTimeout(15000);
                 conn.setReadTimeout(25000);
                 conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty(CLIENT_LEVEL_HEADER, String.valueOf(CLIENT_LEVEL));
                 if (bearer != null) {
                     conn.setRequestProperty("Authorization", "Bearer " + bearer);
                 }
