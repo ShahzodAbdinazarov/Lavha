@@ -8,9 +8,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Client for the Instagram-style Explore grid endpoint (GET /v1/discover). References only — each
- * item is a Telegram post the app resolves and renders a thumbnail for, then plays via the reels
- * player. Mirrors ReelsActivity.requestFeed's auth + 401-retry idiom.
+ * Client for the Explore grid's reference endpoints. References only — each item is a Telegram post
+ * the app resolves and renders a thumbnail for, then plays via the reels player. Mirrors
+ * ReelsActivity.requestFeed's auth + 401-retry idiom.
+ *
+ * The browse grid is fed by TWO fully independent pipes, each with its own server-side algorithm and
+ * its own paging cursor, and neither mixes orientations:
+ * <ul>
+ *   <li>{@link #load} → GET /v1/discover — SHORTS: vertical, short videos (the diversity grid);</li>
+ *   <li>{@link #videos} → GET /v1/videos — LONG-FORM: horizontal, minutes-long videos.</li>
+ * </ul>
+ * Interleaving them is the CLIENT's job (see SvipeExploreGrid), which is what makes the grid's row
+ * alignment structural instead of something the server has to get right.
  */
 public class SvipeDiscover {
 
@@ -69,7 +78,10 @@ public class SvipeDiscover {
         load(account, category, offset, limit, false, cb);
     }
 
-    /** refresh=true rotates the server grid to a fresh window (pull-to-refresh); page-0 only. */
+    /**
+     * SHORTS pipe (GET /v1/discover): vertical, short videos only — the original diversity grid.
+     * refresh=true rotates the server grid to a fresh window (pull-to-refresh); page-0 only.
+     */
     public static void load(int account, String category, int offset, int limit, boolean refresh, Callback cb) {
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {
@@ -114,6 +126,31 @@ public class SvipeDiscover {
             Integer next = res.isNull("next_offset") ? null : Integer.valueOf(res.optInt("next_offset"));
             cb.onResult(out, next, null);
         });
+    }
+
+    /**
+     * LONG-FORM pipe (GET /v1/videos): horizontal, minutes-long videos, ranked by their own server-side
+     * algorithm. Same query shape, response shape and {@link Item} model as {@link #load} — the two are
+     * separate only in WHAT they return, so the grid can page them independently and still render both
+     * with one cell renderer.
+     *
+     * No client-level gate is needed: a build that predates this endpoint simply never calls it, and
+     * /v1/discover stays shorts-only, so old builds keep their exact original feed by construction.
+     *
+     * {@code refresh=true} asks the server for a fresh window (pull-to-refresh); page-0 only.
+     */
+    public static void videos(int account, String category, int offset, int limit, boolean refresh, Callback cb) {
+        StringBuilder path = new StringBuilder("/v1/videos?limit=").append(limit).append("&offset=").append(offset);
+        if (refresh) {
+            path.append("&refresh=1");
+        }
+        if (category != null && !category.isEmpty()) {
+            try {
+                path.append("&category=").append(URLEncoder.encode(category, "UTF-8"));
+            } catch (Exception ignore) {
+            }
+        }
+        feedGet(account, path.toString(), cb);
     }
 
     /**

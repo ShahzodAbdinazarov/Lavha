@@ -53,14 +53,30 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Instagram-style Explore grid for the Search section. In the empty (no-query) state it BROWSES reel
- * references from GET /v1/discover; once the user types it SEARCHES OUR videos via
- * GET /v1/discover/search (same FeedItem reference shape, so the exact same reference→thumbnail
- * renderer + reels-open-on-tap is reused). Focusing the empty field shows the user's recently-tapped
- * reels (a local {@link SvipeVideoSearchHistory} ledger, storing the tapped video REFERENCE, not the
- * query) as the SAME reel thumbnails under a "Recent" header — tap re-opens that reel, long-press
- * removes it, or clear the whole history. Resolves each reference to a Telegram message (batched per
- * channel) to render its video thumbnail, and pages on scroll.
+ * Instagram-style Explore grid for the Search section, in three modes:
+ *
+ * <p><b>BROWSE</b> (the empty, unfocused state) is fed by TWO fully independent server pipes, each
+ * with its own algorithm, its own paging cursor and a single orientation: SHORTS from
+ * GET /v1/discover (vertical) and LONG-FORM from GET /v1/videos (horizontal). Neither side mixes
+ * orientations — the CLIENT composes the display order: one full-width long card, then
+ * {@link #SHORTS_ROWS_PER_LONG} COMPLETE rows of {@link #SPAN_COUNT} shorts, repeating.
+ *
+ * <p>That is the whole point of the split. When one interleaved list arrived from the server, any
+ * gap in it (references with no public username are dropped, the ⋮ menu removes items) turned a run
+ * of 3 verticals into a run of 1 or 2 and GridLayoutManager left a lone tile beside two empty cells.
+ * Emitting the rows here makes alignment STRUCTURAL: a row is only emitted once SPAN_COUNT shorts are
+ * in hand, so a half-filled row cannot be expressed. Each pipe pages, fails and runs dry on its own —
+ * a dead long-form pipe degrades to a pure shorts grid, never to an empty screen.
+ *
+ * <p><b>SEARCH</b> (once the user types) shows GET /v1/discover/search results, and <b>RECENTS</b>
+ * (empty field, focused) shows the user's recently-tapped reels — a local
+ * {@link SvipeVideoSearchHistory} ledger storing the tapped video REFERENCE, not the query — under a
+ * "Recent" header, where tap re-opens that reel and long-press removes it. Both are single lists, as
+ * is an injected {@link PageLoader} (the standalone watch-history screen): one stream has no rhythm to
+ * compose, so it is displayed in the order it arrived.
+ *
+ * <p>Every mode resolves its references to Telegram messages (batched per channel) to render video
+ * thumbnails, and pages on scroll.
  */
 public class SvipeExploreGrid extends RecyclerListView {
 
@@ -78,7 +94,42 @@ public class SvipeExploreGrid extends RecyclerListView {
     }
 
     private static final int SPAN_COUNT = 3;
+    /**
+     * The display rhythm, and the ONE place it lives: after each long-form card the grid emits this
+     * many COMPLETE rows of {@code SPAN_COUNT} shorts. Retune freely — the composer, the skeleton and
+     * the two pipes' page sizes all derive from it, and no server change is needed because the server
+     * never sees the rhythm.
+     */
+    private static final int SHORTS_ROWS_PER_LONG = 1;
     private static final int PAGE_SIZE = 60;
+    /**
+     * Long-form page size. Sized so one long page can back one shorts page at the current rhythm
+     * ({@code 60 shorts / 3 per row / 1 row per long} = 20 cards), which keeps both pipes running out
+     * at roughly the same time instead of one starving the composer.
+     */
+    private static final int LONG_PAGE_SIZE = PAGE_SIZE / (SPAN_COUNT * SHORTS_ROWS_PER_LONG);
+    /**
+     * Compose at least this many cells before trusting the scroll to drive further paging. A page that
+     * lands short (or whose remainder is held back for an incomplete row) can compose into less than a
+     * screenful, and then there is nothing to scroll — so a page that DID deliver items tops itself up
+     * until the grid is deep enough to page itself.
+     */
+    private static final int MIN_COMPOSED_CELLS = SPAN_COUNT * 6;
+    /**
+     * How many rhythm units (one long card + its rows of shorts) each pipe keeps buffered ahead of the
+     * composer. Expressed in units so both pipes are prefetched at the same depth whatever the ratio is.
+     */
+    private static final int PREFETCH_UNITS = 2;
+    /**
+     * Consecutive failures a pipe is allowed before the grid stops chasing it by itself and waits for
+     * the user (a scroll or a pull-to-refresh). It bounds the self-heal loop below: without a cap, an
+     * outage during the first page would spin requests as fast as they can fail.
+     *
+     * <p>Hitting the cap also RETIRES the long-form pipe for this content generation, which the shorts
+     * pipe deliberately never does: a server without /v1/videos fails deterministically and forever and
+     * the grid is complete without it, whereas the shorts ARE the grid and must stay retryable.
+     */
+    private static final int MAX_PIPE_FAILURES = 2;
     private static final int SKELETON_COUNT = 15;   // ~5 rows of shimmer placeholders
     private static final int SEARCH_DEBOUNCE_MS = 350;
     private static final int TYPE_PHOTO = 0;      // a reel thumbnail — used for BOTH browse/search results and recents
@@ -95,13 +146,17 @@ public class SvipeExploreGrid extends RecyclerListView {
     private final int account;
     private final GridLayoutManager layoutManager;
     private final GridAdapter adapter;
+    /**
+     * The DISPLAY list — exactly what the adapter renders, in order. In browse mode it is composed from
+     * the two pipes below (see {@link #composeBrowse}); in search / page-loader mode it IS the stream.
+     */
     private final ArrayList<GridItem> items = new ArrayList<>();
     // username (lowercase) -> already resolved chat, so a channel is resolved once across pages.
     private final HashMap<String, TLRPC.Chat> resolvedChats = new HashMap<>();
 
-    private boolean loading;
+    private boolean loadingSingle;   // the single-stream path: search results / injected page loader
     private boolean startedFirstLoad;
-    private Integer nextOffset = 0;
+    private Integer nextOffset = 0;  // single-stream cursor; null when that stream is exhausted
     private OnReelTapListener tapListener;
     /**
      * Host fragment, needed by the wide cards' ⋮ menu. ItemOptions.downFragment special-cases a
@@ -128,8 +183,24 @@ public class SvipeExploreGrid extends RecyclerListView {
     // whose mode/query has since changed lands stale and is dropped instead of polluting the list.
     private int contentSeq;
 
+    // ---- browse mode: the two independent source pipes ----
+    // Sources, NOT display: nothing here is rendered until composeBrowse() emits it into `items`. Each
+    // pipe keeps its own cursor (null = exhausted) and its own in-flight flag, so one can page, stall or
+    // die without touching the other. `composed*` is how much of each pipe the last composition
+    // consumed — the rest is buffered, which is how "run low" is measured.
+    private final ArrayList<GridItem> shorts = new ArrayList<>();
+    private final ArrayList<GridItem> longs = new ArrayList<>();
+    private Integer shortsOffset = 0;
+    private Integer longsOffset = 0;
+    private boolean loadingShorts;
+    private boolean loadingLongs;
+    private int composedShorts;
+    private int composedLongs;
+    private int shortFailures;
+    private int longFailures;
+
     // ---- pluggable pager (standalone history screens) ----
-    private PageLoader pageLoader;          // null -> default /v1/discover feed
+    private PageLoader pageLoader;          // null -> the dual-pipe browse feed
     private final boolean pullEnabled;      // pull-to-refresh only makes sense for the live explore feed
 
     // --- pull-to-refresh: native, drawn in dispatchDraw. The grid must stay a RecyclerListView
@@ -156,12 +227,27 @@ public class SvipeExploreGrid extends RecyclerListView {
 
     private static class GridItem {
         final SvipeDiscover.Item ref;
+        /**
+         * Full-span long-form card vs one 3-up tile, fixed at construction and never recomputed.
+         *
+         * For the browse grid this is the PIPE the item arrived on, not its pixels: the composer places
+         * a long-pipe item in a full-span slot, so the span lookup must agree even if that item's
+         * server-sent dimensions were odd — otherwise a 1-span cell would land in a full-span slot and
+         * reopen the very hole this design closes. Single-stream lists (search, recents, an injected page
+         * loader) have no pipe to go on, so they fall back to the server-sent dimensions as before.
+         */
+        final boolean wide;
         MessageObject mo;
         boolean resolved;
         boolean resolving;
 
         GridItem(SvipeDiscover.Item ref) {
+            this(ref, ref != null && ref.isLandscape());
+        }
+
+        GridItem(SvipeDiscover.Item ref, boolean wide) {
             this.ref = ref;
+            this.wide = wide;
         }
     }
 
@@ -183,9 +269,9 @@ public class SvipeExploreGrid extends RecyclerListView {
         setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
 
         layoutManager = new GridLayoutManager(context, SPAN_COUNT);
-        // The "Recent" header, the no-results notice and every HORIZONTAL video card span the full
-        // width; vertical reels keep their 3-up column. The server emits verticals in complete runs of
-        // SPAN_COUNT, so each run lands as one full row with no holes.
+        // The "Recent" header, the no-results notice and every long-form video card span the full
+        // width; shorts keep their 3-up column. In browse mode the composer only ever emits shorts in
+        // complete runs of SPAN_COUNT, so every run lands as one full row with no holes.
         layoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
             @Override
             public int getSpanSize(int position) {
@@ -235,19 +321,22 @@ public class SvipeExploreGrid extends RecyclerListView {
                 tapListener.onReelTap(single, 0);
                 return;
             }
-            // Browse / search grid.
-            if (position < 0 || position >= items.size()) {
+            // Browse / search grid. `items` is the DISPLAY list, so the seed list handed to
+            // ReelsActivity.ofDiscoverSeed is in exactly the order on screen and the index is the
+            // tapped cell's own — composition can't desynchronise the two.
+            final int idx = position - recentHeaderRows();
+            if (idx < 0 || idx >= items.size()) {
                 return;
             }
             // Record a tapped SEARCH RESULT as a recent (browse taps aren't results, so store nothing).
             if (searchActive) {
-                history.add(items.get(position).ref);
+                history.add(items.get(idx).ref);
             }
             final ArrayList<SvipeDiscover.Item> refs = new ArrayList<>(items.size());
             for (GridItem gi : items) {
                 refs.add(gi.ref);
             }
-            tapListener.onReelTap(refs, position);
+            tapListener.onReelTap(refs, idx);
         });
 
         // Long-press a recent thumbnail to remove just that entry (the per-item counterpart to the
@@ -270,8 +359,9 @@ public class SvipeExploreGrid extends RecyclerListView {
                 if (dy <= 0) {
                     return;
                 }
-                if (!loading && nextOffset != null
-                        && layoutManager.findLastVisibleItemPosition() >= items.size() - SPAN_COUNT * 2) {
+                // Every "may I load?" test lives inside the loaders (per pipe in browse mode), so this
+                // only decides WHEN to ask.
+                if (layoutManager.findLastVisibleItemPosition() >= items.size() - SPAN_COUNT * 2) {
                     loadPage();
                 }
             }
@@ -287,15 +377,37 @@ public class SvipeExploreGrid extends RecyclerListView {
         this.fragment = fragment;
     }
 
-    /** Route paging through a custom endpoint (e.g. reels watch-history) instead of /v1/discover. */
+    /**
+     * Route paging through a custom endpoint (e.g. reels watch-history) instead of the two browse
+     * pipes. One stream means there is no rhythm to compose, so such a grid shows its items in the
+     * order the endpoint returned them.
+     */
     public void setPageLoader(PageLoader loader) {
         this.pageLoader = loader;
     }
 
+    /**
+     * True when browse is fed by the two independent pipes — i.e. the live explore feed. Search results
+     * and an injected page loader are single streams and take the plain append path.
+     */
+    private boolean dualStream() {
+        return !searchActive && pageLoader == null;
+    }
+
+    /** Any page in flight, on either pipe or on the single stream. */
+    private boolean isLoading() {
+        return loadingSingle || loadingShorts || loadingLongs;
+    }
+
+    /** The single-stream fetch: search results while a query is active, else the injected page loader. */
     private void requestPage(int offset, int limit, boolean refresh, SvipeDiscover.Callback cb) {
-        if (pageLoader != null) {
+        if (searchActive) {
+            SvipeDiscover.search(account, activeQuery, offset, limit, cb);
+        } else if (pageLoader != null) {
             pageLoader.load(offset, limit, refresh, cb);
         } else {
+            // Unreachable: without a page loader and without a query, browse is dual-stream. Kept as a
+            // safe fallback rather than a silent no-op that would look like a dead feed.
             SvipeDiscover.load(account, null, offset, limit, refresh, cb);
         }
     }
@@ -363,7 +475,7 @@ public class SvipeExploreGrid extends RecyclerListView {
 
     /** Reload the browse grid if it is currently empty and nothing is in flight (used after a search). */
     private void ensureBrowseLoaded() {
-        if (!searchActive && !loading && items.isEmpty()) {
+        if (!searchActive && !isLoading() && items.isEmpty()) {
             loadPage();
         }
     }
@@ -396,12 +508,22 @@ public class SvipeExploreGrid extends RecyclerListView {
         loadPage();                  // loadPage routes to /v1/discover/search while searchActive
     }
 
-    /** Clear the current list + paging so the next loadPage starts fresh; older loads land stale. */
+    /** Clear the display, both pipes and all paging so the next loadPage starts fresh; older loads land stale. */
     private void resetContent() {
         contentSeq++;
         items.clear();
+        shorts.clear();
+        longs.clear();
         nextOffset = 0;
-        loading = false;
+        shortsOffset = 0;
+        longsOffset = 0;
+        composedShorts = 0;
+        composedLongs = 0;
+        shortFailures = 0;
+        longFailures = 0;
+        loadingSingle = false;
+        loadingShorts = false;
+        loadingLongs = false;
         refreshing = false;
     }
 
@@ -433,10 +555,11 @@ public class SvipeExploreGrid extends RecyclerListView {
     }
 
     /**
-     * True when the video at this ADAPTER position is horizontal (a full-width card). Decided purely
-     * from the server-sent dimensions on the reference, so it is stable from the first layout pass —
-     * deriving it from the resolved Telegram document instead would make cells change span/height as
-     * MTProto resolves, reflowing the grid under the user's finger.
+     * True when the cell at this ADAPTER position is a full-width long-form card. Decided from the
+     * GridItem's fixed {@code wide} flag (the pipe it came from, or the server-sent dimensions for a
+     * single stream), so it is stable from the first layout pass — deriving it from the resolved
+     * Telegram document instead would make cells change span/height as MTProto resolves, reflowing the
+     * grid under the user's finger.
      */
     private boolean isWideAt(int position) {
         final int idx = position - recentHeaderRows();
@@ -444,16 +567,15 @@ public class SvipeExploreGrid extends RecyclerListView {
         if (idx < 0 || idx >= grid.size()) {
             return false;
         }
-        final GridItem gi = grid.get(idx);
-        return gi.ref != null && gi.ref.isLandscape();
+        return grid.get(idx).wide;
     }
 
     /**
-     * Shimmer placeholders mirror the real mix (one full-width card, then a 3-up row) so the skeleton
-     * doesn't re-flow into a different shape the moment the first page lands.
+     * Shimmer placeholders mirror the real rhythm (one full-width card, then whole 3-up rows) so the
+     * skeleton doesn't re-flow into a different shape the moment the first page lands.
      */
     private static boolean isWideSkeleton(int position) {
-        return position % (1 + SPAN_COUNT) == 0;
+        return position % (1 + SPAN_COUNT * SHORTS_ROWS_PER_LONG) == 0;
     }
 
     /** The adapter position a resolved GridItem should notify at, or -1 if it isn't the visible grid. */
@@ -464,7 +586,7 @@ public class SvipeExploreGrid extends RecyclerListView {
 
     /** A committed search that came back with nothing — show the single "no results" notice. */
     private boolean searchEmpty() {
-        return searchActive && items.isEmpty() && !loading && !refreshing;
+        return searchActive && items.isEmpty() && !isLoading() && !refreshing;
     }
 
     /**
@@ -563,7 +685,7 @@ public class SvipeExploreGrid extends RecyclerListView {
                 pulling = false;
                 disallowParentIntercept(false);
                 final boolean trigger = action == MotionEvent.ACTION_UP
-                        && pullDistance >= PULL_THRESHOLD && !loading && !refreshing;
+                        && pullDistance >= PULL_THRESHOLD && !isLoading() && !refreshing;
                 pullStartY = -1f;
                 if (trigger) {
                     triggerRefresh();
@@ -585,39 +707,109 @@ public class SvipeExploreGrid extends RecyclerListView {
     }
 
     /**
-     * Pull-to-refresh: fetch a fresh (server-rotated) page 0 while keeping the current grid on
-     * screen under the spinner, then swap the whole list in one pass when it lands. The old content
+     * Pull-to-refresh: fetch a fresh (server-rotated) page 0 of EVERY stream feeding the grid while
+     * keeping the current content on screen under the spinner, then swap in one pass. The old content
      * is NOT cleared up-front — that clear-then-reload is what made the grid flash the skeleton (and
      * stale recycled thumbnails) and look like it "reverted". With refresh=1 the server rotates to a
      * different window, so the swap shows genuinely new content rather than the identical list.
      */
     private void triggerRefresh() {
-        if (loading || searchActive) {
+        if (isLoading() || searchActive) {
             animatePullTo(0f);   // a page load is already in flight (or we're showing search results)
             return;
         }
         refreshing = true;
-        loading = true;          // block scroll-pagination until the swap completes
         startSpin();
         animatePullTo(PULL_THRESHOLD);   // settle at the resting position while loading
-        requestPage(0, PAGE_SIZE, true, (result, next, error) -> {
-            loading = false;
-            refreshing = false;
-            stopSpin();
-            animatePullTo(0f);
-            if (result == null) {
-                return;   // network/auth failure: keep the current grid, never blank or revert
+        if (dualStream()) {
+            refreshBothPipes();
+        } else {
+            refreshSingleStream();
+        }
+    }
+
+    /**
+     * Refresh BOTH browse pipes and swap once. The two answers are collected in a {@link RefreshBatch}
+     * so the grid re-lays out a single time — swapping per pipe would show a shorts-only grid for a
+     * frame and then reflow when the long cards arrive. A pipe whose refresh FAILED keeps its existing
+     * items and cursor: mixing fresh shorts with the long cards we already have beats throwing content
+     * away.
+     */
+    private void refreshBothPipes() {
+        final int seq = contentSeq;
+        final RefreshBatch batch = new RefreshBatch();
+        loadingShorts = true;    // both flags also block scroll-pagination until the swap completes
+        loadingLongs = true;
+        SvipeDiscover.load(account, null, 0, PAGE_SIZE, true, (result, next, error) -> {
+            loadingShorts = false;
+            batch.shorts = result;
+            batch.shortsNext = next;
+            if (--batch.pending == 0) {
+                applyRefresh(seq, batch);
             }
-            // Atomic swap: replace the list in one notify so there's no empty/skeleton frame. Keep
-            // resolvedChats as a warm cache so channels that reappear keep their thumbnails.
+        });
+        SvipeDiscover.videos(account, null, 0, LONG_PAGE_SIZE, true, (result, next, error) -> {
+            loadingLongs = false;
+            batch.longs = result;
+            batch.longsNext = next;
+            if (--batch.pending == 0) {
+                applyRefresh(seq, batch);
+            }
+        });
+    }
+
+    /** The two refreshed page-0s, held until both have answered so the swap happens exactly once. */
+    private static class RefreshBatch {
+        int pending = 2;
+        List<SvipeDiscover.Item> shorts;
+        List<SvipeDiscover.Item> longs;
+        Integer shortsNext;
+        Integer longsNext;
+    }
+
+    private void applyRefresh(int seq, RefreshBatch batch) {
+        finishRefresh();
+        if (seq != contentSeq) {
+            return;   // a search / mode change landed mid-refresh: that content owns the grid now
+        }
+        if (batch.shorts == null && batch.longs == null) {
+            return;   // both failed: keep the current grid, never blank or revert
+        }
+        // Keep resolvedChats as a warm cache so channels that reappear keep their thumbnails.
+        final ArrayList<GridItem> fresh = new ArrayList<>();
+        if (batch.shorts != null) {
+            shorts.clear();
+            shortsOffset = batch.shortsNext;
+            shortFailures = 0;
+            fresh.addAll(fillPipe(shorts, batch.shorts, false));
+        }
+        if (batch.longs != null) {
+            longs.clear();
+            longsOffset = batch.longsNext;
+            longFailures = 0;
+            fresh.addAll(fillPipe(longs, batch.longs, true));
+        }
+        composeBrowse();
+        adapter.notifyDataSetChanged();
+        scrollToPosition(0);
+        if (!fresh.isEmpty()) {
+            resolveThumbnails(fresh);
+        }
+    }
+
+    /** Single-stream refresh (an injected page loader): the same keep-then-swap, one endpoint. */
+    private void refreshSingleStream() {
+        loadingSingle = true;    // block scroll-pagination until the swap completes
+        final int seq = contentSeq;
+        requestPage(0, PAGE_SIZE, true, (result, next, error) -> {
+            loadingSingle = false;
+            finishRefresh();
+            if (seq != contentSeq || result == null) {
+                return;   // stale, or a network/auth failure: keep the current grid
+            }
             items.clear();
             nextOffset = next;
-            final ArrayList<GridItem> fresh = new ArrayList<>(result.size());
-            for (SvipeDiscover.Item ref : result) {
-                GridItem gi = new GridItem(ref);
-                items.add(gi);
-                fresh.add(gi);
-            }
+            final ArrayList<GridItem> fresh = fillPipe(items, result, null);
             adapter.notifyDataSetChanged();
             scrollToPosition(0);
             if (!fresh.isEmpty()) {
@@ -733,27 +925,214 @@ public class SvipeExploreGrid extends RecyclerListView {
         spinRotation = 0f;
     }
 
-    /** The 3-column shimmer placeholder grid is shown while the first page (initial or refresh) loads. */
+    /** The shimmer placeholder grid is shown while the first page (initial or refresh) loads. */
     private boolean showingSkeleton() {
-        return !hasRecents() && items.isEmpty() && (loading || refreshing);
+        return !hasRecents() && items.isEmpty() && (isLoading() || refreshing);
     }
 
+    /** Ask for more content: both browse pipes, or the single stream behind search / a page loader. */
     private void loadPage() {
-        if (loading || nextOffset == null) {
+        if (dualStream()) {
+            loadBothPipes();
+        } else {
+            loadSinglePage();
+        }
+    }
+
+    // ---- browse mode: two independent pipes + client-side composition ----
+
+    /**
+     * Page whichever pipe is running low. Each is gated on its own in-flight flag and its own cursor, so
+     * the shorts keep flowing while the long-form pipe is slow, exhausted or dead — and vice versa.
+     * "Low" is measured on the BUFFER (what the last composition did not consume), because that is what
+     * the composer will need next, not on the pipe's total length.
+     */
+    private void loadBothPipes() {
+        final int seq = contentSeq;   // pin these requests to the current browse content
+        final boolean wasIdle = !isLoading();
+        if (!loadingShorts && shortsOffset != null
+                && shorts.size() - composedShorts < SPAN_COUNT * SHORTS_ROWS_PER_LONG * PREFETCH_UNITS) {
+            loadingShorts = true;
+            final int offset = shortsOffset;
+            SvipeDiscover.load(account, null, offset, PAGE_SIZE, false,
+                    (result, next, error) -> onPipePage(seq, false, result, next));
+        }
+        if (!loadingLongs && longsOffset != null && longs.size() - composedLongs < PREFETCH_UNITS) {
+            loadingLongs = true;
+            final int offset = longsOffset;
+            SvipeDiscover.videos(account, null, offset, LONG_PAGE_SIZE, false,
+                    (result, next, error) -> onPipePage(seq, true, result, next));
+        }
+        // Reveal the shimmer for a FIRST page only — i.e. the grid was idle and empty, so it had nothing
+        // on screen and cannot be mid-scroll. Notifying the adapter from inside a scroll callback (this
+        // method is also reached from onScrolled) is exactly what RecyclerView refuses to do.
+        if (wasIdle && isLoading() && items.isEmpty()) {
+            adapter.notifyDataSetChanged();
+        }
+    }
+
+    /**
+     * One pipe's page landed. Appends it to that pipe and recomposes the display.
+     *
+     * <p>The first composition deliberately waits for BOTH pipes to settle: composing a lone shorts page
+     * would paint a pure 3-up grid and then splice long cards into it a moment later, reflowing the
+     * whole screen. Later pages compose immediately — by then the rhythm is established and composition
+     * only appends.
+     *
+     * <p>A failure or an empty page is not a dead end. The composer holds a slot open for a pipe that is
+     * merely behind, so a pipe that is actually BROKEN has to be recognised as done, or the grid would
+     * sit on a slot that never fills — that is what the failure cap and the empty-page retirement below
+     * are for, and it is why a dead /v1/videos ends up as a plain shorts grid rather than a blank screen.
+     */
+    private void onPipePage(int seq, boolean longPipe, List<SvipeDiscover.Item> result, Integer next) {
+        if (seq != contentSeq) {
+            return;   // mode / query changed under us (or a refresh reset the pipes) — drop this page
+        }
+        final boolean wasSkeleton = showingSkeleton();
+        if (longPipe) {
+            loadingLongs = false;
+        } else {
+            loadingShorts = false;
+        }
+        ArrayList<GridItem> fresh = null;
+        if (result == null) {
+            // Failed page: keep the cursor so a retry is still possible, but count the failure. At the
+            // cap the long-form pipe is retired outright — a server that has no /v1/videos fails on
+            // every single call, and the grid must stop waiting for cards that will never come.
+            if (longPipe) {
+                if (++longFailures >= MAX_PIPE_FAILURES) {
+                    longsOffset = null;
+                }
+            } else {
+                shortFailures++;
+            }
+        } else if (longPipe && result.isEmpty()) {
+            // An empty long page means there is nothing more to place, whatever next_offset says —
+            // retire the pipe or the composer would hold a card slot open for a card that never comes.
+            longsOffset = null;
+            longFailures = 0;
+        } else {
+            if (longPipe) {
+                longsOffset = next;
+                longFailures = 0;
+            } else {
+                shortsOffset = next;
+                shortFailures = 0;
+            }
+            fresh = fillPipe(longPipe ? longs : shorts, result, longPipe);
+            // Resolve thumbnails off the PIPE, not the display: a page buffered behind the skeleton (or
+            // held back for an incomplete row) warms up meanwhile, so it paints filled when composed.
+            resolveThumbnails(fresh);
+        }
+        if (items.isEmpty() && isLoading()) {
+            return;   // nothing on screen yet and the other pipe may still deliver — keep the skeleton
+        }
+        recomposeBrowse(wasSkeleton);
+        // Self-heal: while the grid is too shallow to scroll it cannot page itself, so top it up here.
+        // A page that delivered always qualifies; a failed page qualifies only while that pipe is under
+        // its failure cap, which is what keeps an outage from spinning requests as fast as they fail.
+        final boolean retryable = fresh != null
+                || (longPipe ? longFailures : shortFailures) < MAX_PIPE_FAILURES;
+        if (retryable && items.size() < MIN_COMPOSED_CELLS) {
+            loadBothPipes();
+        }
+    }
+
+    /**
+     * Rebuild the display list from the two pipes and tell the adapter as cheaply as possible.
+     * Composition is append-only while the pipes only grow, so the previous display is normally a
+     * PREFIX of the new one and a range-insert keeps the scroll position; anything else (a removal, a
+     * refresh, the skeleton being replaced) needs a full rebind.
+     */
+    private void recomposeBrowse(boolean wasSkeleton) {
+        final ArrayList<GridItem> before = new ArrayList<>(items);
+        composeBrowse();
+        if (hasRecents()) {
+            // Browse loaded BEHIND the recents view — staged silently; it renders when the recents view
+            // is dismissed (that transition does a full notify).
             return;
         }
-        loading = true;
+        if (!wasSkeleton && !before.isEmpty() && isPrefixOf(before, items)) {
+            final int added = items.size() - before.size();
+            if (added > 0) {
+                adapter.notifyItemRangeInserted(recentHeaderRows() + before.size(), added);
+            }
+            return;
+        }
+        adapter.notifyDataSetChanged();
+    }
+
+    /**
+     * Compose the DISPLAY list: one long-form card, then {@link #SHORTS_ROWS_PER_LONG} COMPLETE rows of
+     * {@link #SPAN_COUNT} shorts, repeating. This is where row alignment is won — a row is emitted only
+     * once SPAN_COUNT shorts are in hand, so the grid physically cannot contain a half-filled row.
+     *
+     * <p>A pipe that is merely BEHIND (dry but still pageable) stops composition rather than being
+     * skipped, so the rhythm survives a slow page instead of degenerating into a long run of one shape.
+     * A pipe that is DONE (exhausted or retired) is composed around: with no long cards left the rest of
+     * the shorts fill the screen as a plain 3-up grid, and with no shorts left the long cards continue
+     * on their own. The leftover shorts that never made a full row are appended only when NOTHING more
+     * can arrive — holding them back keeps every earlier row whole and keeps the display append-only
+     * (see {@link #recomposeBrowse}), and once both pipes are done the tail can no longer move.
+     */
+    private void composeBrowse() {
+        items.clear();
+        int si = 0;
+        int li = 0;
+        while (true) {
+            boolean placed = false;
+            if (li < longs.size()) {
+                items.add(longs.get(li++));
+                placed = true;
+            } else if (longsOffset != null) {
+                break;   // more long cards are on their way: leave the slot for them
+            }
+            boolean rowShort = false;
+            for (int row = 0; row < SHORTS_ROWS_PER_LONG; row++) {
+                if (shorts.size() - si < SPAN_COUNT) {
+                    rowShort = true;
+                    break;
+                }
+                for (int k = 0; k < SPAN_COUNT; k++) {
+                    items.add(shorts.get(si++));
+                }
+                placed = true;
+            }
+            if (rowShort && shortsOffset != null) {
+                break;   // the next row is incomplete but still fillable: wait for the page
+            }
+            if (!placed) {
+                break;   // both pipes are done and gave nothing this round
+            }
+        }
+        if (shortsOffset == null && longsOffset == null) {
+            while (si < shorts.size()) {
+                items.add(shorts.get(si++));
+            }
+        }
+        composedShorts = si;
+        composedLongs = li;
+    }
+
+    // ---- single stream (search results / injected page loader) ----
+
+    /** Append the next page of the one stream in play, in the order the endpoint returned it. */
+    private void loadSinglePage() {
+        if (loadingSingle || nextOffset == null) {
+            return;
+        }
+        loadingSingle = true;
         if (items.isEmpty()) {
             adapter.notifyDataSetChanged();   // reveal the skeleton grid while the first page loads
         }
         final int offset = nextOffset;
-        final int seq = contentSeq;             // pin this request to the current browse/search content
-        final SvipeDiscover.Callback cb = (result, next, error) -> {
+        final int seq = contentSeq;             // pin this request to the current search/history content
+        requestPage(offset, PAGE_SIZE, false, (result, next, error) -> {
             if (seq != contentSeq) {
                 return;   // mode / query changed under us — this page is stale, drop it
             }
             final boolean wasSkeleton = showingSkeleton();
-            loading = false;
+            loadingSingle = false;
             if (refreshing) {
                 finishRefresh();
             }
@@ -764,34 +1143,46 @@ public class SvipeExploreGrid extends RecyclerListView {
             }
             nextOffset = next;
             final int before = items.size();
-            final ArrayList<GridItem> fresh = new ArrayList<>(result.size());
-            for (SvipeDiscover.Item ref : result) {
-                GridItem gi = new GridItem(ref);
-                items.add(gi);
-                fresh.add(gi);
-            }
-            // Guarantee complete 3-up rows before anything is measured (see closeVerticalRows).
-            final boolean regrouped = closeVerticalRows(items, before);
+            final ArrayList<GridItem> fresh = fillPipe(items, result, null);
             if (hasRecents()) {
-                // Browse/search loaded BEHIND the recents view — stage the data silently; it renders
-                // when the recents view is dismissed (that transition does a full notify).
-            } else if (wasSkeleton || before == 0 || regrouped) {
+                // Search loaded BEHIND the recents view — stage the data silently; it renders when the
+                // recents view is dismissed (that transition does a full notify).
+            } else if (wasSkeleton || before == 0) {
                 // The item count changes wholesale (skeleton/empty -> real size), so a full rebind.
-                // A regroup also moved already-bound positions, so the range insert would be wrong.
                 adapter.notifyDataSetChanged();
             } else if (!fresh.isEmpty()) {
                 adapter.notifyItemRangeInserted(recentHeaderRows() + before, fresh.size());
             }
-            if (!fresh.isEmpty()) {
-                resolveThumbnails(fresh);
-            }
-        };
-        if (searchActive) {
-            SvipeDiscover.search(account, activeQuery, offset, PAGE_SIZE, cb);
-        } else {
-            // Browse mode: honour an injected PageLoader (e.g. reels-history) when set, else /v1/discover.
-            requestPage(offset, PAGE_SIZE, false, cb);
+            resolveThumbnails(fresh);
+        });
+    }
+
+    /**
+     * Wrap references in GridItems, append them to {@code target} and return the new ones so their
+     * thumbnails can be resolved. {@code wide} is the browse pipe's orientation, or null for a single
+     * stream, where the cell shape comes from the reference's own dimensions.
+     */
+    private static ArrayList<GridItem> fillPipe(ArrayList<GridItem> target, List<SvipeDiscover.Item> refs, Boolean wide) {
+        final ArrayList<GridItem> fresh = new ArrayList<>(refs.size());
+        for (SvipeDiscover.Item ref : refs) {
+            final GridItem gi = wide == null ? new GridItem(ref) : new GridItem(ref, wide);
+            target.add(gi);
+            fresh.add(gi);
         }
+        return fresh;
+    }
+
+    /** True when {@code a} is element-for-element the first {@code a.size()} entries of {@code b}. */
+    private static boolean isPrefixOf(List<GridItem> a, List<GridItem> b) {
+        if (a.size() > b.size()) {
+            return false;
+        }
+        for (int i = 0; i < a.size(); i++) {
+            if (a.get(i) != b.get(i)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ---- thumbnail resolution (resolveUsername -> getMessages, batched per channel) ----
@@ -1279,25 +1670,33 @@ public class SvipeExploreGrid extends RecyclerListView {
         fragment.showDialog(new ShareAlert(fragment.getParentActivity(), null, link, false, link, false));
     }
 
-    /** Drop one reference from the visible grid (a "not interested" tap should make it disappear). */
+    /**
+     * Drop one reference from the grid (a "not interested" tap should make it disappear). Removal now
+     * happens on the SOURCES — both pipes plus the recents — and the display is simply recomposed, which
+     * is what keeps the rows whole: a tile leaving a 3-up row no longer punches a hole in it, the
+     * remaining shorts just shift up and the leftover waits for the next page.
+     */
     private void removeRef(SvipeDiscover.Item ref) {
-        boolean changed = dropWhere(items, gi -> gi.ref == ref);
+        boolean changed = dropWhere(shorts, gi -> gi.ref == ref);
+        changed |= dropWhere(longs, gi -> gi.ref == ref);
+        changed |= dropWhere(items, gi -> gi.ref == ref);
         changed |= dropWhere(recentItems, gi -> gi.ref == ref);
         if (changed) {
             recentRows.remove(ref);
-            // Removing one tile out of a 3-up row would leave a hole; re-close the runs.
-            closeVerticalRows(items, 0);
-            adapter.notifyDataSetChanged();
+            afterRemoval();
         }
     }
 
     /**
-     * Drop every reference from a channel the user just blocked — from the browse/search list AND the
-     * recents, since either can be the list on screen when the menu is used.
+     * Drop every reference from a channel the user just blocked — from both browse pipes, the search
+     * list AND the recents, since any of them can be the list on screen when the menu is used.
      */
     private void removeChannel(long channelId) {
-        boolean changed = dropWhere(items, gi -> gi.ref != null && gi.ref.channelId == channelId);
-        changed |= dropWhere(recentItems, gi -> gi.ref != null && gi.ref.channelId == channelId);
+        final GridItemFilter sameChannel = gi -> gi.ref != null && gi.ref.channelId == channelId;
+        boolean changed = dropWhere(shorts, sameChannel);
+        changed |= dropWhere(longs, sameChannel);
+        changed |= dropWhere(items, sameChannel);
+        changed |= dropWhere(recentItems, sameChannel);
         if (changed) {
             for (int i = recentRows.size() - 1; i >= 0; i--) {
                 if (recentRows.get(i).channelId == channelId) {
@@ -1305,83 +1704,30 @@ public class SvipeExploreGrid extends RecyclerListView {
                     recentRows.remove(i);
                 }
             }
-            closeVerticalRows(items, 0);
-            adapter.notifyDataSetChanged();
+            afterRemoval();
         }
-    }
-
-    private static boolean isWide(GridItem gi) {
-        return gi != null && gi.ref != null && gi.ref.isLandscape();
     }
 
     /**
-     * Make every vertical run a whole number of 3-up rows, so the grid never shows a half-filled row.
-     *
-     * The server already interleaves in exact runs (one horizontal, then {@code SPAN_COUNT} verticals),
-     * but the client cannot assume that survives: {@link SvipeDiscover} drops references with no public
-     * username (it has nothing to resolve), and the ⋮ menu removes items outright. Either leaves a run
-     * of 1, 2, 4… and GridLayoutManager then puts a lone tile on its own row with visible gaps beside
-     * it — exactly the artefact this closes.
-     *
-     * The fix is ratio-AGNOSTIC on purpose: it does not impose 1:3, it only rounds each vertical run
-     * down to a multiple of {@code SPAN_COUNT} and pushes the remainder to the front of the NEXT
-     * vertical run. Relative order within each orientation is preserved, the server keeps owning the
-     * mix, and remainders cascade forward until they land in a complete row. Two adjacent horizontal
-     * cards are fine — both are full-span, so neither can leave a gap.
-     *
-     * @param from the index the caller last considered stable; scanning starts at the run containing
-     *             it so an append doesn't reshuffle rows the user is already looking at.
-     * @return true if anything moved, i.e. the caller must do a full rebind rather than a range insert.
+     * Re-render after a removal. Browse recomposes from the pruned pipes; a single stream was pruned in
+     * place. Either way the display shrank, so it is a full rebind, and the browse grid may now be short
+     * enough to need another page.
      */
-    private static boolean closeVerticalRows(ArrayList<GridItem> list, int from) {
-        // Rewind to the start of the run that `from` falls in: a run can only be repaired as a whole.
-        int start = Math.max(0, Math.min(from, list.size()));
-        while (start > 0 && !isWide(list.get(start - 1))) {
-            start--;
+    private void afterRemoval() {
+        if (dualStream()) {
+            composeBrowse();
         }
-        boolean moved = false;
-        final ArrayList<GridItem> carry = new ArrayList<>();   // remainder waiting for the next run
-        int i = start;
-        while (i < list.size()) {
-            if (isWide(list.get(i))) {
-                i++;
-                continue;
-            }
-            // Collect this vertical run.
-            final int runStart = i;
-            while (i < list.size() && !isWide(list.get(i))) {
-                i++;
-            }
-            final ArrayList<GridItem> run = new ArrayList<>(carry);
-            run.addAll(list.subList(runStart, i));
-            carry.clear();
-            final int keep = (run.size() / SPAN_COUNT) * SPAN_COUNT;
-            if (keep != run.size() || run.size() != i - runStart) {
-                moved = true;
-            }
-            for (int k = run.size() - 1; k >= keep; k--) {
-                carry.add(0, run.remove(k));
-            }
-            // Splice the (possibly shorter) run back in.
-            final int oldLen = i - runStart;
-            for (int k = 0; k < oldLen; k++) {
-                list.remove(runStart);
-            }
-            list.addAll(runStart, run);
-            i = runStart + run.size();
+        adapter.notifyDataSetChanged();
+        if (dualStream() && items.size() < MIN_COMPOSED_CELLS) {
+            loadBothPipes();
         }
-        // Whatever is still carried has no following run to join — it is the tail, where a partial row
-        // is unavoidable in any grid. Put it back at the end so nothing is lost.
-        if (!carry.isEmpty()) {
-            list.addAll(carry);
-        }
-        return moved;
     }
 
     private interface GridItemFilter {
         boolean matches(GridItem gi);
     }
 
+    /** Prune one list in place — a ⋮ removal has to reach every list a reference can be sitting in. */
     private static boolean dropWhere(ArrayList<GridItem> list, GridItemFilter f) {
         boolean changed = false;
         for (int i = list.size() - 1; i >= 0; i--) {
