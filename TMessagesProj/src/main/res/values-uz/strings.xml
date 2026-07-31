@@ -221,4 +221,5 @@
     <string name="SvipeSaveWatchLater">Keyinroq ko\'rishga saqlash</string>
     <string name="SvipeSavedToList">Saqlandi</string>
     <string name="SvipeReelsSave">Saqlash</string>
+    <string name="SvipeSaveToList">Saqlanganlarga qo\'shish</string>
 </resources>

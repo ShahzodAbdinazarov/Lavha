@@ -262,16 +262,15 @@ public class SvipeWideVideoCell extends LinearLayout {
                 // "Keyinroq ko'rish" — the YouTube action, implemented as a forward into the user's own
                 // private archived channel (SvipeSavedChannels). Only offered once the message has
                 // resolved, because the list stores a real copy, not a reference.
-                .addIf(message != null, R.drawable.msg_message,
+                // The two YouTube "before you play it" saves, in YouTube's own order. They are
+                // different intents and therefore different lists: Watch Later is a queue you mean to
+                // empty, Saved is a library you mean to keep — see SvipeSavedChannels.
+                .addIf(message != null, R.drawable.msg_recent,
                         LocaleController.getString(R.string.SvipeSaveWatchLater), () ->
-                        SvipeSavedChannels.save(account, SvipeSavedChannels.Kind.WATCH_LATER, message,
-                                fragment, chatId -> AndroidUtilities.runOnUIThread(() -> {
-                                    if (chatId != 0) {
-                                        BulletinFactory.of(fragment).createSimpleBulletin(
-                                                R.raw.saved_messages,
-                                                LocaleController.getString(R.string.SvipeSavedToList)).show();
-                                    }
-                                })))
+                        saveTo(fragment, account, SvipeSavedChannels.Kind.WATCH_LATER, message))
+                .addIf(message != null, R.drawable.msg_saved,
+                        LocaleController.getString(R.string.SvipeSaveToList), () ->
+                        saveTo(fragment, account, SvipeSavedChannels.Kind.SAVED_VIDEOS, message))
                 .add(R.drawable.msg_share, LocaleController.getString(R.string.SvipeReelsShare), () -> share(fragment, item, message))
                 .add(R.drawable.msg2_block2, LocaleController.getString(R.string.SvipeReelsNotInterested), () -> {
                     SvipeDiscover.sendEvent(account, item.channelId, item.messageId, "NOT_INTERESTED", null);
@@ -294,6 +293,19 @@ public class SvipeWideVideoCell extends LinearLayout {
                     }
                 })
                 .show();
+    }
+
+    /** Forward a post into one of the user's saved-list channels, then confirm it landed. */
+    private static void saveTo(BaseFragment fragment, int account, SvipeSavedChannels.Kind kind,
+                               MessageObject message) {
+        SvipeSavedChannels.save(account, kind, message, fragment,
+                chatId -> AndroidUtilities.runOnUIThread(() -> {
+                    if (chatId != 0) {
+                        BulletinFactory.of(fragment).createSimpleBulletin(
+                                R.raw.saved_messages,
+                                LocaleController.getString(R.string.SvipeSavedToList)).show();
+                    }
+                }));
     }
 
     /** Share a reference: the owned svipe.uz link when the feed carried one, else the t.me post. */

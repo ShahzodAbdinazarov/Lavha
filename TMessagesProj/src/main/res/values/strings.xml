@@ -11376,4 +11376,5 @@
     <string name="SvipeSaveWatchLater">Save to Watch Later</string>
     <string name="SvipeSavedToList">Saved</string>
     <string name="SvipeReelsSave">Save</string>
+    <string name="SvipeSaveToList">Save to Saved Videos</string>
 </resources>
