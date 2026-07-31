@@ -485,4 +485,5 @@
     <string name="SvipeSavedVideosChannel">Сохранённые видео</string>
     <string name="SvipeSaveWatchLater">Смотреть позже</string>
     <string name="SvipeSavedToList">Сохранено</string>
+    <string name="SvipeReelsSave">Сохранить</string>
 </resources>

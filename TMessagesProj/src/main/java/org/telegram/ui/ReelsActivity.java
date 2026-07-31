@@ -48,6 +48,7 @@ import org.telegram.svipe.SvipeAuth;
 import org.telegram.svipe.SvipeBlockedChannels;
 import org.telegram.svipe.SvipeFeedRetry;
 import org.telegram.svipe.SvipePreloadPlan;
+import org.telegram.svipe.SvipeSavedChannels;
 import org.telegram.svipe.SvipeQueuePlan;
 import org.telegram.svipe.SvipeReelQueue;
 import org.telegram.svipe.SvipeWatchedSet;
@@ -2079,6 +2080,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             return true;
         }
         if (pointInView(h.shareIcon, e) || pointInView(h.shareCount, e)) { share(it); return true; }
+        if (pointInView(h.saveIcon, e) || pointInView(h.saveLabel, e)) { saveReel(it); return true; }
         if (pointInView(h.moreIcon, e)) { showMore(it, h); return true; }
         if (pointInView(h.followBtn, e)) { toggleFollow(it, h); return true; }
         if (pointInView(h.avatar, e) || pointInView(h.channelName, e)) { openComments(it); return true; }
@@ -2088,6 +2090,26 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             return true;
         }
         return false;
+    }
+
+    /**
+     * Save this reel into the user's "Saved Reels" list — a private, archived channel on their own
+     * account that the app creates on first use. The saved item is a FORWARD, not a reference, which
+     * is what makes it outlive the source channel deleting the post.
+     */
+    private void saveReel(FeedItem it) {
+        if (it == null || it.mo == null) {
+            return;
+        }
+        SvipeSavedChannels.save(currentAccount, SvipeSavedChannels.Kind.SAVED_REELS, it.mo, this,
+                chatId -> AndroidUtilities.runOnUIThread(() -> {
+                    if (chatId != 0) {
+                        BulletinFactory.of(this)
+                                .createSimpleBulletin(R.raw.saved_messages,
+                                        LocaleController.getString(R.string.SvipeSavedToList))
+                                .show();
+                    }
+                }));
     }
 
     // ===================== Pinch-to-zoom on the playing video =====================
@@ -2958,6 +2980,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         View actionRail;   // right column (like/comment/share/more) — taps here must NOT toggle pause
         View infoBox;      // channel row + caption — taps here must NOT toggle pause
         ImageView shareIcon, moreIcon;  // not in the ctor — needed for list-level tap dispatch
+        ImageView saveIcon;             // "Saqlash" -> the user's private Saved Reels channel
+        TextView saveLabel;
 
         ReelsHolder(FrameLayout root, AspectRatioFrameLayout aspect, TextureView tv, BackupImageView cover, ProgressBar pb,
                     ImageView paused, ImageView likeIcon, TextView likeCount, ImageView commentIcon,
@@ -3114,6 +3138,18 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             TextView shareCount = railLabel(ctx, "Ulashish");
             rail.addView(shareCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
 
+            // "Saqlash" — forwards this reel into the user's own private, archived "Saved Reels"
+            // channel (SvipeSavedChannels). The list lives in the user's Telegram account, not on our
+            // servers, so it survives the source channel deleting the post and we never learn what
+            // anyone saved.
+            ImageView saveIcon = new ImageView(ctx);
+            saveIcon.setImageResource(R.drawable.msg_saved);
+            saveIcon.setColorFilter(0xFFFFFFFF);
+            saveIcon.setPadding(AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8));
+            rail.addView(saveIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
+            TextView saveLabel = railLabel(ctx, LocaleController.getString(R.string.SvipeReelsSave));
+            rail.addView(saveLabel, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
+
             ImageView moreIcon = new ImageView(ctx);
             moreIcon.setImageResource(R.drawable.msg_actions);
             moreIcon.setColorFilter(0xFFFFFFFF);
@@ -3194,6 +3230,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             holder.actionRail = rail;
             holder.infoBox = bottomBox;
             holder.shareIcon = shareIcon;
+            holder.saveIcon = saveIcon;
+            holder.saveLabel = saveLabel;
             holder.moreIcon = moreIcon;
             // NOTE: control taps (rail buttons, follow, channel, caption) are dispatched at the LIST
             // level in dispatchControlTap — NOT via per-child click listeners. RecyclerView sends a

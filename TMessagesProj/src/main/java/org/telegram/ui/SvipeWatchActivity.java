@@ -1306,6 +1306,9 @@ public class SvipeWatchActivity extends BaseFragment {
             comment.setLabel(replies > 0 ? String.valueOf(replies) : getString(R.string.SvipeReelsComment));
             comment.setDimmed(replies <= 0);
             shareChip.setLabel(getString(R.string.SvipeReelsShare));
+            // Labelled like every other chip: an icon-only pill in a row of labelled ones reads as a
+            // decoration and gets missed entirely.
+            saveChip.setLabel(getString(R.string.SvipeReelsSave));
             download.bind(mo);
         }
     }

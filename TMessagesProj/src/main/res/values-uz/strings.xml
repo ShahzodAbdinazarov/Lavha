@@ -220,4 +220,5 @@
     <string name="SvipeSavedVideosChannel">Saqlangan videolar</string>
     <string name="SvipeSaveWatchLater">Keyinroq ko\'rishga saqlash</string>
     <string name="SvipeSavedToList">Saqlandi</string>
+    <string name="SvipeReelsSave">Saqlash</string>
 </resources>
