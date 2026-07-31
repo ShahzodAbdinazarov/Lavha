@@ -29802,6 +29802,10 @@ public class ChatActivity extends BaseFragment implements
         super.onResume();
         checkShowBlur(false);
         activityResumeTime = System.currentTimeMillis();
+        // Svipe: a public channel the user just opened is one the indexer may never have reached —
+        // report it. Deduped client-side and server-side, so opening the same chat twice costs one
+        // call ever, and a private chat or a group reports nothing.
+        org.telegram.svipe.SvipeChannelSync.submitChat(currentAccount, currentChat);
         if (openImport && getSendMessagesHelper().getImportingHistory(dialog_id) != null) {
             ImportingAlert alert = new ImportingAlert(getParentActivity(), null, this, themeDelegate);
             alert.setOnHideListener(dialog -> {

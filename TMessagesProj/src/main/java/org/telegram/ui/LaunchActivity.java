@@ -6997,6 +6997,11 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             Theme.checkAutoNightThemeConditions();
         }
         checkWasMutedByAdmin(true);
+        // Svipe: report the public channels this account can see, so the server can index them.
+        // Self-throttled to once a week and a no-op when the dialog list is empty, so this costs a
+        // returning user nothing. Delayed past the resume frame — it walks the whole dialog list.
+        AndroidUtilities.runOnUIThread(
+                () -> org.telegram.svipe.SvipeChannelSync.syncAll(currentAccount), 4000);
         //FileLog.d("UI resume time = " + (SystemClock.elapsedRealtime() - ApplicationLoader.startTime));
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.startAllHeavyOperations, 4096);
         MediaController.getInstance().setFeedbackView(feedbackView = actionBarLayout.getView(), true);
