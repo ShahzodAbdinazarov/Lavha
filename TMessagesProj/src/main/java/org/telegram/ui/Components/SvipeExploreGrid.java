@@ -84,9 +84,11 @@ public class SvipeExploreGrid extends RecyclerListView {
         void load(int offset, int limit, boolean refresh, SvipeDiscover.Callback cb);
     }
 
-    /** Host hook for taps on a film card — the grid does not know how to present a fragment. */
+    /** Host hook for taps on a film / show card — the grid cannot present a fragment itself. */
     public interface MovieDelegate {
         void onMovieTapped(SvipeMovies.Movie movie);
+
+        void onSeriesTapped(SvipeMovies.Series series);
     }
 
     private static final int SPAN_COUNT = 3;
@@ -274,12 +276,26 @@ public class SvipeExploreGrid extends RecyclerListView {
         GridItem(SvipeDiscover.Item ref) {
             // A film poster IS 16:9, but it renders as one of two film cards, not as a full-span
             // video card — so it must never inherit the landscape-means-wide rule.
-            this(ref, ref != null && !(ref instanceof SvipeMovies.PosterRef) && ref.isLandscape());
+            this(ref, ref != null && !(ref instanceof SvipeMovies.PosterRef)
+                    && !(ref instanceof SvipeMovies.SeriesRef) && ref.isLandscape());
         }
 
         /** The film behind a poster reference, or null for an ordinary video tile/card. */
         SvipeMovies.Movie movie() {
-            return ref instanceof SvipeMovies.PosterRef ? ((SvipeMovies.PosterRef) ref).movie : null;
+            if (ref instanceof SvipeMovies.PosterRef) {
+                return ((SvipeMovies.PosterRef) ref).movie;
+            }
+            // A show renders with the SAME card as a film — same poster, same title line — so the
+            // card never has to know which of the two it is holding.
+            if (ref instanceof SvipeMovies.SeriesRef) {
+                return ((SvipeMovies.SeriesRef) ref).series.asCard();
+            }
+            return null;
+        }
+
+        /** The show behind a series reference, or null. */
+        SvipeMovies.Series series() {
+            return ref instanceof SvipeMovies.SeriesRef ? ((SvipeMovies.SeriesRef) ref).series : null;
         }
 
         GridItem(SvipeDiscover.Item ref, boolean wide) {
@@ -369,6 +385,13 @@ public class SvipeExploreGrid extends RecyclerListView {
             // A film card opens the MovieProfile, never the player: which COPY to play is the film
             // page's decision (the user's pinned version, else the crowd default), and short-circuiting
             // to the poster's own copy here would silently ignore that choice.
+            final SvipeMovies.Series tappedSeries = items.get(idx).series();
+            if (tappedSeries != null) {
+                if (movieDelegate != null) {
+                    movieDelegate.onSeriesTapped(tappedSeries);
+                }
+                return;
+            }
             final SvipeMovies.Movie tappedMovie = items.get(idx).movie();
             if (tappedMovie != null) {
                 if (movieDelegate != null) {
@@ -468,9 +491,27 @@ public class SvipeExploreGrid extends RecyclerListView {
         loadingLongs = false;
         loadingSingle = false;
         nextOffset = 0;
-        layoutManager.setSpanCount(category != null && category.film ? MOVIE_SPAN_COUNT : SPAN_COUNT);
+        final boolean cardShelf = category != null
+                && (category.film || "serial".equals(category.slug));
+        layoutManager.setSpanCount(cardShelf ? MOVIE_SPAN_COUNT : SPAN_COUNT);
         if (category == null) {
             pageLoader = null;
+        } else if ("serial".equals(category.slug)) {
+            // The serial shelf lists SHOWS, not loose episodes: an episode is only useful next to its
+            // siblings, and the server has already grouped them (app/movies/series.py).
+            pageLoader = (offset, limit, refresh, cb) -> SvipeMovies.series(
+                    account, offset, Math.min(limit, MOVIE_PAGE_SIZE),
+                    (series, next, error) -> {
+                        if (series == null) {
+                            cb.onResult(null, null, error);
+                            return;
+                        }
+                        final ArrayList<SvipeDiscover.Item> refs = new ArrayList<>(series.size());
+                        for (SvipeMovies.Series one : series) {
+                            refs.add(SvipeMovies.SeriesRef.of(one));
+                        }
+                        cb.onResult(refs, next, null);
+                    });
         } else if (category.film) {
             final String slug = category.slug;
             pageLoader = (offset, limit, refresh, cb) -> SvipeMovies.movies(

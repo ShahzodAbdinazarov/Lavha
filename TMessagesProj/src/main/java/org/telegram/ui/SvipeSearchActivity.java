@@ -41,7 +41,23 @@ public class SvipeSearchActivity extends DialogsActivity {
         exploreGrid.setFragment(this);
         // A film card in a category shelf opens the MovieProfile — the grid raises the tap, the
         // fragment presents, because only a fragment can present another one.
-        exploreGrid.setMovieDelegate(movie -> presentFragment(new SvipeMovieActivity(movie)));
+        exploreGrid.setMovieDelegate(new org.telegram.ui.Components.SvipeExploreGrid.MovieDelegate() {
+            @Override
+            public void onMovieTapped(org.telegram.svipe.SvipeMovies.Movie movie) {
+                presentFragment(new SvipeMovieActivity(movie));
+            }
+
+            @Override
+            public void onSeriesTapped(org.telegram.svipe.SvipeMovies.Series series) {
+                // A show's playlist IS a Telegram channel, so "open the show" is literally opening
+                // that channel — every episode, in order, in the client the user already has. Until
+                // the server has built it the card is inert rather than opening a half-answer.
+                if (series.hasChannel()) {
+                    org.telegram.messenger.browser.Browser.openUrl(
+                            getParentActivity(), "https://t.me/" + series.tgUsername);
+                }
+            }
+        });
         exploreGrid.setOnReelTapListener((items, position) -> {
             final org.telegram.svipe.SvipeDiscover.Item ref =
                     position >= 0 && position < items.size() ? items.get(position) : null;

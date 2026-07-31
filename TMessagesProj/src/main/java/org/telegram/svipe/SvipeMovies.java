@@ -146,6 +146,65 @@ public final class SvipeMovies {
         }
     }
 
+    /** A show. {@code tgUsername} is the generated public channel holding every episode in order. */
+    public static class Series {
+        public long id;
+        public String title;
+        public int year;
+        public int episodeCount;
+        public int seasonCount;
+        public String country;
+        public final List<String> genres = new ArrayList<>();
+        public long posterChannelId;
+        public int posterMessageId;
+        public String posterUsername;
+        public String tgUsername;      // null until the server has built the playlist channel
+        public String channelStatus = "pending";
+
+        public boolean hasChannel() {
+            return tgUsername != null && !tgUsername.isEmpty();
+        }
+
+        /**
+         * A display-only {@link Movie} so a show can be rendered by the SAME card as a film. Only the
+         * fields the card reads are filled; nothing downstream treats it as a real film, because the
+         * grid keeps the Series itself on the reference.
+         */
+        public Movie asCard() {
+            Movie m = new Movie();
+            m.id = id;
+            m.title = title;
+            m.year = year;
+            m.kind = "series";
+            m.versionCount = episodeCount;
+            m.posterChannelId = posterChannelId;
+            m.posterMessageId = posterMessageId;
+            m.posterUsername = posterUsername;
+            m.genres.addAll(genres);
+            return m;
+        }
+    }
+
+    /** A show's poster, shaped as a feed reference — the {@link PosterRef} of the series world. */
+    public static class SeriesRef extends SvipeDiscover.Item {
+        public Series series;
+
+        public static SeriesRef of(Series s) {
+            SeriesRef r = new SeriesRef();
+            r.series = s;
+            r.channelId = s.posterChannelId;
+            r.messageId = s.posterMessageId;
+            r.username = s.posterUsername;
+            r.width = 16;
+            r.height = 9;
+            return r;
+        }
+    }
+
+    public interface SeriesCallback {
+        void onResult(List<Series> series, Integer nextOffset, String error);
+    }
+
     public static class ActorPage {
         public Actor actor;
         public final List<Movie> movies = new ArrayList<>();
@@ -216,6 +275,42 @@ public final class SvipeMovies {
             }
             List<Movie> out = new ArrayList<>();
             parseMovies(res.optJSONArray("items"), out);
+            Integer next = res.isNull("next_offset") ? null : Integer.valueOf(res.optInt("next_offset"));
+            cb.onResult(out, next, null);
+        });
+    }
+
+    /** One page of shows, biggest first. */
+    public static void series(int account, int offset, int limit, SeriesCallback cb) {
+        get(account, "/v1/series?limit=" + limit + "&offset=" + offset, (res, err) -> {
+            if (res == null) {
+                cb.onResult(null, null, err);
+                return;
+            }
+            List<Series> out = new ArrayList<>();
+            JSONArray arr = res.optJSONArray("items");
+            for (int i = 0; arr != null && i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                Series s = new Series();
+                s.id = o.optLong("id");
+                s.title = o.optString("title", "");
+                s.year = o.isNull("year") ? 0 : o.optInt("year");
+                s.episodeCount = o.optInt("episode_count");
+                s.seasonCount = o.optInt("season_count");
+                s.country = o.isNull("country") ? null : o.optString("country", null);
+                JSONArray g = o.optJSONArray("genres");
+                for (int j = 0; g != null && j < g.length(); j++) {
+                    String v = g.optString(j, null);
+                    if (v != null && !v.isEmpty()) s.genres.add(v);
+                }
+                s.posterChannelId = o.optLong("poster_channel_id");
+                s.posterMessageId = o.optInt("poster_message_id");
+                s.posterUsername = o.isNull("poster_username") ? null : o.optString("poster_username", null);
+                s.tgUsername = o.isNull("tg_username") ? null : o.optString("tg_username", null);
+                s.channelStatus = o.optString("channel_status", "pending");
+                out.add(s);
+            }
             Integer next = res.isNull("next_offset") ? null : Integer.valueOf(res.optInt("next_offset"));
             cb.onResult(out, next, null);
         });
