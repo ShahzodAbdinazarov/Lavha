@@ -44,6 +44,32 @@ def keys_of(path):
     return {e.get("name"): "".join(e.itertext()) for e in ET.parse(path).getroot().findall("string")}
 
 
+def unescaped_apostrophes():
+    """aapt2 treats a bare ' inside a string resource as an escape introducer, so an Uzbek string like
+    "Keyinroq ko'rish" fails the RESOURCE MERGE with "Invalid unicode escape sequence in string" — a
+    build error whose message names neither the apostrophe nor the fix. Uzbek uses that character in
+    ordinary words, so this is a mistake worth catching at the source instead of in aapt2's output.
+
+    Reads the raw XML, not the parsed tree: ElementTree resolves the text and the evidence is gone.
+    """
+    problems = []
+    for rel in ["values", *LOCALES]:
+        path = RES / rel / "strings.xml"
+        if not path.exists():
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            m = re.search(r'<string name="([^"]+)">(.*?)</string>', line)
+            if not m:
+                continue
+            body = m.group(2)
+            if re.search(r"(?<!\\)'", body) and not body.startswith('"'):
+                problems.append(
+                    f"{rel}/strings.xml:{lineno}: {m.group(1)} has an unescaped apostrophe "
+                    f"— write it as \\' ({body[:40]})"
+                )
+    return problems
+
+
 def svipe_keys():
     """Keys this fork adds on top of upstream, read from the diff rather than a hand-kept list.
 
@@ -125,6 +151,7 @@ def main():
                 problems.append(f"{loc}: missing {key} (a {loc[7:]} user would read it in English)")
 
     problems += hardcoded()
+    problems += unescaped_apostrophes()
 
     if problems:
         print("Svipe strings must follow the user's Telegram language. Problems:\n", file=sys.stderr)

@@ -212,6 +212,30 @@ public abstract class ProfileStyleActivity extends BaseFragment {
     protected abstract CharSequence getTabTitle();
 
     /**
+     * Titles for the pinned strip, left to right. Default: the one tab {@link #getTabTitle()} names,
+     * which is every existing subclass. Return more to get a multi-tab section — the strip then
+     * reports selection through {@link #onTabSelected(int)} and the SAME adapter renders whichever
+     * tab is active, so a subclass switches a field and calls {@link #notifyInnerListChanged()}
+     * instead of maintaining one adapter per tab.
+     */
+    protected CharSequence[] getTabTitles() {
+        return new CharSequence[]{getTabTitle()};
+    }
+
+    /** A tab was selected (0-based, in {@link #getTabTitles()} order). */
+    protected void onTabSelected(int index) {
+    }
+
+    /** Rebind the section's inner list — the multi-tab counterpart of {@link #notifyListChanged()}. */
+    protected void notifyInnerListChanged() {
+        if (mediaSection != null && mediaSection.innerListView != null
+                && mediaSection.innerListView.getAdapter() != null) {
+            mediaSection.innerListView.getAdapter().notifyDataSetChanged();
+            mediaSection.innerListView.scrollToPosition(0);
+        }
+    }
+
+    /**
      * SharedMediaLayout's shape, reduced to one tab.
      *
      * <p>This is what makes the strip pin: it is not the strip that sticks, it is that the whole
@@ -244,9 +268,25 @@ public abstract class ProfileStyleActivity extends BaseFragment {
             tabStrip = new ScrollSlidingTextTabStrip(context, getResourceProvider());
             tabStrip.setColors(Theme.key_profile_tabSelectedLine, Theme.key_profile_tabSelectedText, Theme.key_profile_tabText, Theme.key_profile_tabSelector);
             tabStrip.setUseMinimalWidth(true);
-            tabStrip.addTextTab(0, getTabTitle());
+            final CharSequence[] titles = getTabTitles();
+            for (int i = 0; i < titles.length; i++) {
+                tabStrip.addTextTab(i, titles[i]);
+            }
             tabStrip.finishAddingTabs();
             tabStrip.setInitialTabId(0);
+            if (titles.length > 1) {
+                tabStrip.setDelegate(new ScrollSlidingTextTabStrip.ScrollSlidingTabStripDelegate() {
+                    @Override
+                    public void onPageSelected(int page, boolean forward) {
+                        onTabSelected(page);
+                        notifyInnerListChanged();
+                    }
+
+                    @Override
+                    public void onPageScrolled(float progress) {
+                    }
+                });
+            }
             try {
                 // SharedMediaLayout's own fallback for when it is handed no liquid-glass factory:
                 // the same drawable off a plain colour source, without the render-node pipeline.

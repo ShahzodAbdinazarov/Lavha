@@ -470,4 +470,19 @@
     <string name="SvipeUpdateUpToDate">У вас последняя версия Svipe</string>
     <string name="SvipeUpdateCheckFailed">Не удалось проверить обновления. Проверьте подключение.</string>
     <string name="SvipeUpdateChecking">Проверка обновлений…</string>
+    <string name="SvipeVideoCategoryAll">Все</string>
+    <string name="SvipeMovieVersions">Версии</string>
+    <string name="SvipeMovieActors">Актёры</string>
+    <string name="SvipeMovieCast">В ролях</string>
+    <string name="SvipeMovieWatch">Смотреть</string>
+    <string name="SvipeMovieSetDefault">Смотреть этот вариант</string>
+    <string name="SvipeMovieDefaultSet">Этот вариант выбран</string>
+    <string name="SvipeMoviesTitle">Кино</string>
+    <string name="SvipeMoviesEmpty">Пока пусто</string>
+    <string name="SvipeActorFilmography">Фильмы</string>
+    <string name="SvipeWatchLaterChannel">Смотреть позже</string>
+    <string name="SvipeSavedReelsChannel">Сохранённые Reels</string>
+    <string name="SvipeSavedVideosChannel">Сохранённые видео</string>
+    <string name="SvipeSaveWatchLater">Смотреть позже</string>
+    <string name="SvipeSavedToList">Сохранено</string>
 </resources>

@@ -108,6 +108,11 @@ public class SvipeRefResolver {
      * MessageObject on the Ref. Reused for both the visible item (then play) and read-ahead prefetch
      * (no play). Idempotent: skips if already resolved or a resolve is in flight.
      */
+    /**
+     * @param delegate optional — pass null when the caller only wants the {@code onResolved} runnable
+     *                 (a poster or avatar binder has no retry policy to run). Every dispatch below is
+     *                 null-guarded for exactly that case.
+     */
     public static void resolve(final int account, final Ref ref, final Runnable onResolved, final Delegate delegate) {
         if (ref.message() != null && ref.chat() != null) { if (onResolved != null) onResolved.run(); return; }
         // Queue-restored item: we already hold a playable MessageObject, only the chat is missing
@@ -124,7 +129,7 @@ public class SvipeRefResolver {
         req.username = ref.username().toLowerCase();
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
             if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
-                delegate.onFailed(ref, true); // transient network failure — retry
+                if (delegate != null) delegate.onFailed(ref, true); // transient network failure — retry
                 return;
             }
             TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
@@ -138,7 +143,7 @@ public class SvipeRefResolver {
                 if (chat == null && !rp.chats.isEmpty()) chat = rp.chats.get(0);
             }
             if (chat == null) {
-                delegate.onFailed(ref, false); // channel not found — give up
+                if (delegate != null) delegate.onFailed(ref, false); // channel not found — give up
                 return;
             }
             final TLRPC.Chat fchat = chat;
@@ -151,27 +156,27 @@ public class SvipeRefResolver {
             gm.id.add(ref.messageId());
             ConnectionsManager.getInstance(account).sendRequest(gm, (resp2, err2) -> {
                 if (err2 != null || !(resp2 instanceof TLRPC.messages_Messages)) {
-                    delegate.onFailed(ref, true); // transient network failure — retry
+                    if (delegate != null) delegate.onFailed(ref, true); // transient network failure — retry
                     return;
                 }
                 TLRPC.messages_Messages mm = (TLRPC.messages_Messages) resp2;
                 MessagesController.getInstance(account).putUsers(mm.users, false);
                 MessagesController.getInstance(account).putChats(mm.chats, false);
                 if (mm.messages == null || mm.messages.isEmpty()) {
-                    delegate.onFailed(ref, false); // message gone — give up
+                    if (delegate != null) delegate.onFailed(ref, false); // message gone — give up
                     return;
                 }
                 final MessageObject mo = new MessageObject(account, mm.messages.get(0), false, true);
                 TLRPC.Document doc = mo.getDocument();
                 if (doc == null || !MessageObject.isVideoDocument(doc)) {
-                    delegate.onFailed(ref, false); // not a playable video — give up
+                    if (delegate != null) delegate.onFailed(ref, false); // not a playable video — give up
                     return;
                 }
                 AndroidUtilities.runOnUIThread(() -> {
                     ref.setResolving(false);
                     ref.setMessage(mo);
                     ref.setChat(fchat);
-                    delegate.onResolved(ref);
+                    if (delegate != null) delegate.onResolved(ref);
                     drainCallbacks(ref); // wakes the caller's queued start-playback intent
                 });
             });

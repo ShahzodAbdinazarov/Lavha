@@ -11360,4 +11360,19 @@
     <string name="ArticleAIPrompt">Write a prompt...</string>
     <string name="ArticleAIGenerate">Generate</string>
     <string name="ArticleAIAddToPage">Add to Page</string>
+    <string name="SvipeVideoCategoryAll">Hammasi</string>
+    <string name="SvipeMovieVersions">Versions</string>
+    <string name="SvipeMovieActors">Actors</string>
+    <string name="SvipeMovieCast">Cast</string>
+    <string name="SvipeMovieWatch">Watch</string>
+    <string name="SvipeMovieSetDefault">Watch this version</string>
+    <string name="SvipeMovieDefaultSet">This version is now your default</string>
+    <string name="SvipeMoviesTitle">Movies</string>
+    <string name="SvipeMoviesEmpty">Nothing here yet</string>
+    <string name="SvipeActorFilmography">Films</string>
+    <string name="SvipeWatchLaterChannel">Watch Later</string>
+    <string name="SvipeSavedReelsChannel">Saved Reels</string>
+    <string name="SvipeSavedVideosChannel">Saved Videos</string>
+    <string name="SvipeSaveWatchLater">Save to Watch Later</string>
+    <string name="SvipeSavedToList">Saved</string>
 </resources>

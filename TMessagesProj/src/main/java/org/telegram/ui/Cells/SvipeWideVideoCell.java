@@ -29,6 +29,7 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
 import org.telegram.svipe.SvipeBlockedChannels;
 import org.telegram.svipe.SvipeDiscover;
+import org.telegram.svipe.SvipeSavedChannels;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
@@ -258,6 +259,19 @@ public class SvipeWideVideoCell extends LinearLayout {
         final MessageObject message = mo;
         ItemOptions.makeOptions(fragment, anchor)
                 .setGravity(Gravity.RIGHT)
+                // "Keyinroq ko'rish" — the YouTube action, implemented as a forward into the user's own
+                // private archived channel (SvipeSavedChannels). Only offered once the message has
+                // resolved, because the list stores a real copy, not a reference.
+                .addIf(message != null, R.drawable.msg_message,
+                        LocaleController.getString(R.string.SvipeSaveWatchLater), () ->
+                        SvipeSavedChannels.save(account, SvipeSavedChannels.Kind.WATCH_LATER, message,
+                                fragment, chatId -> AndroidUtilities.runOnUIThread(() -> {
+                                    if (chatId != 0) {
+                                        BulletinFactory.of(fragment).createSimpleBulletin(
+                                                R.raw.saved_messages,
+                                                LocaleController.getString(R.string.SvipeSavedToList)).show();
+                                    }
+                                })))
                 .add(R.drawable.msg_share, LocaleController.getString(R.string.SvipeReelsShare), () -> share(fragment, item, message))
                 .add(R.drawable.msg2_block2, LocaleController.getString(R.string.SvipeReelsNotInterested), () -> {
                     SvipeDiscover.sendEvent(account, item.channelId, item.messageId, "NOT_INTERESTED", null);

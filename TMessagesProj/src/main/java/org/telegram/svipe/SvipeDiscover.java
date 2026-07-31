@@ -168,6 +168,19 @@ public class SvipeDiscover {
      * {@code refresh=true} asks the server for a fresh window (pull-to-refresh); page-0 only.
      */
     public static void videos(int account, String category, int offset, int limit, boolean refresh, Callback cb) {
+        videos(account, category, null, offset, limit, refresh, cb);
+    }
+
+    /**
+     * @param cat a long-video CATEGORY slug from {@code GET /v1/videos/categories}
+     *            (see {@link SvipeMovies}) — "komediya", "serial", "konsert"… A different axis from
+     *            {@code category} above: that one is a reels interest cluster matched on
+     *            {@code topic_id}, which ~80% of the horizontal corpus does not carry, while every
+     *            long video carries its categories. Null = the unfiltered feed, byte-identical to
+     *            what this call produced before categories existed.
+     */
+    public static void videos(int account, String category, String cat, int offset, int limit,
+                              boolean refresh, Callback cb) {
         StringBuilder path = new StringBuilder("/v1/videos?limit=").append(limit).append("&offset=").append(offset);
         if (refresh) {
             path.append("&refresh=1");
@@ -175,6 +188,12 @@ public class SvipeDiscover {
         if (category != null && !category.isEmpty()) {
             try {
                 path.append("&category=").append(URLEncoder.encode(category, "UTF-8"));
+            } catch (Exception ignore) {
+            }
+        }
+        if (cat != null && !cat.isEmpty()) {
+            try {
+                path.append("&cat=").append(URLEncoder.encode(cat, "UTF-8"));
             } catch (Exception ignore) {
             }
         }

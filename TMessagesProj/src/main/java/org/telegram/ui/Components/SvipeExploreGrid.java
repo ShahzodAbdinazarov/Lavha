@@ -29,11 +29,13 @@ import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
 import org.telegram.svipe.SvipeDiscover;
+import org.telegram.svipe.SvipeMovies;
 import org.telegram.svipe.SvipeVideoSearchHistory;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.SvipeMovieCell;
 import org.telegram.ui.Cells.SvipeWideVideoCell;
 
 import java.util.ArrayList;
@@ -82,6 +84,11 @@ public class SvipeExploreGrid extends RecyclerListView {
         void load(int offset, int limit, boolean refresh, SvipeDiscover.Callback cb);
     }
 
+    /** Host hook for taps on a film card — the grid does not know how to present a fragment. */
+    public interface MovieDelegate {
+        void onMovieTapped(SvipeMovies.Movie movie);
+    }
+
     private static final int SPAN_COUNT = 3;
     /**
      * The display rhythm, and the ONE place it lives: after each long-form card the grid emits this
@@ -128,6 +135,15 @@ public class SvipeExploreGrid extends RecyclerListView {
     // 3 was TYPE_RECENT_ROW (a recent-search QUERY text row); recents now reuse the reel-thumbnail cell.
     private static final int TYPE_PHOTO_WIDE = 4;  // a HORIZONTAL/long-form video: full-width 16:9 card
     private static final int TYPE_SKELETON_WIDE = 5;
+    private static final int TYPE_CATEGORY_CHIPS = 6;  // the YouTube-style chip strip, always row 0
+    private static final int TYPE_MOVIE = 7;           // a film card in a Zona-style category
+    /**
+     * Film cards use TWO columns, not {@link #SPAN_COUNT}. A "poster" here is a 16:9 video thumbnail
+     * (that is the shape Telegram stores), and three 16:9 cards per row are too small to read a title
+     * under. The span count is switched on the layout manager when a film category is entered.
+     */
+    private static final int MOVIE_SPAN_COUNT = 2;
+    private static final int MOVIE_PAGE_SIZE = 30;
 
     private final int account;
     private final GridLayoutManager layoutManager;
@@ -208,6 +224,12 @@ public class SvipeExploreGrid extends RecyclerListView {
     private int longFailures;
 
     // ---- pluggable pager (standalone history screens) ----
+    // ---- category chips + film catalog ----
+    private final ArrayList<SvipeMovies.Category> categories = new ArrayList<>();
+    private SvipeMovies.Category selectedCategory;   // null = "Hammasi" (the unfiltered dual-pipe feed)
+    private boolean categoriesRequested;
+    private MovieDelegate movieDelegate;
+
     private PageLoader pageLoader;          // null -> the dual-pipe browse feed
     private final boolean pullEnabled;      // pull-to-refresh only makes sense for the live explore feed
 
@@ -250,7 +272,14 @@ public class SvipeExploreGrid extends RecyclerListView {
         boolean resolving;
 
         GridItem(SvipeDiscover.Item ref) {
-            this(ref, ref != null && ref.isLandscape());
+            // A film poster IS 16:9, but it renders as one of two film cards, not as a full-span
+            // video card — so it must never inherit the landscape-means-wide rule.
+            this(ref, ref != null && !(ref instanceof SvipeMovies.PosterRef) && ref.isLandscape());
+        }
+
+        /** The film behind a poster reference, or null for an ordinary video tile/card. */
+        SvipeMovies.Movie movie() {
+            return ref instanceof SvipeMovies.PosterRef ? ((SvipeMovies.PosterRef) ref).movie : null;
         }
 
         GridItem(SvipeDiscover.Item ref, boolean wide) {
@@ -283,16 +312,17 @@ public class SvipeExploreGrid extends RecyclerListView {
         layoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
             @Override
             public int getSpanSize(int position) {
+                final int spans = layoutManager.getSpanCount();
+                if (position < headerRows()) {
+                    return spans;   // the chip strip and the "Recent" header both span the row
+                }
                 if (showingSkeleton()) {
-                    return isWideSkeleton(position) ? SPAN_COUNT : 1;
+                    return isWideSkeleton(position - headerRows()) ? spans : 1;
                 }
                 if (searchEmpty()) {
-                    return SPAN_COUNT;
+                    return spans;
                 }
-                if (position < recentHeaderRows()) {
-                    return SPAN_COUNT;
-                }
-                return isWideAt(position) ? SPAN_COUNT : 1;
+                return isWideAt(position) ? spans : 1;
             }
         });
         setLayoutManager(layoutManager);
@@ -320,7 +350,7 @@ public class SvipeExploreGrid extends RecyclerListView {
             if (hasRecents()) {
                 // Recents view: the "Recent" header at 0, then recent reel thumbnails. Tapping one
                 // re-OPENS that reel (seeded like a live result), never a re-search.
-                final int idx = position - recentHeaderRows();
+                final int idx = position - headerRows();
                 if (idx < 0 || idx >= recentRows.size()) {
                     return;
                 }
@@ -332,8 +362,18 @@ public class SvipeExploreGrid extends RecyclerListView {
             // Browse / search grid. `items` is the DISPLAY list, so the seed list handed to
             // ReelsActivity.ofDiscoverSeed is in exactly the order on screen and the index is the
             // tapped cell's own — composition can't desynchronise the two.
-            final int idx = position - recentHeaderRows();
+            final int idx = position - headerRows();
             if (idx < 0 || idx >= items.size()) {
+                return;
+            }
+            // A film card opens the MovieProfile, never the player: which COPY to play is the film
+            // page's decision (the user's pinned version, else the crowd default), and short-circuiting
+            // to the poster's own copy here would silently ignore that choice.
+            final SvipeMovies.Movie tappedMovie = items.get(idx).movie();
+            if (tappedMovie != null) {
+                if (movieDelegate != null) {
+                    movieDelegate.onMovieTapped(tappedMovie);
+                }
                 return;
             }
             // Record a tapped SEARCH RESULT as a recent (browse taps aren't results, so store nothing).
@@ -374,6 +414,86 @@ public class SvipeExploreGrid extends RecyclerListView {
                 }
             }
         });
+    }
+
+    public void setMovieDelegate(MovieDelegate delegate) {
+        this.movieDelegate = delegate;
+    }
+
+    /**
+     * Fetch the chip row once. Failure is silent and non-fatal: with no categories the strip simply
+     * does not render and the grid is exactly the feed it was before categories existed — which is
+     * also what an older backend produces.
+     */
+    private void loadCategories() {
+        if (categoriesRequested) {
+            return;
+        }
+        categoriesRequested = true;
+        SvipeMovies.categories(account, (list, error) -> AndroidUtilities.runOnUIThread(() -> {
+            if (list == null || list.isEmpty()) {
+                return;
+            }
+            categories.clear();
+            categories.addAll(list);   // SERVER order: "Kino" is last on purpose, never re-sort
+            adapter.notifyDataSetChanged();
+        }));
+    }
+
+    /**
+     * Switch shelves. Three destinations, decided by the server's {@code film} flag:
+     * <ul>
+     *   <li>null -> back to the unfiltered dual-pipe browse feed;</li>
+     *   <li>a film shelf -> the Zona-style film catalog from {@code /v1/movies};</li>
+     *   <li>a non-film shelf (Seriallar, Konsertlar, Ta'lim) -> the same long-video list the tab
+     *       already renders, filtered with {@code /v1/videos?cat=}.</li>
+     * </ul>
+     * Both filtered modes are SINGLE streams, so they take the existing page-loader path and there is
+     * no second composer to keep in sync.
+     */
+    private void selectCategory(SvipeMovies.Category category) {
+        selectedCategory = category;
+        stopScroll();
+        contentSeq++;              // orphan every in-flight page from the previous shelf
+        items.clear();
+        shorts.clear();
+        longs.clear();
+        shortsOffset = 0;
+        longsOffset = 0;
+        composedShorts = 0;
+        composedLongs = 0;
+        shortFailures = 0;
+        longFailures = 0;
+        loadingShorts = false;
+        loadingLongs = false;
+        loadingSingle = false;
+        nextOffset = 0;
+        layoutManager.setSpanCount(category != null && category.film ? MOVIE_SPAN_COUNT : SPAN_COUNT);
+        if (category == null) {
+            pageLoader = null;
+        } else if (category.film) {
+            final String slug = category.slug;
+            pageLoader = (offset, limit, refresh, cb) -> SvipeMovies.movies(
+                    account, slug, null, offset, Math.min(limit, MOVIE_PAGE_SIZE),
+                    (movies, next, error) -> {
+                        if (movies == null) {
+                            cb.onResult(null, null, error);
+                            return;
+                        }
+                        final ArrayList<SvipeDiscover.Item> refs = new ArrayList<>(movies.size());
+                        for (SvipeMovies.Movie m : movies) {
+                            refs.add(SvipeMovies.PosterRef.of(m));
+                        }
+                        cb.onResult(refs, next, null);
+                    });
+        } else {
+            final String slug = category.slug;
+            pageLoader = (offset, limit, refresh, cb) ->
+                    SvipeDiscover.videos(account, null, slug, offset, limit, refresh, cb);
+        }
+        adapter.notifyDataSetChanged();
+        scrollToPosition(0);
+        loadPage();
     }
 
     public void setOnReelTapListener(OnReelTapListener listener) {
@@ -557,6 +677,24 @@ public class SvipeExploreGrid extends RecyclerListView {
         return hasRecents() ? 1 : 0;
     }
 
+    /**
+     * True while the category chip strip occupies row 0. It shows in browse mode only — a typed
+     * search and the recents view each own the whole surface — and it stays up during the skeleton so
+     * the categories are tappable before the first page has landed.
+     */
+    private boolean showChips() {
+        return !searchActive && !hasRecents() && !categories.isEmpty();
+    }
+
+    /**
+     * Rows the grid spends on a header before the content starts. Chips and the "Recent" header are
+     * mutually exclusive, so this is 0 or 1 — every list-offset computation must go through it, or a
+     * cell would bind the item next to the one it draws.
+     */
+    private int headerRows() {
+        return hasRecents() ? 1 : (showChips() ? 1 : 0);
+    }
+
     /** The GridItem list currently backing the reel thumbnails: recents when up, else browse/search. */
     private List<GridItem> currentGrid() {
         return hasRecents() ? recentItems : items;
@@ -570,7 +708,7 @@ public class SvipeExploreGrid extends RecyclerListView {
      * grid under the user's finger.
      */
     private boolean isWideAt(int position) {
-        final int idx = position - recentHeaderRows();
+        final int idx = position - headerRows();
         final List<GridItem> grid = currentGrid();
         if (idx < 0 || idx >= grid.size()) {
             return false;
@@ -589,7 +727,7 @@ public class SvipeExploreGrid extends RecyclerListView {
     /** The adapter position a resolved GridItem should notify at, or -1 if it isn't the visible grid. */
     private int adapterPositionOf(GridItem gi) {
         final int idx = currentGrid().indexOf(gi);
-        return idx < 0 ? -1 : recentHeaderRows() + idx;
+        return idx < 0 ? -1 : headerRows() + idx;
     }
 
     /** A committed search that came back with nothing — show the single "no results" notice. */
@@ -940,6 +1078,10 @@ public class SvipeExploreGrid extends RecyclerListView {
 
     /** Ask for more content: both browse pipes, or the single stream behind search / a page loader. */
     private void loadPage() {
+        // Every content path funnels through here — ensureLoaded() does NOT, because the Search
+        // section it lives in is permanently in search mode and returns early from it. loadCategories()
+        // self-guards, so calling it on every page is free after the first.
+        loadCategories();
         if (dualStream()) {
             loadBothPipes();
         } else {
@@ -1159,7 +1301,7 @@ public class SvipeExploreGrid extends RecyclerListView {
                 // The item count changes wholesale (skeleton/empty -> real size), so a full rebind.
                 adapter.notifyDataSetChanged();
             } else if (!fresh.isEmpty()) {
-                adapter.notifyItemRangeInserted(recentHeaderRows() + before, fresh.size());
+                adapter.notifyItemRangeInserted(headerRows() + before, fresh.size());
             }
             resolveThumbnails(fresh);
         });
@@ -1318,19 +1460,24 @@ public class SvipeExploreGrid extends RecyclerListView {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             final int type = holder.getItemViewType();
-            return type == TYPE_PHOTO || type == TYPE_PHOTO_WIDE;
+            return type == TYPE_PHOTO || type == TYPE_PHOTO_WIDE || type == TYPE_MOVIE;
         }
 
         @Override
         public int getItemViewType(int position) {
+            if (position < headerRows()) {
+                return hasRecents() ? TYPE_RECENT_HEADER : TYPE_CATEGORY_CHIPS;
+            }
             if (showingSkeleton()) {
-                return isWideSkeleton(position) ? TYPE_SKELETON_WIDE : TYPE_SKELETON;
+                return isWideSkeleton(position - headerRows()) ? TYPE_SKELETON_WIDE : TYPE_SKELETON;
             }
             if (searchEmpty()) {
                 return TYPE_EMPTY;
             }
-            if (position < recentHeaderRows()) {
-                return TYPE_RECENT_HEADER;
+            final int idx = position - headerRows();
+            final List<GridItem> grid = currentGrid();
+            if (idx >= 0 && idx < grid.size() && grid.get(idx).movie() != null) {
+                return TYPE_MOVIE;
             }
             return isWideAt(position) ? TYPE_PHOTO_WIDE : TYPE_PHOTO;
         }
@@ -1348,6 +1495,17 @@ public class SvipeExploreGrid extends RecyclerListView {
                     break;
                 case TYPE_RECENT_HEADER:
                     view = new RecentHeaderView(ctx);
+                    break;
+                case TYPE_CATEGORY_CHIPS: {
+                    SvipeCategoryChips chips = new SvipeCategoryChips(ctx);
+                    chips.setCategories(categories,
+                            selectedCategory == null ? null : selectedCategory.slug);
+                    chips.setDelegate(SvipeExploreGrid.this::selectCategory);
+                    view = chips;
+                    break;
+                }
+                case TYPE_MOVIE:
+                    view = new SvipeMovieCell(ctx);
                     break;
                 case TYPE_EMPTY:
                     view = createEmptyView(ctx);
@@ -1369,10 +1527,14 @@ public class SvipeExploreGrid extends RecyclerListView {
         @Override
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
             final int type = holder.getItemViewType();
-            if (type != TYPE_PHOTO && type != TYPE_PHOTO_WIDE) {
-                return;   // skeleton / recent header / empty self-render, nothing to bind
+            if (type != TYPE_PHOTO && type != TYPE_PHOTO_WIDE && type != TYPE_MOVIE) {
+                return;   // skeleton / chips / recent header / empty self-render, nothing to bind
             }
-            final GridItem gi = currentGrid().get(position - recentHeaderRows());
+            final GridItem gi = currentGrid().get(position - headerRows());
+            if (type == TYPE_MOVIE) {
+                ((SvipeMovieCell) holder.itemView).bind(gi.movie(), gi.mo);
+                return;
+            }
             if (type == TYPE_PHOTO_WIDE) {
                 ((SvipeWideVideoCell) holder.itemView).bind(gi.ref, gi.mo, chatHintFor(gi));
                 return;
@@ -1383,13 +1545,14 @@ public class SvipeExploreGrid extends RecyclerListView {
 
         @Override
         public int getItemCount() {
+            final int header = headerRows();
             if (showingSkeleton()) {
-                return SKELETON_COUNT;
+                return header + SKELETON_COUNT;
             }
             if (searchEmpty()) {
-                return 1;
+                return header + 1;
             }
-            return recentHeaderRows() + currentGrid().size();
+            return header + currentGrid().size();
         }
     }
 

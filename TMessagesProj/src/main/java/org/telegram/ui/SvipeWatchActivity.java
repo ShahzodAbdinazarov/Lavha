@@ -32,6 +32,8 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.messenger.UserConfig;
 import org.telegram.svipe.SvipeDiscover;
+import org.telegram.svipe.SvipeMovies;
+import org.telegram.svipe.SvipeSavedChannels;
 import org.telegram.svipe.video.SvipeDownloadButton;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
@@ -39,6 +41,7 @@ import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.SvipeWideVideoCell;
 import org.telegram.ui.Components.AvatarDrawable;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.Reactions.ReactionsLayoutInBubble;
@@ -117,6 +120,8 @@ public class SvipeWatchActivity extends BaseFragment {
     private static final int TYPE_RELATED_HEADER = 5;
     private static final int TYPE_RELATED = 6;
     private static final int TYPE_RELATED_SKELETON = 7;
+    /** Cast strip under the player — only present when this post resolved to a film. */
+    private static final int TYPE_ACTORS = 8;
 
     private static final int RELATED_PAGE_SIZE = 20;
     /** Placeholder rows shown while the first related page loads — about one screenful. */
@@ -154,6 +159,11 @@ public class SvipeWatchActivity extends BaseFragment {
     }
 
     private Row watched;
+    /**
+     * The film this post is a copy of, or null — most long videos (concerts, serial episodes,
+     * lectures) are not films, and then the page renders exactly as it did before the movie layer.
+     */
+    private SvipeMovies.MovieDetail movieDetail;
     private final ArrayList<Row> related = new ArrayList<>();
     /** channelId:messageId of everything already on this page, so a related page cannot repeat it. */
     private final HashSet<String> shownKeys = new HashSet<>();
@@ -354,6 +364,7 @@ public class SvipeWatchActivity extends BaseFragment {
         rebuildRows();
         resolveWatched();
         loadRelated();
+        loadMovie();
         if (holeListener != null) {
             holeListener.onWatchPageOpened(this);
         }
@@ -450,6 +461,9 @@ public class SvipeWatchActivity extends BaseFragment {
         rows.add(TYPE_TITLE);
         rows.add(TYPE_CHANNEL);
         rows.add(TYPE_ACTIONS);
+        if (movieDetail != null && !movieDetail.actors.isEmpty()) {
+            rows.add(TYPE_ACTORS);
+        }
         if (hasCaptionBody()) {
             rows.add(TYPE_CAPTION);
         }
@@ -677,6 +691,44 @@ public class SvipeWatchActivity extends BaseFragment {
      * Page the related list. Phase A source (see {@link SvipeDiscover#relatedVideos}): the same
      * long-form pipe the Video tab uses, minus the video being watched and anything already listed.
      */
+    /**
+     * Save the watched post into the user's "Saved Videos" list. Requires the message to be resolved
+     * — the list stores a real forwarded copy, not a reference, which is what makes it survive the
+     * source channel deleting the post.
+     */
+    private void saveToList() {
+        if (watched == null || watched.mo == null) {
+            return;
+        }
+        SvipeSavedChannels.save(currentAccount, SvipeSavedChannels.Kind.SAVED_VIDEOS, watched.mo, this,
+                chatId -> AndroidUtilities.runOnUIThread(() -> {
+                    if (chatId != 0) {
+                        BulletinFactory.of(this)
+                                .createSimpleBulletin(R.raw.saved_messages,
+                                        getString(R.string.SvipeSavedToList))
+                                .show();
+                    }
+                }));
+    }
+
+    /**
+     * Ask whether the watched post is a film; if it is, its cast becomes a strip under the player.
+     * Fire-and-forget: a 404 is the common answer and leaves the page exactly as it was.
+     */
+    private void loadMovie() {
+        if (watched == null || watched.ref == null) {
+            return;
+        }
+        SvipeMovies.movieByPost(currentAccount, watched.ref.channelId, watched.ref.messageId,
+                (detail, error) -> AndroidUtilities.runOnUIThread(() -> {
+                    if (detail == null || detail.actors.isEmpty()) {
+                        return;
+                    }
+                    movieDetail = detail;
+                    rebuildRows();
+                }));
+    }
+
     private void loadRelated() {
         if (loadingRelated || relatedOffset == null || watched.ref == null) {
             return;
@@ -959,6 +1011,9 @@ public class SvipeWatchActivity extends BaseFragment {
                 case TYPE_CAPTION:
                     view = new CaptionView(ctx);
                     break;
+                case TYPE_ACTORS:
+                    view = new ActorsRowView(ctx);
+                    break;
                 case TYPE_RELATED_HEADER:
                     view = sectionHeader(ctx);
                     break;
@@ -991,6 +1046,9 @@ public class SvipeWatchActivity extends BaseFragment {
                 case TYPE_CAPTION:
                     ((CaptionView) holder.itemView).bind();
                     break;
+                case TYPE_ACTORS:
+                    ((ActorsRowView) holder.itemView).bind();
+                    break;
                 case TYPE_RELATED: {
                     final Row row = related.get(position - firstRelatedRow);
                     ((SvipeWideVideoCell) holder.itemView).bind(row.ref, row.mo, row.chat);
@@ -999,6 +1057,68 @@ public class SvipeWatchActivity extends BaseFragment {
                 default:
                     break;   // spacer / header / skeleton render themselves
             }
+        }
+    }
+
+    /**
+     * The cast strip: horizontally scrolling round avatars under the player, each opening that
+     * performer's ActorProfile. Names are the uploading channel's own Uzbek spelling — see
+     * {@link SvipeActorActivity} for why that is the right label rather than a romanisation.
+     */
+    private class ActorsRowView extends FrameLayout {
+        private final LinearLayout row;
+
+        ActorsRowView(Context context) {
+            super(context);
+            HorizontalScrollView scroll = new HorizontalScrollView(context);
+            scroll.setHorizontalScrollBarEnabled(false);
+            scroll.setClipToPadding(false);
+            scroll.setPadding(dp(12), 0, dp(12), 0);
+            row = new LinearLayout(context);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            scroll.addView(row, new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            addView(scroll, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 104, Gravity.TOP, 0, 4, 0, 8));
+        }
+
+        void bind() {
+            row.removeAllViews();
+            if (movieDetail == null) {
+                return;
+            }
+            for (SvipeMovies.Actor a : movieDetail.actors) {
+                row.addView(actorChip(getContext(), a));
+            }
+        }
+
+        private View actorChip(Context context, SvipeMovies.Actor a) {
+            LinearLayout column = new LinearLayout(context);
+            column.setOrientation(LinearLayout.VERTICAL);
+            column.setGravity(Gravity.CENTER_HORIZONTAL);
+
+            BackupImageView avatar = new BackupImageView(context);
+            avatar.setRoundRadius(dp(28));
+            AvatarDrawable drawable = new AvatarDrawable();
+            drawable.setInfo(a.id, a.name, null);
+            avatar.setImageDrawable(drawable);
+            column.addView(avatar, LayoutHelper.createLinear(56, 56));
+
+            TextView name = new TextView(context);
+            name.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+            name.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+            name.setGravity(Gravity.CENTER);
+            name.setMaxLines(2);
+            name.setEllipsize(TextUtils.TruncateAt.END);
+            name.setText(a.name);
+            LinearLayout.LayoutParams nlp = LayoutHelper.createLinear(72, LayoutHelper.WRAP_CONTENT);
+            nlp.topMargin = dp(4);
+            column.addView(name, nlp);
+
+            column.setOnClickListener(v -> presentFragment(new SvipeActorActivity(a.id, a.name)));
+            LinearLayout.LayoutParams lp = LayoutHelper.createLinear(72, LayoutHelper.WRAP_CONTENT);
+            lp.rightMargin = dp(4);
+            column.setLayoutParams(lp);
+            return column;
         }
     }
 
@@ -1142,6 +1262,7 @@ public class SvipeWatchActivity extends BaseFragment {
         private final ActionPill like;
         private final ActionPill comment;
         private final ActionPill shareChip;
+        private final ActionPill saveChip;
         private final SvipeDownloadButton download;
 
         ActionsView(Context context) {
@@ -1165,6 +1286,13 @@ public class SvipeWatchActivity extends BaseFragment {
             shareChip = new ActionPill(context, R.drawable.media_share);
             shareChip.setOnClickListener(v -> share());
             row.addView(shareChip, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 36, Gravity.CENTER_VERTICAL, 4, 0, 4, 0));
+
+            // "Saqlash" — forwards this post into the user's private, archived "Saved Videos" channel.
+            // The list lives in the user's own Telegram account, not on our servers; see
+            // SvipeSavedChannels for why that is the right home for it.
+            saveChip = new ActionPill(context, R.drawable.msg_saved);
+            saveChip.setOnClickListener(v -> saveToList());
+            row.addView(saveChip, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 36, Gravity.CENTER_VERTICAL, 4, 0, 4, 0));
 
             download = new SvipeDownloadButton(context, currentAccount);
             row.addView(download, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 36, Gravity.CENTER_VERTICAL, 4, 0, 4, 0));

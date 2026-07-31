@@ -39,6 +39,9 @@ public class SvipeSearchActivity extends DialogsActivity {
         // Needed by the horizontal cards' ⋮ menu (ItemOptions routes the popup above the bottom tabs
         // via the fragment), plus the share sheet and the report flow.
         exploreGrid.setFragment(this);
+        // A film card in a category shelf opens the MovieProfile — the grid raises the tap, the
+        // fragment presents, because only a fragment can present another one.
+        exploreGrid.setMovieDelegate(movie -> presentFragment(new SvipeMovieActivity(movie)));
         exploreGrid.setOnReelTapListener((items, position) -> {
             final org.telegram.svipe.SvipeDiscover.Item ref =
                     position >= 0 && position < items.size() ? items.get(position) : null;
