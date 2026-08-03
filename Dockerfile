@@ -1,4 +1,6 @@
-FROM gradle:8.13.0-jdk17
+# JDK 21, not 17: gradle/gradle-daemon-jvm.properties pins the daemon to Java 21, so the image has
+# to actually contain a Java 21 or every task here fails to start. Keep the two in sync.
+FROM gradle:8.13.0-jdk21
 
 ENV ANDROID_SDK_URL https://dl.google.com/android/repository/commandlinetools-linux-7302050_latest.zip
 ENV ANDROID_API_LEVEL android-36

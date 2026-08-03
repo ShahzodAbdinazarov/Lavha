@@ -1,3 +1,9 @@
+// Lets Gradle download the JDK named in gradle/gradle-daemon-jvm.properties by itself when the
+// machine has no matching one, so a clean clone (or a new CI box) never needs a hand-installed JDK.
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.10.0'
+}
+
 include ':TMessagesProj'
 include ':TMessagesProj_App'
 include ':TMessagesProj_AppHuawei'
