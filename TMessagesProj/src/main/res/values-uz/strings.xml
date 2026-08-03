@@ -187,6 +187,7 @@
     <string name="SvipeVideoLoop">Videoni takrorlash</string>
     <string name="SvipeVideoDownload">Yuklab olish</string>
     <string name="SvipeVideoDownloaded">Yuklab olindi</string>
+    <string name="SvipeVideoPlaybackFailed">Bu videoni ijro etib bo\'lmadi</string>
     <string name="SvipeSearchVideos">Videolarni qidirish</string>
     <string name="SvipeListenTimeLabel">%1$s • %2$d marta</string>
 
@@ -206,6 +207,21 @@
     <string name="SvipeUpdateCheckFailed">Yangilanishni tekshirib bo\'lmadi. Internetni tekshiring.</string>
     <string name="SvipeUpdateChecking">Yangilanish tekshirilmoqda…</string>
     <string name="SvipeVideoCategoryAll">Hammasi</string>
+    <string name="SvipeVideoCategoryEmpty">Bu yerda hozircha hech nima yo\'q</string>
+    <string name="SvipeVideoCategoryComedy">Komediya</string>
+    <string name="SvipeVideoCategoryAction">Jangari</string>
+    <string name="SvipeVideoCategoryDrama">Drama</string>
+    <string name="SvipeVideoCategoryHorror">Qo\'rqinchli</string>
+    <string name="SvipeVideoCategorySciFi">Fantastika</string>
+    <string name="SvipeVideoCategoryCartoons">Multfilm</string>
+    <string name="SvipeVideoCategoryAnime">Anime</string>
+    <string name="SvipeVideoCategorySeries">Seriallar</string>
+    <string name="SvipeVideoCategoryConcerts">Konsertlar</string>
+    <string name="SvipeVideoCategorySport">Sport</string>
+    <string name="SvipeVideoCategoryEducation">Ta\'lim</string>
+    <string name="SvipeVideoCategoryNews">Yangiliklar</string>
+    <string name="SvipeVideoCategoryDocumentary">Hujjatli</string>
+    <string name="SvipeVideoCategoryMovies">Kino</string>
     <string name="SvipeMovieVersions">Variantlar</string>
     <string name="SvipeMovieActors">Aktyorlar</string>
     <string name="SvipeMovieCast">Rollarda</string>

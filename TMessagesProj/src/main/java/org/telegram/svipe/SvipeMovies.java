@@ -2,6 +2,8 @@ package org.telegram.svipe;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.R;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
@@ -51,6 +53,67 @@ public final class SvipeMovies {
          */
         public boolean film;
         public int count;
+
+        /**
+         * The chip label in the USER's language.
+         *
+         * <p>{@link #title} is the server's single-language display name (Uzbek — see
+         * {@code app/movies/categories.py}, where the taxonomy is a frozen, hard-coded tuple) and is
+         * only a FALLBACK. The taxonomy is fixed and small, so the stable {@link #slug} is what
+         * identifies a shelf and the text belongs in the langpack like every other string in this
+         * app; that also lets {@code Tools/check_svipe_strings.py} enforce uz+ru on it, which a JSON
+         * payload never could. A slug added on the server after this build shipped falls back to the
+         * server title: readable, never blank.
+         */
+        public String label() {
+            final int res = categoryRes(slug);
+            return res == 0 ? title : LocaleController.getString(res);
+        }
+    }
+
+    /**
+     * Category slug -> string resource. Written out rather than resolved by name through
+     * {@code Resources.getIdentifier}: a reflective lookup does not survive R8 resource shrinking,
+     * and this way an unknown slug is a compile-time-visible {@code 0}, not a crash.
+     */
+    private static int categoryRes(String slug) {
+        if (slug == null) return 0;
+        switch (slug) {
+            case "komediya":    return R.string.SvipeVideoCategoryComedy;
+            case "jangari":     return R.string.SvipeVideoCategoryAction;
+            case "drama":       return R.string.SvipeVideoCategoryDrama;
+            case "qorqinchli":  return R.string.SvipeVideoCategoryHorror;
+            case "fantastika":  return R.string.SvipeVideoCategorySciFi;
+            case "multfilm":    return R.string.SvipeVideoCategoryCartoons;
+            case "anime":       return R.string.SvipeVideoCategoryAnime;
+            case "serial":      return R.string.SvipeVideoCategorySeries;
+            case "konsert":     return R.string.SvipeVideoCategoryConcerts;
+            case "sport":       return R.string.SvipeVideoCategorySport;
+            case "talim":       return R.string.SvipeVideoCategoryEducation;
+            case "yangiliklar": return R.string.SvipeVideoCategoryNews;
+            case "hujjatli":    return R.string.SvipeVideoCategoryDocumentary;
+            case "kino":        return R.string.SvipeVideoCategoryMovies;
+            default:            return 0;
+        }
+    }
+
+    /**
+     * The genre line under a film card, in the user's language.
+     *
+     * <p>{@code Movie.genres} is RAW caption text, lower-cased by the parser
+     * ({@code app/movies/parse.py:282}) in whatever language the uploader typed — "боевик", "komediya" — and
+     * can never be translated. The server also sends the film's own taxonomy slugs, so the localized
+     * shelf name is used instead and the raw word stays only as the last resort. "kino" is skipped:
+     * every film lands there, so it is a catch-all, not a genre.
+     */
+    public static String genreLabel(Movie m) {
+        if (m == null) return "";
+        for (String slug : m.categories) {
+            if ("kino".equals(slug)) continue;
+            final int res = categoryRes(slug);
+            if (res != 0) return LocaleController.getString(res);
+        }
+        return m.genres.isEmpty() ? "" : m.genres.get(0);
     }
 
     /** A film card in a grid. */
@@ -62,6 +125,8 @@ public final class SvipeMovies {
         public int runtimeS;
         public String country;
         public final List<String> genres = new ArrayList<>();
+        /** Taxonomy slugs this film sits in, server order. The localizable twin of {@link #genres}. */
+        public final List<String> categories = new ArrayList<>();
         public double kpRating;       // 0 = absent
         public double imdbRating;
         public int versionCount;
@@ -465,6 +530,11 @@ public final class SvipeMovies {
         for (int i = 0; g != null && i < g.length(); i++) {
             String s = g.optString(i, null);
             if (s != null && !s.isEmpty()) m.genres.add(s);
+        }
+        JSONArray cats = o.optJSONArray("categories");
+        for (int i = 0; cats != null && i < cats.length(); i++) {
+            String s = cats.optString(i, null);
+            if (s != null && !s.isEmpty()) m.categories.add(s);
         }
         m.kpRating = o.isNull("kp_rating") ? 0 : o.optDouble("kp_rating", 0);
         m.imdbRating = o.isNull("imdb_rating") ? 0 : o.optDouble("imdb_rating", 0);

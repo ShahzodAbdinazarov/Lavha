@@ -246,6 +246,28 @@ public class SvipeDiscover {
         feedGet(account, "/v1/discover/search?q=" + q + "&limit=" + limit + "&offset=" + offset, cb);
     }
 
+    /**
+     * LONG-FORM search (GET /v1/videos/search) — the horizontal twin of {@link #search}, exactly as
+     * {@link #videos} is the twin of {@link #load}. Same reference shape, its own cursor.
+     *
+     * <p>A separate endpoint rather than a {@code q=} on /v1/videos, and that is deliberate: /v1/videos
+     * is an epoch-rotated, cached recommendation window, so a query must not enter its cache key nor
+     * touch its rotation counter. Searching therefore never disturbs the Video tab the user came from.
+     *
+     * <p>An older server without this route answers 404, which {@link #feedGet} surfaces as a failed
+     * page — the grid retires the long pipe after its failure cap and search degrades to the shorts-only
+     * list it produces today, never to an error screen.
+     */
+    public static void videosSearch(int account, String query, int offset, int limit, Callback cb) {
+        String q;
+        try {
+            q = URLEncoder.encode(query == null ? "" : query, "UTF-8");
+        } catch (Exception e) {
+            q = "";
+        }
+        feedGet(account, "/v1/videos/search?q=" + q + "&limit=" + limit + "&offset=" + offset, cb);
+    }
+
     /** Reels the user recently watched, newest first (the "watching history"). Same reference shape as the grid. */
     public static void reelsHistory(int account, int offset, int limit, Callback cb) {
         feedGet(account, "/v1/reels/history?limit=" + limit + "&offset=" + offset, cb);

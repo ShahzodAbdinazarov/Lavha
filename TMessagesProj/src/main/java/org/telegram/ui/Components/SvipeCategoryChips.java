@@ -27,13 +27,17 @@ import java.util.List;
  * client-side sort (alphabetical, by count, by "relevance") would silently break that product rule,
  * which is why the order is not a decision this view is allowed to make.
  *
- * <p>The leading "Hammasi" chip is synthetic — it is the absence of a filter, so the server never
- * sends it.
+ * <p>The leading "All" chip is synthetic — it is the absence of a filter, so the server never sends
+ * it.
+ *
+ * <p>Every other chip is labelled from {@link SvipeMovies.Category#label()}, NOT from the server's
+ * {@code title}: the payload carries one language (Uzbek), so the stable slug is resolved to a
+ * string resource and the label follows the user's Telegram language.
  */
 public class SvipeCategoryChips extends HorizontalScrollView {
 
     public interface Delegate {
-        /** @param category null for "Hammasi" (no filter). */
+        /** @param category null for "All" (no filter). */
         void onCategorySelected(SvipeMovies.Category category);
     }
 
@@ -75,7 +79,7 @@ public class SvipeCategoryChips extends HorizontalScrollView {
         row.removeAllViews();
         row.addView(chip(null, LocaleController.getString(R.string.SvipeVideoCategoryAll)));
         for (SvipeMovies.Category c : categories) {
-            row.addView(chip(c, c.title));
+            row.addView(chip(c, c.label()));
         }
     }
 

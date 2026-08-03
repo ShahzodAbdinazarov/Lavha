@@ -59,7 +59,9 @@ import java.util.Map;
  * in hand, so a half-filled row cannot be expressed. Each pipe pages, fails and runs dry on its own —
  * a dead long-form pipe degrades to a pure shorts grid, never to an empty screen.
  *
- * <p><b>SEARCH</b> (once the user types) shows GET /v1/discover/search results, and <b>RECENTS</b>
+ * <p><b>SEARCH</b> (once the user types) queries BOTH pipes — GET /v1/discover/search (shorts) and
+ * GET /v1/videos/search (long-form) — and composes them with the same rhythm as browse, since the two
+ * corpora are disjoint server-side and one endpoint can never return the other's videos. <b>RECENTS</b>
  * (empty field, focused) shows the user's recently-tapped reels — a local
  * {@link SvipeVideoSearchHistory} ledger storing the tapped video REFERENCE, not the query — under a
  * "Recent" header, where tap re-opens that reel and long-press removes it. Both are single lists, as
@@ -194,8 +196,9 @@ public class SvipeExploreGrid extends RecyclerListView {
     };
 
     // ---- browse / search / recents mode ----
-    // When searchActive: items hold /v1/discover/search results for activeQuery. Otherwise items hold
-    // the /v1/discover browse grid, and showRecents toggles the recent-search rows on top of it.
+    // When searchActive: the SAME two pipes below hold the two searches for activeQuery
+    // (/v1/discover/search -> shorts, /v1/videos/search -> longs) and items holds their composition.
+    // Otherwise items hold the composed browse grid, and showRecents toggles the recents on top of it.
     private final SvipeVideoSearchHistory history;
     // The recent references (most-recent first) and their resolved-thumbnail GridItems, shown IN PLACE
     // of the browse grid while the empty field is focused. Kept parallel: recentItems[i] wraps recentRows[i].
@@ -556,11 +559,16 @@ public class SvipeExploreGrid extends RecyclerListView {
     }
 
     /**
-     * True when browse is fed by the two independent pipes — i.e. the live explore feed. Search results
-     * and an injected page loader are single streams and take the plain append path.
+     * True when the grid is fed by the two independent pipes — the live explore feed AND a typed query,
+     * which searches BOTH corpora (/v1/discover/search + /v1/videos/search) and composes them with the
+     * same rhythm. Only an injected page loader is a single stream and takes the plain append path.
+     *
+     * <p>Search must be dual-stream for the same reason browse is: the two catalogs are disjoint
+     * server-side (vertical vs landscape), so a search that asks only the shorts endpoint can never
+     * return a single long-form video — which is exactly what it used to do.
      */
     private boolean dualStream() {
-        return !searchActive && pageLoader == null;
+        return pageLoader == null;
     }
 
     /** Any page in flight, on either pipe or on the single stream. */
@@ -568,15 +576,16 @@ public class SvipeExploreGrid extends RecyclerListView {
         return loadingSingle || loadingShorts || loadingLongs;
     }
 
-    /** The single-stream fetch: search results while a query is active, else the injected page loader. */
+    /**
+     * The single-stream fetch: the injected page loader (a history screen). Search does NOT come here —
+     * it is dual-stream, because one search endpoint can only ever see one of the two disjoint corpora.
+     */
     private void requestPage(int offset, int limit, boolean refresh, SvipeDiscover.Callback cb) {
-        if (searchActive) {
-            SvipeDiscover.search(account, activeQuery, offset, limit, cb);
-        } else if (pageLoader != null) {
+        if (pageLoader != null) {
             pageLoader.load(offset, limit, refresh, cb);
         } else {
-            // Unreachable: without a page loader and without a query, browse is dual-stream. Kept as a
-            // safe fallback rather than a silent no-op that would look like a dead feed.
+            // Unreachable: without a page loader the grid is dual-stream. Kept as a safe fallback rather
+            // than a silent no-op that would look like a dead feed.
             SvipeDiscover.load(account, null, offset, limit, refresh, cb);
         }
     }
@@ -594,7 +603,8 @@ public class SvipeExploreGrid extends RecyclerListView {
     /**
      * Drive the grid from the search field. Called by the host on every text / focus change:
      * <ul>
-     *   <li>non-empty query → SEARCH OUR videos (debounced) via {@code /v1/discover/search};</li>
+     *   <li>non-empty query → SEARCH OUR videos (debounced) via BOTH {@code /v1/discover/search} and
+     *       {@code /v1/videos/search}, paged and composed independently;</li>
      *   <li>empty + focused → show the recently-tapped reels (thumbnails) in place of the browse grid;</li>
      *   <li>empty + unfocused → the plain browse grid.</li>
      * </ul>
@@ -671,10 +681,16 @@ public class SvipeExploreGrid extends RecyclerListView {
         searchActive = true;
         activeQuery = q;
         showRecents = false;
+        // A typed search owns the whole surface (see showChips()): it is global, never scoped to the
+        // chip that happened to be selected. Drop the shelf's page loader AND its span count, or the
+        // query would be answered by /v1/movies and the 3-up composition would land in a 2-column grid.
+        selectedCategory = null;
+        pageLoader = null;
+        layoutManager.setSpanCount(SPAN_COUNT);
         recentRows.clear();
         recentItems.clear();
         resetContent();
-        loadPage();                  // loadPage routes to /v1/discover/search while searchActive
+        loadPage();                  // dual-stream: both search endpoints, one per pipe
     }
 
     /** Clear the display, both pipes and all paging so the next loadPage starts fresh; older loads land stale. */
@@ -771,9 +787,15 @@ public class SvipeExploreGrid extends RecyclerListView {
         return idx < 0 ? -1 : headerRows() + idx;
     }
 
-    /** A committed search that came back with nothing — show the single "no results" notice. */
+    /**
+     * Nothing to show and nothing on its way — a committed search that found nothing, OR a category
+     * shelf the server has no inventory for. Both must draw the notice: an empty grid with no notice
+     * is a black void, which is exactly how a shelf with no content used to look (the chip strip on
+     * top of bare window background, and not one pixel of content under it).
+     */
     private boolean searchEmpty() {
-        return searchActive && items.isEmpty() && !isLoading() && !refreshing;
+        return (searchActive || selectedCategory != null)
+                && !hasRecents() && items.isEmpty() && !isLoading() && !refreshing;
     }
 
     /**
@@ -1145,14 +1167,28 @@ public class SvipeExploreGrid extends RecyclerListView {
                 && shorts.size() - composedShorts < SPAN_COUNT * SHORTS_ROWS_PER_LONG * PREFETCH_UNITS) {
             loadingShorts = true;
             final int offset = shortsOffset;
-            SvipeDiscover.load(account, null, offset, PAGE_SIZE, false,
-                    (result, next, error) -> onPipePage(seq, false, result, next));
+            // A typed query swaps this pipe's SOURCE, never its plumbing: same cursor, same failure
+            // counter, same composition. Browse and search are two sources for one pipe, not two modes.
+            if (searchActive) {
+                SvipeDiscover.search(account, activeQuery, offset, PAGE_SIZE,
+                        (result, next, error) -> onPipePage(seq, false, result, next));
+            } else {
+                SvipeDiscover.load(account, null, offset, PAGE_SIZE, false,
+                        (result, next, error) -> onPipePage(seq, false, result, next));
+            }
         }
         if (!loadingLongs && longsOffset != null && longs.size() - composedLongs < PREFETCH_UNITS) {
             loadingLongs = true;
             final int offset = longsOffset;
-            SvipeDiscover.videos(account, null, offset, LONG_PAGE_SIZE, false,
-                    (result, next, error) -> onPipePage(seq, true, result, next));
+            // The long corpus is disjoint from the shorts one server-side, so it needs its OWN query
+            // endpoint — /v1/discover/search physically cannot return a landscape video.
+            if (searchActive) {
+                SvipeDiscover.videosSearch(account, activeQuery, offset, LONG_PAGE_SIZE,
+                        (result, next, error) -> onPipePage(seq, true, result, next));
+            } else {
+                SvipeDiscover.videos(account, null, offset, LONG_PAGE_SIZE, false,
+                        (result, next, error) -> onPipePage(seq, true, result, next));
+            }
         }
         // Reveal the shimmer for a FIRST page only — i.e. the grid was idle and empty, so it had nothing
         // on screen and cannot be mid-scroll. Notifying the adapter from inside a scroll callback (this
@@ -1568,8 +1604,14 @@ public class SvipeExploreGrid extends RecyclerListView {
         @Override
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
             final int type = holder.getItemViewType();
+            if (type == TYPE_EMPTY) {
+                // Two different nothings: a search that found nothing vs a shelf with no content yet.
+                ((TextView) holder.itemView).setText(LocaleController.getString(
+                        searchActive ? R.string.NoResult : R.string.SvipeVideoCategoryEmpty));
+                return;
+            }
             if (type != TYPE_PHOTO && type != TYPE_PHOTO_WIDE && type != TYPE_MOVIE) {
-                return;   // skeleton / chips / recent header / empty self-render, nothing to bind
+                return;   // skeleton / chips / recent header self-render, nothing to bind
             }
             final GridItem gi = currentGrid().get(position - headerRows());
             if (type == TYPE_MOVIE) {
@@ -1640,14 +1682,17 @@ public class SvipeExploreGrid extends RecyclerListView {
         }
     }
 
-    /** The single centred "No results" notice shown when a committed search returns nothing. */
+    /**
+     * The single centred notice shown when a single stream came back with nothing — a committed
+     * search or a category shelf. The wording is set in {@code onBindViewHolder}, because the same
+     * view serves both and only the bind knows which one is on screen.
+     */
     private View createEmptyView(Context context) {
         TextView tv = new TextView(context);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(AndroidUtilities.dp(20), AndroidUtilities.dp(48), AndroidUtilities.dp(20), AndroidUtilities.dp(20));
         tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
         tv.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
-        tv.setText(LocaleController.getString(R.string.NoResult));
         return tv;
     }
 

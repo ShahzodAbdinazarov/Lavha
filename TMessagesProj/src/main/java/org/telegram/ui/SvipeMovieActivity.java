@@ -226,9 +226,10 @@ public class SvipeMovieActivity extends ProfileStyleActivity {
             if (sb.length() > 0) sb.append(" • ");
             sb.append(String.format(Locale.US, "★ %.1f", d.movie.rating()));
         }
-        if (!d.movie.genres.isEmpty()) {
+        final String genre = SvipeMovies.genreLabel(d.movie);
+        if (!genre.isEmpty()) {
             if (sb.length() > 0) sb.append(" • ");
-            sb.append(d.movie.genres.get(0));
+            sb.append(genre);
         }
         return sb.toString();
     }

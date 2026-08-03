@@ -533,6 +533,11 @@ public class SvipeWatchActivity extends BaseFragment {
     // resolver into svipe/video/SvipeRefResolver is its own step (it carries the in-flight-callback
     // queue that keeps a reel from spinning forever), and this page must not wait on it.
 
+    /** Re-run the MTProto resolve after it failed. The player's retry button is the only caller. */
+    public void retryResolve() {
+        resolveWatched();
+    }
+
     private void resolveWatched() {
         final Row row = watched;
         resolve(row, () -> {
@@ -544,7 +549,12 @@ public class SvipeWatchActivity extends BaseFragment {
                 likeCount = totalReactions(row.mo);
             }
             rebuildRows();
-            if (holeListener != null && row.mo != null) {
+            // Unconditional on purpose. The controller opened this reference with resolveHere=false
+            // (SvipeVideoPlayerController.onWatchPageOpened) and is waiting on exactly this callback;
+            // firing it only on success left a failed resolve as a permanently black player with no
+            // error and no retry. onWatchItemResolved is a no-op when the message is still null, and
+            // the controller surfaces the failure from there.
+            if (holeListener != null) {
                 holeListener.onWatchItemResolved(this);
             }
         });

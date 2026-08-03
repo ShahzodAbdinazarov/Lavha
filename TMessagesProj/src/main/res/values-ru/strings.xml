@@ -452,6 +452,7 @@
     <string name="SvipeVideoLoop">Повторять видео</string>
     <string name="SvipeVideoDownload">Скачать</string>
     <string name="SvipeVideoDownloaded">Скачано</string>
+    <string name="SvipeVideoPlaybackFailed">Не удалось воспроизвести это видео</string>
     <string name="SvipeSearchVideos">Поиск видео</string>
     <string name="SvipeListenTimeLabel">%1$s • %2$d прослуш.</string>
 
@@ -471,6 +472,21 @@
     <string name="SvipeUpdateCheckFailed">Не удалось проверить обновления. Проверьте подключение.</string>
     <string name="SvipeUpdateChecking">Проверка обновлений…</string>
     <string name="SvipeVideoCategoryAll">Все</string>
+    <string name="SvipeVideoCategoryEmpty">Здесь пока ничего нет</string>
+    <string name="SvipeVideoCategoryComedy">Комедии</string>
+    <string name="SvipeVideoCategoryAction">Боевики</string>
+    <string name="SvipeVideoCategoryDrama">Драмы</string>
+    <string name="SvipeVideoCategoryHorror">Ужасы</string>
+    <string name="SvipeVideoCategorySciFi">Фантастика</string>
+    <string name="SvipeVideoCategoryCartoons">Мультфильмы</string>
+    <string name="SvipeVideoCategoryAnime">Аниме</string>
+    <string name="SvipeVideoCategorySeries">Сериалы</string>
+    <string name="SvipeVideoCategoryConcerts">Концерты</string>
+    <string name="SvipeVideoCategorySport">Спорт</string>
+    <string name="SvipeVideoCategoryEducation">Образование</string>
+    <string name="SvipeVideoCategoryNews">Новости</string>
+    <string name="SvipeVideoCategoryDocumentary">Документальные</string>
+    <string name="SvipeVideoCategoryMovies">Фильмы</string>
     <string name="SvipeMovieVersions">Версии</string>
     <string name="SvipeMovieActors">Актёры</string>
     <string name="SvipeMovieCast">В ролях</string>

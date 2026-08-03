@@ -11123,6 +11123,7 @@
     <string name="SvipeVideoLoop">Loop video</string>
     <string name="SvipeVideoDownload">Download</string>
     <string name="SvipeVideoDownloaded">Downloaded</string>
+    <string name="SvipeVideoPlaybackFailed">Couldn\'t play this video</string>
 
     <!-- Svipe self-update -->
     <string name="SvipeUpdateDownloading">Downloading update…</string>
@@ -11368,7 +11369,22 @@
     <string name="ArticleAIPrompt">Write a prompt...</string>
     <string name="ArticleAIGenerate">Generate</string>
     <string name="ArticleAIAddToPage">Add to Page</string>
-    <string name="SvipeVideoCategoryAll">Hammasi</string>
+    <string name="SvipeVideoCategoryAll">All</string>
+    <string name="SvipeVideoCategoryEmpty">Nothing here yet</string>
+    <string name="SvipeVideoCategoryComedy">Comedy</string>
+    <string name="SvipeVideoCategoryAction">Action</string>
+    <string name="SvipeVideoCategoryDrama">Drama</string>
+    <string name="SvipeVideoCategoryHorror">Horror</string>
+    <string name="SvipeVideoCategorySciFi">Sci-Fi</string>
+    <string name="SvipeVideoCategoryCartoons">Cartoons</string>
+    <string name="SvipeVideoCategoryAnime">Anime</string>
+    <string name="SvipeVideoCategorySeries">Series</string>
+    <string name="SvipeVideoCategoryConcerts">Concerts</string>
+    <string name="SvipeVideoCategorySport">Sport</string>
+    <string name="SvipeVideoCategoryEducation">Education</string>
+    <string name="SvipeVideoCategoryNews">News</string>
+    <string name="SvipeVideoCategoryDocumentary">Documentary</string>
+    <string name="SvipeVideoCategoryMovies">Movies</string>
     <string name="SvipeMovieVersions">Versions</string>
     <string name="SvipeMovieActors">Actors</string>
     <string name="SvipeMovieCast">Cast</string>

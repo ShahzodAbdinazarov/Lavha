@@ -639,6 +639,24 @@ public class SvipeVideoPlayerController {
      * mutual exclusion for free (VideoPlayer observes playerDidStartPlaying and MediaController
      * consumes ours), exactly as the reels player gets it.
      */
+    /**
+     * Route every dead end here. What this player did before was leave a black rectangle up with no
+     * message, no spinner and no way to try again — indistinguishable from "the video does not play
+     * at all", which is exactly how it was reported.
+     */
+    private void showPlaybackError() {
+        if (stage == null) return;
+        stage.showError(() -> {
+            stage.showError(null);
+            final SvipeWatchActivity page = watchPage;
+            if (current != null && current.mo == null && page != null) {
+                page.retryResolve();   // the MTProto resolve is what failed — run it again
+            } else {
+                startPlayback();
+            }
+        });
+    }
+
     private void startPlayback() {
         if (stage == null || current == null || current.mo == null) return;
         final MessageObject mo = current.mo;
@@ -695,7 +713,10 @@ public class SvipeVideoPlayerController {
                 @Override
                 public void onError(VideoPlayer failed, Exception e) {
                     FileLog.e(e);
-                    if (p == player) telemetry.onPlayFailed("player_error");
+                    if (p == player) {
+                        telemetry.onPlayFailed("player_error");
+                        showPlaybackError();   // a swallowed error reads as "it just doesn't play"
+                    }
                 }
 
                 @Override
@@ -943,6 +964,15 @@ public class SvipeVideoPlayerController {
             if (page != watchPage || current == null || current.mo != null) return;
             current.mo = page.getWatchMessage();
             current.chat = page.getWatchChat();
+            if (current.mo == null) {
+                // The page's MTProto resolve came back empty (network, a private channel, a deleted
+                // post). There is nothing to play and nothing else will call us — say so and offer a
+                // retry instead of leaving a black player up forever.
+                FileLog.d("svipe: long-form watch item did not resolve -> error + retry");
+                telemetry.onPlayFailed("resolve_failed");
+                showPlaybackError();
+                return;
+            }
             if (stage != null) {
                 stage.showCover(current.mo);
                 stage.getControls().setVideo(current.mo, current.chat);

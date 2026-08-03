@@ -109,8 +109,8 @@ public class SvipeMovieCell extends FrameLayout {
             if (sb.length() > 0) sb.append("  •  ");
             sb.append(String.format(Locale.US, "★ %.1f", m.rating()));
         }
-        if (sb.length() == 0 && !m.genres.isEmpty()) {
-            sb.append(m.genres.get(0));
+        if (sb.length() == 0) {
+            sb.append(SvipeMovies.genreLabel(m));
         }
         return sb.toString();
     }

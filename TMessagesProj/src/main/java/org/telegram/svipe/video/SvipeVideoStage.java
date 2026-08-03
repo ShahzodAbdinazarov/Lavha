@@ -6,21 +6,27 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Rect;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ViewConfiguration;
 import android.view.TextureView;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.ImageLocation;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.R;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.INavigationLayout;
+import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
@@ -61,6 +67,9 @@ public class SvipeVideoStage extends FrameLayout {
     private final AspectRatioFrameLayout aspect;
     private final TextureView textureView;
     private final BackupImageView cover; // video thumbnail shown until the first frame renders
+    /** Failure + retry over the picture. Without it a playback failure is an indefinite black frame. */
+    private final LinearLayout errorView;
+    private Runnable retryAction;
     private final SvipeVideoControls controls;
     private final SvipeVideoGestures gestures;
 
@@ -104,6 +113,34 @@ public class SvipeVideoStage extends FrameLayout {
         textureView = new TextureView(context);
         aspect.addView(textureView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         content.addView(aspect, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
+
+        errorView = new LinearLayout(context);
+        errorView.setOrientation(LinearLayout.VERTICAL);
+        errorView.setGravity(Gravity.CENTER);
+        errorView.setBackgroundColor(0x99000000);
+        errorView.setVisibility(GONE);
+        final TextView errorText = new TextView(context);
+        errorText.setText(LocaleController.getString(R.string.SvipeVideoPlaybackFailed));
+        errorText.setTextColor(0xFFFFFFFF);
+        errorText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        errorText.setGravity(Gravity.CENTER);
+        errorView.addView(errorText, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT,
+                LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 16, 0, 16, 10));
+        final TextView retryButton = new TextView(context);
+        retryButton.setText(LocaleController.getString(R.string.Retry));
+        retryButton.setTextColor(0xFFFFFFFF);
+        retryButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        retryButton.setGravity(Gravity.CENTER);
+        retryButton.setPadding(AndroidUtilities.dp(18), AndroidUtilities.dp(8), AndroidUtilities.dp(18), AndroidUtilities.dp(8));
+        retryButton.setBackground(Theme.createSimpleSelectorRoundRectDrawable(
+                AndroidUtilities.dp(16), 0x33FFFFFF, 0x55FFFFFF));
+        retryButton.setOnClickListener(v -> {
+            final Runnable r = retryAction;
+            if (r != null) r.run();
+        });
+        errorView.addView(retryButton, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT,
+                LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+        content.addView(errorView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
 
         addView(content, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
@@ -156,7 +193,18 @@ public class SvipeVideoStage extends FrameLayout {
      * Show the poster for a video about to play. The TextureView is transparent until the decoder
      * pushes a frame, so the cover is what the user actually sees while the stream starts.
      */
+    /**
+     * Show ({@code retry != null}) or hide the failure affordance. The alternative — what this player
+     * did before — is a black rectangle with no message, no spinner and no way to try again, which is
+     * indistinguishable from "the video does not play at all".
+     */
+    public void showError(Runnable retry) {
+        retryAction = retry;
+        errorView.setVisibility(retry != null ? VISIBLE : GONE);
+    }
+
     public void showCover(MessageObject mo) {
+        showError(null);
         textureView.setAlpha(0f);
         TLRPC.Document doc = mo != null ? mo.getDocument() : null;
         TLRPC.PhotoSize thumb = doc != null ? FileLoader.getClosestPhotoSizeWithSize(doc.thumbs, 320) : null;

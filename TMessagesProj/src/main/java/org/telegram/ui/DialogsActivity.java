@@ -7633,7 +7633,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     /**
      * Svipe Search: the grid is ALWAYS on screen and its content follows the field. Empty + unfocused
      * → the /v1/discover BROWSE grid; empty + focused → the recent-search rows above the browse grid;
-     * a typed query → OUR video results from /v1/discover/search (SvipeDiscover.search). The grid sits
+     * a typed query → OUR video results from BOTH pipes' search endpoints (/v1/discover/search for
+     * shorts and /v1/videos/search for long-form; the grid owns that fan-out). The grid sits
      * over the native chat-search pager, so this tab shows our videos, not dialog matches.
      */
     private void svipeUpdateExploreGridVisibility() {
