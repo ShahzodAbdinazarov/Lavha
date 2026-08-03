@@ -536,7 +536,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
                 refreshListPadding();
             }
         };
-        fragmentContextView.isInsideBubble = true;
+        // Telegram 12.9.2 dropped FragmentContextView.isInsideBubble: the transparent, no-extra-padding
+        // look it used to opt into is now what the view always does, so the flag has no replacement.
         contextWrap.addView(fragmentContextView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         fragmentView = root;
