@@ -272,6 +272,39 @@ public class SvipeWatchActivity extends BaseFragment {
     /** How close to the left edge a back swipe has to start. */
     private static final int EDGE_DP = 40;
 
+    /**
+     * The back-swipe, driven from wherever the finger happens to be.
+     *
+     * The picture is an overlay on the window, NOT a child of this page, so a swipe that starts on
+     * the video never reaches this view at all — it is swallowed by the player. Which is most of the
+     * screen's top third, and the most natural place to start the gesture. So the player forwards it
+     * here, and both entry points run the same two methods.
+     */
+    public void backDragMove(float dx) {
+        if (listView == null) return;
+        listView.setTranslationX(Math.max(0, dx));
+        final int w = fragmentView == null ? 1 : Math.max(1, fragmentView.getWidth());
+        listView.setAlpha(Math.max(0f, 1f - Math.max(0, dx) / (w * .6f)));
+    }
+
+    public void backDragEnd(float dx, boolean released) {
+        if (listView == null) return;
+        final int w = fragmentView == null ? 1 : Math.max(1, fragmentView.getWidth());
+        if (released && dx > w * .25f && stepBackInHistory()) {
+            // The video underneath has already swapped; bring its page in from the left so the
+            // movement reads as going back rather than as a page bouncing.
+            listView.setTranslationX(-w * .25f);
+            listView.setAlpha(0f);
+        }
+        listView.animate().cancel();
+        listView.animate().translationX(0).alpha(1f).setDuration(180).start();
+    }
+
+    /** Does this page have somewhere to go back TO? The player asks before claiming a drag. */
+    public boolean hasHistory() {
+        return !history.isEmpty();
+    }
+
     public boolean stepBackInHistory() {
         if (history.isEmpty()) return false;
         openRow(history.remove(history.size() - 1), false);
@@ -448,21 +481,12 @@ public class SvipeWatchActivity extends BaseFragment {
                 final int action = ev.getActionMasked();
                 final float dx = Math.max(0, ev.getX() - downX);
                 if (action == MotionEvent.ACTION_MOVE) {
-                    setDragAway(0, 1f);
-                    listView.setTranslationX(dx);
-                    listView.setAlpha(Math.max(0f, 1f - dx / (getWidth() * .6f)));
+                    backDragMove(dx);
                     return true;
                 }
                 if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                     tracking = false;
-                    final boolean commit = action == MotionEvent.ACTION_UP && dx > getWidth() * .25f;
-                    if (commit && stepBackInHistory()) {
-                        // The video underneath has already swapped; bring its page in from the left
-                        // so the movement reads as going back rather than as a page bouncing.
-                        listView.setTranslationX(-getWidth() * .25f);
-                        listView.setAlpha(0f);
-                    }
-                    listView.animate().translationX(0).alpha(1f).setDuration(180).start();
+                    backDragEnd(dx, action == MotionEvent.ACTION_UP);
                     return true;
                 }
                 return super.onTouchEvent(ev);
