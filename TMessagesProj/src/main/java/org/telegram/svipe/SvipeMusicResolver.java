@@ -106,7 +106,10 @@ public class SvipeMusicResolver {
             }
             chats.put(username, chat);
             fetchMessages(account, chat, group, resolved, done);
-        }));
+            // FailOnServerErrors: without it tgnet swallows a 420 FLOOD_WAIT and re-queues the
+            // request behind the wait, so this callback — and the `done` barrier the caller is
+            // waiting on — would simply never run (see SvipeAuth for the measured case).
+        }), ConnectionsManager.RequestFlagFailOnServerErrors);
     }
 
     private static void fetchMessages(int account, TLRPC.Chat chat, ArrayList<SvipeMusic.Track> group,
@@ -160,6 +163,6 @@ public class SvipeMusicResolver {
                 }
             }
             done.run();
-        }));
+        }), ConnectionsManager.RequestFlagFailOnServerErrors);
     }
 }

@@ -29,6 +29,20 @@ public class SvipeConfig {
     public static final String PREF_REFRESH = "svipe_refresh_token";
     public static final String PREF_EXPIRES = "svipe_token_expires";
 
+    /** Auth-bot peer id, remembered per bot username. contacts.resolveUsername is one of Telegram's
+     *  most flood-limited calls, and a fresh account spends its budget fast (the feed resolves a
+     *  channel per item); paying it once for the bot and never again keeps first-launch auth off
+     *  that budget entirely. Keyed by username so dev and prod bots can never be confused. */
+    public static final String PREF_AUTH_BOT_ID_PREFIX = "svipe_auth_bot_id_";
+
+    public static String prefAuthBotId() {
+        return PREF_AUTH_BOT_ID_PREFIX + botUsername().toLowerCase();
+    }
+
+    /** When a FLOOD_WAIT on the bot resolve expires (epoch ms). Retrying inside the window is not
+     *  just pointless — Telegram can extend the wait for it. */
+    public static final String PREF_AUTH_BOT_FLOOD_UNTIL = "svipe_auth_bot_flood_until";
+
     /** Persisted offline ready-queue (JSON blob) and the watched-reel ledger (JSON array). */
     public static final String PREF_REEL_QUEUE = "svipe_reel_queue";
     public static final String PREF_REEL_WATCHED = "svipe_reel_watched";

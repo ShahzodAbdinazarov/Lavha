@@ -11078,7 +11078,7 @@
 
     <!-- Svipe reels -->
     <string name="SvipeReelsLoadingFeed">Loading feed…</string>
-    <string name="SvipeReelsConnectFailed">Couldn\'t reach Svipe. It will retry once you\'re back online.</string>
+    <string name="SvipeReelsConnectFailed">Couldn\'t reach Svipe. Trying again…</string>
     <string name="SvipeReelsNoInternet">No internet. The feed will load as soon as you\'re back online…</string>
     <string name="SvipeReelsLoadFailed">Feed failed to load (%1$s)</string>
     <string name="SvipeReelsEmpty">No videos yet</string>

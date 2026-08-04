@@ -4,10 +4,14 @@ import android.content.SharedPreferences;
 
 import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Seamless auth for the forked client, fully invisible in the UI. Token chain:
@@ -42,6 +46,20 @@ public class SvipeAuth {
     // firing its own /refresh (+ bot /start), which would race and clobber the stored tokens.
     private static final java.util.HashMap<Integer, java.util.ArrayList<TokenCallback>> inFlight = new java.util.HashMap<>();
 
+    /**
+     * Deadlines. Every link in the chain must answer, or be treated as having answered "no" — an
+     * auth flow that simply never calls back used to park every later caller in {@link #inFlight}
+     * forever, killing reels, music, video and telemetry for the whole process until a restart.
+     * The one observed cause was a FLOOD_WAIT on the bot's contacts.resolveUsername: without
+     * RequestFlagFailOnServerErrors, tgnet swallows a 420 and silently re-queues the request behind
+     * the wait (measured: FLOOD_WAIT_4473 — 74 minutes), so the Java callback never runs.
+     */
+    private static final long CHAIN_DEADLINE_MS = 30_000;   // whole auth chain
+    private static final long MTPROTO_STEP_MS = 8_000;      // resolving the bot: cheap, cached, or floods
+    // The web-app call gets longer: timing it out early would push a merely-slow link onto the
+    // legacy /start fallback, which sends a real message and leaves a bot chat in the user's list.
+    private static final long WEBVIEW_STEP_MS = 12_000;
+
     public static void ensureToken(int account, TokenCallback cb) {
         String stored = getStoredToken(account);
         if (stored != null) {
@@ -58,20 +76,33 @@ public class SvipeAuth {
             waiters.add(cb);
             inFlight.put(account, waiters);
         }
-        authChain(account, token -> {
-            java.util.ArrayList<TokenCallback> waiters;
+        // Completes EXACTLY once, from whichever comes first: the chain or its deadline. A late real
+        // answer is not wasted — the token it stores is picked up by the next ensureToken call.
+        final AtomicBoolean settled = new AtomicBoolean();
+        final TokenCallback finish = token -> {
+            if (!settled.compareAndSet(false, true)) return;
+            final java.util.ArrayList<TokenCallback> waiters;
             synchronized (inFlight) {
                 waiters = inFlight.remove(account);
             }
-            if (waiters != null) {
+            if (waiters == null) return;
+            AndroidUtilities.runOnUIThread(() -> {
                 for (TokenCallback w : waiters) {
                     try { w.run(token); } catch (Exception ignore) {}
                 }
+            });
+        };
+        AndroidUtilities.runOnUIThread(() -> {
+            if (!settled.get()) {
+                FileLog.d("svipe: auth chain deadline hit — releasing waiters so callers can retry");
+                finish.run(null);
             }
-        });
+        }, CHAIN_DEADLINE_MS);
+        authChain(account, finish);
     }
 
     private static void authChain(int account, TokenCallback cb) {
+        final long deadlineAt = System.currentTimeMillis() + CHAIN_DEADLINE_MS;
         refreshToken(account, refreshed -> {
             if (refreshed != null) {
                 cb.run(refreshed);
@@ -82,7 +113,16 @@ public class SvipeAuth {
                     cb.run(webApp);
                     return;
                 }
-                legacyBotAuth(account, cb);
+                // The legacy fallback sends "/start" TO the bot, so it needs the same peer the
+                // web-app path just failed to get. When the bot itself is what we could not
+                // resolve (a flood window, typically), there is nothing left to try this round —
+                // and pretending otherwise would fire three backend calls plus a poll loop for a
+                // flow that cannot possibly complete.
+                if (!botKnown(account)) {
+                    cb.run(null);
+                    return;
+                }
+                legacyBotAuth(account, deadlineAt, cb);
             });
         });
     }
@@ -132,10 +172,16 @@ public class SvipeAuth {
             req.url = SvipeConfig.webAppUrl();
             req.flags |= 2;
             req.from_bot_menu = true;
+            final AtomicBoolean answered = new AtomicBoolean();
+            // FailOnServerErrors: hand us a 420/500 instead of parking the request behind an internal
+            // retry we would never hear about. The timeout covers the rest (no response at all).
             ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
+                if (!answered.compareAndSet(false, true)) return;
                 String initData = null;
                 if (error == null && response instanceof TLRPC.TL_webViewResultUrl) {
                     initData = SvipeInitData.extract(((TLRPC.TL_webViewResultUrl) response).url);
+                } else if (error != null) {
+                    FileLog.d("svipe: auth requestWebView failed: " + error.text);
                 }
                 if (initData == null) {
                     AndroidUtilities.runOnUIThread(() -> cb.run(null));
@@ -151,27 +197,65 @@ public class SvipeAuth {
                         cb.run(null);
                     }
                 });
-            });
+            }, ConnectionsManager.RequestFlagFailOnServerErrors);
+            AndroidUtilities.runOnUIThread(() -> {
+                if (answered.compareAndSet(false, true)) {
+                    FileLog.d("svipe: auth requestWebView timed out");
+                    cb.run(null);
+                }
+            }, WEBVIEW_STEP_MS);
         });
     }
 
     // ---- legacy deep-link flow (fallback only) ----
 
-    private static void legacyBotAuth(int account, TokenCallback cb) {
+    private static void legacyBotAuth(int account, long deadlineAt, TokenCallback cb) {
         SvipeApi.post("/v1/auth/telegram/start", new JSONObject(), null, (res, code, err) -> {
             if (res == null) { cb.run(null); return; }
             String nonce = res.optString("nonce", null);
             if (nonce == null || nonce.isEmpty()) { cb.run(null); return; }
             sendStartToBot(account, nonce);
-            pollToken(account, nonce, 0, cb);
+            pollToken(account, nonce, 0, deadlineAt, cb);
         });
     }
 
+    /**
+     * The auth bot's peer id. Three sources, cheapest first — the network resolve is the LAST resort
+     * because contacts.resolveUsername is flood-limited per account and a new user's budget is
+     * already being spent resolving feed channels. Once known, the id is remembered forever
+     * ({@link SvipeConfig#prefAuthBotId()}), so this costs a round-trip once per install.
+     */
     private static void resolveBot(int account, BotCallback cb) {
-        MessagesController mc = MessagesController.getInstance(account);
+        final MessagesController mc = MessagesController.getInstance(account);
+        final String username = SvipeConfig.botUsername();
+        // 1. Telegram's own username cache (populated by any earlier resolve, contact or dialog).
+        TLObject cached = mc.getUserOrChat(username);
+        if (cached instanceof TLRPC.User && ((TLRPC.User) cached).id != 0) {
+            long id = ((TLRPC.User) cached).id;
+            rememberBotId(account, id);
+            cb.run(id);
+            return;
+        }
+        // 2. Our own note of it — only trusted while the user object (and its access_hash) is loaded.
+        long remembered = MessagesController.getMainSettings(account).getLong(SvipeConfig.prefAuthBotId(), 0);
+        if (remembered != 0 && mc.getUser(remembered) != null) {
+            cb.run(remembered);
+            return;
+        }
+        // 3. Ask the server, bounded on both sides: FailOnServerErrors so a FLOOD_WAIT comes back as
+        // an error instead of being re-queued behind the wait, and a timeout for silence. While a
+        // known flood window is open we don't ask at all — the answer is already known, and hammering
+        // a flood-limited method is how a short wait becomes a long one.
+        long floodUntil = MessagesController.getMainSettings(account).getLong(SvipeConfig.PREF_AUTH_BOT_FLOOD_UNTIL, 0);
+        if (floodUntil > System.currentTimeMillis()) {
+            cb.run(0);
+            return;
+        }
         TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
-        req.username = SvipeConfig.botUsername();
+        req.username = username;
+        final AtomicBoolean answered = new AtomicBoolean();
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
+            if (!answered.compareAndSet(false, true)) return;
             long botId = 0;
             if (error == null && response instanceof TLRPC.TL_contacts_resolvedPeer) {
                 TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
@@ -179,10 +263,51 @@ public class SvipeAuth {
                 mc.putChats(rp.chats, false);
                 if (rp.users != null && !rp.users.isEmpty()) {
                     botId = rp.users.get(0).id;
+                    rememberBotId(account, botId);
                 }
+            } else if (error != null) {
+                FileLog.d("svipe: auth bot resolve failed: " + error.text);
+                rememberFloodWait(account, error.text);
             }
             cb.run(botId);
-        });
+        }, ConnectionsManager.RequestFlagFailOnServerErrors);
+        AndroidUtilities.runOnUIThread(() -> {
+            if (answered.compareAndSet(false, true)) {
+                FileLog.d("svipe: auth bot resolve timed out");
+                cb.run(0);
+            }
+        }, MTPROTO_STEP_MS);
+    }
+
+    /** Do we hold the auth bot's peer without going to the network? */
+    private static boolean botKnown(int account) {
+        MessagesController mc = MessagesController.getInstance(account);
+        if (mc.getUserOrChat(SvipeConfig.botUsername()) instanceof TLRPC.User) return true;
+        long remembered = MessagesController.getMainSettings(account).getLong(SvipeConfig.prefAuthBotId(), 0);
+        return remembered != 0 && mc.getUser(remembered) != null;
+    }
+
+    /** Note how long Telegram told us to wait, so we stop asking until it is over. */
+    private static void rememberFloodWait(int account, String errorText) {
+        int seconds = SvipeFloodWait.secondsIn(errorText);
+        if (seconds <= 0) return;
+        try {
+            MessagesController.getMainSettings(account).edit()
+                    .putLong(SvipeConfig.PREF_AUTH_BOT_FLOOD_UNTIL, System.currentTimeMillis() + seconds * 1000L)
+                    .apply();
+        } catch (Exception ignore) {
+            // best-effort
+        }
+    }
+
+    private static void rememberBotId(int account, long botId) {
+        if (botId == 0) return;
+        try {
+            MessagesController.getMainSettings(account).edit()
+                    .putLong(SvipeConfig.prefAuthBotId(), botId).apply();
+        } catch (Exception ignore) {
+            // best-effort
+        }
     }
 
     private static void sendStartToBot(int account, String nonce) {
@@ -199,8 +324,13 @@ public class SvipeAuth {
         });
     }
 
-    private static void pollToken(int account, String nonce, int attempt, TokenCallback cb) {
-        if (attempt > 20) { cb.run(null); return; }
+    /**
+     * Polls until the bot's /start lands — bounded by the chain deadline as well as by the attempt
+     * count, so a poll loop can never outlive the flow that started it and pile up on top of the
+     * next one (callers retry on their own schedule).
+     */
+    private static void pollToken(int account, String nonce, int attempt, long deadlineAt, TokenCallback cb) {
+        if (attempt > 20 || System.currentTimeMillis() >= deadlineAt) { cb.run(null); return; }
         JSONObject body = new JSONObject();
         try { body.put("nonce", nonce); } catch (Exception ignore) {}
         SvipeApi.post("/v1/auth/telegram/poll", body, null, (res, code, err) -> {
@@ -210,7 +340,7 @@ public class SvipeAuth {
             } else if (code == 404) {
                 cb.run(null);
             } else {
-                AndroidUtilities.runOnUIThread(() -> pollToken(account, nonce, attempt + 1, cb), 1500);
+                AndroidUtilities.runOnUIThread(() -> pollToken(account, nonce, attempt + 1, deadlineAt, cb), 1500);
             }
         });
     }

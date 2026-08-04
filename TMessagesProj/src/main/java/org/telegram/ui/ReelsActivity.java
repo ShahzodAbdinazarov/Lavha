@@ -46,11 +46,13 @@ import org.json.JSONObject;
 import org.telegram.svipe.SvipeApi;
 import org.telegram.svipe.SvipeAuth;
 import org.telegram.svipe.SvipeBlockedChannels;
+import org.telegram.svipe.SvipeColdStart;
 import org.telegram.svipe.SvipeFeedRetry;
 import org.telegram.svipe.SvipePreloadPlan;
 import org.telegram.svipe.SvipeSavedChannels;
 import org.telegram.svipe.SvipeQueuePlan;
 import org.telegram.svipe.SvipeReelQueue;
+import org.telegram.svipe.SvipeReelWarmer;
 import org.telegram.svipe.SvipeWatchedSet;
 import org.telegram.svipe.SvipeWatchEvent;
 import org.telegram.svipe.video.SvipeRefResolver;
@@ -155,7 +157,20 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private String recommendationId;
     private String token;
     private boolean loadingFeed;
+    // When the in-flight feed request started, and which one it is. The pair exists because
+    // `loadingFeed` alone is a latch: a request whose callback never arrives (a stalled auth chain
+    // did exactly this) left it set forever, and every retry path here is gated on it being clear.
+    // Past SvipeColdStart.REQUEST_TIMEOUT_MS the request is presumed dead and a new one may start;
+    // the generation makes the zombie's late callback a no-op instead of a clobber.
+    private long feedRequestStartedMs;
+    private int feedRequestGeneration;
     private boolean feedLoadFailed; // auto-retried via didUpdateConnectionState when network returns
+    // Empty-pager watchdog: while the cold start has produced nothing, re-kick the load on a
+    // widening backoff. Without it the ONLY retry trigger was a connection-state change, which
+    // never comes when the network was fine all along.
+    private Runnable coldStartWatchdog;
+    private int coldStartAttempts;
+    private boolean statusIsFailure; // a failure message is on screen; progress chatter must not hide it
     private boolean feedExhausted;  // the backend ran out of pages (null cursor); reset on a fresh load
     private int emptyAppendStreak;  // consecutive append pages that added 0 new items — bounds cursor-chaining
 
@@ -512,6 +527,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (!playSeedIfPresent()) {
             restoreQueueThenPlay();
         }
+        // createView runs again whenever the pager rebuilds this page, and the fresh statusView is
+        // born showing "Loading". If reels are already playing, restoreQueueThenPlay bows out early
+        // and nobody would ever clear that label — it would sit over the video until the app was
+        // restarted. Decide the label from the state that actually exists right now.
+        if (!items.isEmpty()) setStatus(null);
         // When opened from the Search Explore grid (seeded), this is a presented fragment — show a
         // back button at the top-left to return to Search (the reels tab itself has none), and host
         // the persistent native discussion-comment input at the bottom.
@@ -822,9 +842,16 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private static final int RESTORE_MAX_ATTEMPTS = 4; // retry the early-cold-start FileLoader race
 
     private void restoreQueueThenPlay(int attempt) {
-        // Idempotent: if a prior attempt (or the other createView pass) already populated the pager,
-        // don't touch it again.
-        if (coldStartDone && !items.isEmpty()) return;
+        // Idempotent: if ANYTHING already populated the pager — a prior attempt, the other createView
+        // pass, or the online feed getting there first — this has nothing left to do but make sure
+        // the (possibly brand-new) status label is clear. The test is the pager, NOT coldStartDone:
+        // the flag is set at the END of this path, so gating on it let a late restore attempt paint
+        // "Loading" back over a reel that was already playing.
+        if (!items.isEmpty()) {
+            coldStartDone = true;
+            setStatus(null);
+            return;
+        }
         Utilities.globalQueue.postRunnable(() -> {
             final ArrayList<FeedItem> rebuilt = new ArrayList<>();
             int total = 0, skipWatched = 0, skipDeser = 0, skipNoFile = 0, downloadedUnwatched = 0;
@@ -863,7 +890,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             final int fTotal = total, fSkipWatched = skipWatched, fSkipDeser = skipDeser, fSkipNoFile = skipNoFile;
             final int fDownloadedUnwatched = downloadedUnwatched;
             AndroidUtilities.runOnUIThread(() -> {
-                if (coldStartDone && !items.isEmpty()) return; // another pass already won
+                if (!items.isEmpty()) { // another pass — or the online feed — already won
+                    coldStartDone = true;
+                    setStatus(null);
+                    return;
+                }
                 FileLog.d("svipe: cold start attempt=" + attempt + " queue total=" + fTotal + " restored=" + rebuilt.size()
                         + " skip(watched=" + fSkipWatched + ",deser=" + fSkipDeser + ",noFile=" + fSkipNoFile + ")");
                 if (!rebuilt.isEmpty()) {
@@ -881,17 +912,94 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     AndroidUtilities.runOnUIThread(() -> restoreQueueThenPlay(attempt + 1), 200);
                 } else {
                     coldStartDone = true;
-                    setStatus(getString(R.string.Loading)); // genuinely empty queue -> online fallback shows the spinner
+                    // Nothing on disk — but the warm-up that ran at app start may already hold a
+                    // resolved page, which plays exactly like the offline queue: instantly, with no
+                    // network in the way. Only if that is empty too does the online fallback show.
+                    if (!adoptWarmFeed()) {
+                        setStatus(getString(R.string.Loading)); // genuinely cold -> online fallback shows the spinner
+                    }
                     kickBackgroundFeed();
                 }
             });
         });
     }
 
+    /**
+     * Adopt the page {@link SvipeReelWarmer} prepared at app start. Same shape as the offline-queue
+     * restore — items straight into the pager, play position 0, no network gate — except the items
+     * come from a feed fetched minutes ago instead of from disk. The warm-up resolved the head of
+     * the page and head-preloaded the first video, so this is genuinely instant; the rest resolve
+     * as the user swipes, exactly as they do on any other page.
+     */
+    private boolean adoptWarmFeed() {
+        SvipeReelWarmer.Warm w = SvipeReelWarmer.take();
+        if (w == null || w.items.isEmpty()) return false;
+        for (SvipeRefResolver.VideoRef r : w.items) {
+            if (watchedSet != null && watchedSet.isWatched(r.channelId, r.messageId)) continue;
+            if (blockedChannels.contains(r.channelId)
+                    || (svipeBlockedChannels != null && svipeBlockedChannels.contains(r.channelId))) continue;
+            FeedItem it = new FeedItem();
+            it.channelId = r.channelId;
+            it.messageId = r.messageId;
+            it.username = r.username;
+            it.shareUrl = r.shareUrl;
+            it.topicId = r.topicId;
+            it.recId = r.recId;
+            it.mo = r.mo;
+            it.chat = r.chat;
+            if (it.mo != null) {
+                it.liked = isLiked(it.mo);
+                it.likeCount = totalReactions(it.mo);
+            }
+            items.add(it);
+        }
+        if (items.isEmpty()) return false;
+        recommendationId = w.recommendationId;
+        feedCursor = w.cursor; // keep paginating where the warm-up stopped instead of re-serving it
+        FileLog.d("svipe: cold start served by the app-start warm-up (" + items.size() + " reels)");
+        setStatus(null);
+        adapter.notifyDataSetChanged();
+        currentPosition = -1;
+        AndroidUtilities.runOnUIThread(this::checkCurrentPage, 0);
+        return true;
+    }
+
     /** Background feed load that MERGES into the playing queue instead of replacing it. */
     private void kickBackgroundFeed() {
         feedExhausted = false;
         requestFeed(false, false);
+        if (items.isEmpty()) scheduleColdStartWatchdog();
+    }
+
+    /**
+     * Keep trying until the pager has something in it. The cold start is a chain of network steps
+     * (auth -> feed -> resolve) and any of them can end without an answer; when that happened the
+     * screen simply kept its "Loading" label until the user killed the app — the single most
+     * damaging first impression the app can make, since a new user has no offline queue to fall
+     * back on. The backoff widens to 30s and then stays there, cancelled the moment a reel exists.
+     */
+    private void scheduleColdStartWatchdog() {
+        cancelColdStartWatchdog();
+        if (!items.isEmpty() || isPaused || isFinishing()) return;
+        final long delay = SvipeColdStart.retryDelayMs(coldStartAttempts);
+        coldStartWatchdog = () -> {
+            coldStartWatchdog = null;
+            if (!items.isEmpty() || isPaused || isFinishing()) return;
+            coldStartAttempts++;
+            FileLog.d("svipe: cold-start watchdog re-kick #" + coldStartAttempts
+                    + " (loading=" + loadingFeed + ", failed=" + feedLoadFailed + ")");
+            feedExhausted = false;
+            requestFeed(false, false);
+            scheduleColdStartWatchdog(); // keep watching until a reel actually lands
+        };
+        AndroidUtilities.runOnUIThread(coldStartWatchdog, delay);
+    }
+
+    private void cancelColdStartWatchdog() {
+        if (coldStartWatchdog != null) {
+            AndroidUtilities.cancelRunOnUIThread(coldStartWatchdog);
+            coldStartWatchdog = null;
+        }
     }
 
     private MessageObject deserializeMessage(String b64) {
@@ -921,6 +1029,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void setStatus(String text) {
+        if (text == null) statusIsFailure = false;
         if (statusView == null) return;
         if (text == null) {
             statusView.setVisibility(View.GONE);
@@ -928,6 +1037,26 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             statusView.setVisibility(View.VISIBLE);
             statusView.setText(text);
         }
+    }
+
+    /**
+     * Show why the feed is not here — and keep showing it. Once the cold start has failed, the
+     * retry loop must NOT flash "Connecting…" every few seconds: those messages read exactly like
+     * the frozen screen this used to be, and they hide the one fact the user needs, which is that
+     * something went wrong and we are still working on it. The failure text stays put until a reel
+     * actually lands (or a retry produces a different failure).
+     */
+    private void setFailureStatus(String text) {
+        statusIsFailure = true;
+        if (statusView == null) return;
+        statusView.setVisibility(View.VISIBLE);
+        statusView.setText(text);
+    }
+
+    /** Progress chatter ("Connecting…", "Loading feed…") — suppressed while a failure is on screen. */
+    private void setProgressStatus(String text) {
+        if (statusIsFailure) return;
+        setStatus(text);
     }
 
     private void loadFeed() {
@@ -943,23 +1072,34 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void requestFeed(boolean append, boolean retried) {
-        if (loadingFeed) return;
+        final long startedAt = System.currentTimeMillis();
+        if (!SvipeColdStart.canStartRequest(loadingFeed, feedRequestStartedMs, startedAt)) return;
+        if (loadingFeed) {
+            FileLog.d("svipe: feed request presumed dead after "
+                    + (startedAt - feedRequestStartedMs) + "ms — starting a fresh one");
+        }
         loadingFeed = true;
+        feedRequestStartedMs = startedAt;
+        final int generation = ++feedRequestGeneration;
         feedLoadFailed = false;
-        // While the instant queue is already playing, a fresh load merges silently below it: no
-        // status spinner, no clear, no player restart. The status path is only for the cold,
-        // empty-queue online fallback.
-        final boolean playing = coldStartDone && !items.isEmpty();
-        if (!append && !playing) setStatus(getString(R.string.Connecting));
+        // While something is already playing, a fresh load merges silently below it: no status
+        // spinner, no clear, no player restart. The status path is only for the cold, empty-pager
+        // online fallback — and "is the pager empty" is asked again in every callback, never
+        // captured up front: a reel can arrive (from the queue restore, or from a request that
+        // overtook this one) while this one is still in flight, and a late message painted over a
+        // playing video is exactly the bug this screen is known for.
+        if (!append && items.isEmpty()) setProgressStatus(getString(R.string.Connecting));
         SvipeAuth.ensureToken(account, t -> {
+            if (generation != feedRequestGeneration) return; // superseded by a newer request
             if (t == null) {
                 loadingFeed = false;
                 feedLoadFailed = true;
-                if (!append && !playing) setStatus(getString(R.string.SvipeReelsConnectFailed));
+                if (!append && items.isEmpty()) setFailureStatus(getString(R.string.SvipeReelsConnectFailed));
+                scheduleColdStartWatchdog();
                 return;
             }
             token = t;
-            if (!append && !playing) setStatus(getString(R.string.SvipeReelsLoadingFeed));
+            if (!append && items.isEmpty()) setProgressStatus(getString(R.string.SvipeReelsLoadingFeed));
             // First request carries the seed (discover tap); afterwards the cursor carries page+seed.
             String path = "/v1/feed";
             try {
@@ -973,6 +1113,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 path = "/v1/feed";
             }
             SvipeApi.get(path, token, (res, code, err) -> {
+                if (generation != feedRequestGeneration) return; // superseded by a newer request
                 loadingFeed = false;
                 if (code == 401 && !retried) {
                     // Access token died mid-session: silent re-auth, one retry.
@@ -982,11 +1123,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 }
                 if (res == null || !res.has("items")) {
                     feedLoadFailed = true;
-                    if (!append && !playing) {
-                        setStatus(code == 0
+                    if (!append && items.isEmpty()) {
+                        setFailureStatus(code == 0
                                 ? getString(R.string.SvipeReelsNoInternet)
                                 : LocaleController.formatString(R.string.SvipeReelsLoadFailed, String.valueOf(code)));
                     }
+                    scheduleColdStartWatchdog();
                     return;
                 }
                 String recId = res.isNull("recommendation_id") ? null : res.optString("recommendation_id", null);
@@ -996,7 +1138,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 // additive = append page OR a background merge into the already-playing queue.
                 // Re-evaluated HERE (not at request start): a cold-start restore may have populated
                 // items after this request began, so a fresh feed must merge, never clear them.
-                final boolean additive = append || (coldStartDone && !items.isEmpty());
+                final boolean additive = append || !items.isEmpty();
                 if (!additive) {
                     items.clear();
                 }
@@ -1030,7 +1172,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                         emptyAppendStreak = 0;
                         adapter.notifyItemRangeInserted(before, added);
                         // A merge can newly satisfy the download-ahead target — top it up.
-                        if (playing && currentPosition >= 0) ensureFullDownloadsAhead(currentPosition);
+                        if (currentPosition >= 0) ensureFullDownloadsAhead(currentPosition);
                     }
                     // The feed is only truly exhausted when the backend stops giving a cursor. A page
                     // that added 0 NEW items (all already watched/deduped) is NOT the end: early pages
@@ -1048,9 +1190,18 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                         }
                     }
                 } else {
+                    statusIsFailure = false; // this cycle answered — any failure on screen is stale now
                     setStatus(items.isEmpty() ? getString(R.string.SvipeReelsEmpty) : null);
                     adapter.notifyDataSetChanged();
                     AndroidUtilities.runOnUIThread(this::checkCurrentPage, 200);
+                }
+                // Anything on screen means the cold start is over; an empty result keeps the
+                // watchdog ticking (a backend that answered "nothing yet" can answer differently
+                // in 30 seconds, and the user should never have to restart the app to find out).
+                if (items.isEmpty()) {
+                    scheduleColdStartWatchdog();
+                } else {
+                    cancelColdStartWatchdog();
                 }
             });
         });
@@ -2700,6 +2851,16 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 schedulePlaybackStartChecker(currentPosition);
             }
         }
+        // Coming back to an empty pager (a cold start that never produced a reel) restarts the
+        // retry loop right away, with a fresh budget — the user just told us they still want this.
+        // Only once the cold start has run its course: before that it owns the first attempt, and
+        // racing it here just means two requests for the same page.
+        if (items.isEmpty() && coldStartDone) {
+            coldStartAttempts = 0;
+            statusIsFailure = false; // they came back on purpose — show them the attempt, not the scar
+            requestFeed(false, false);
+            scheduleColdStartWatchdog();
+        }
         Bulletin.addDelegate(this, bulletinDelegate);
     }
 
@@ -2714,6 +2875,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         }
         if (root != null) root.onPause();
         stopPositionUpdates();
+        cancelColdStartWatchdog(); // no point polling the feed for a screen nobody is looking at
         Bulletin.removeDelegate(this);
     }
 
@@ -2763,6 +2925,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             reelEnterView = null;
         }
         stopPositionUpdates();
+        cancelColdStartWatchdog();
         positionUpdateHandler = null;
         updateProgressRunnable = null;
         releaseCurrentPlayer();

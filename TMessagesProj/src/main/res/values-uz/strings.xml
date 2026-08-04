@@ -146,7 +146,7 @@
 
     <!-- Svipe reels -->
     <string name="SvipeReelsLoadingFeed">Lenta yuklanmoqda…</string>
-    <string name="SvipeReelsConnectFailed">Svipe\'ga kirib bo\'lmadi. Internet qaytsa o\'zi qayta urinadi.</string>
+    <string name="SvipeReelsConnectFailed">Svipe\'ga ulanib bo\'lmadi. Qayta urinilmoqda…</string>
     <string name="SvipeReelsNoInternet">Internet yo\'q. Ulanish qaytishi bilan lenta yuklanadi…</string>
     <string name="SvipeReelsLoadFailed">Lenta yuklanmadi (%1$s)</string>
     <string name="SvipeReelsEmpty">Hozircha video yo\'q</string>

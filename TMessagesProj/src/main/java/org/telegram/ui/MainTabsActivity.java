@@ -54,6 +54,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
+import org.telegram.svipe.SvipeReelWarmer;
 import org.telegram.svipe.SvipeUnreadRecountThrottle;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
@@ -388,8 +389,16 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
         updateLayout();
         checkUnreadCount(false);
+        // Start getting reels ready while the user is still reading their chat list. The reels tab's
+        // first open is otherwise a chain of network steps behind a "Loading" label; doing it here,
+        // late enough not to compete with the chat list and quietly enough that nothing on screen
+        // moves, means the tab has something to play the moment it is tapped.
+        SvipeReelWarmer.warmSoon(currentAccount, REELS_WARM_UP_DELAY_MS);
         return contentView;
     }
+
+    /** Long enough for the chat list to finish loading and drawing; short enough to be ready first. */
+    private static final long REELS_WARM_UP_DELAY_MS = 4000;
 
     // The cached main unread count can get stuck (forum topic reads synced from
     // another device never decrement it), so re-derive it from the database when

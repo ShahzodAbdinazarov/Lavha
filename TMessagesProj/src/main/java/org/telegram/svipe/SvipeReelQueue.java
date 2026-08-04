@@ -48,6 +48,27 @@ public class SvipeReelQueue {
         return new ArrayList<>(entries);
     }
 
+    /**
+     * Rebuild an entry's playable message from the stored blob. The blob format is this class's
+     * business, so anything that needs the message (the cold-start restore, the app-start warm-up's
+     * "is it really on disk" check) goes through here rather than re-implementing the decode.
+     */
+    public static org.telegram.messenger.MessageObject messageOf(int account, Entry e) {
+        if (e == null || e.messageB64 == null || e.messageB64.isEmpty()) return null;
+        try {
+            byte[] bytes = android.util.Base64.decode(e.messageB64, android.util.Base64.NO_WRAP);
+            org.telegram.tgnet.SerializedData data = new org.telegram.tgnet.SerializedData(bytes);
+            int constructor = data.readInt32(false);
+            org.telegram.tgnet.TLRPC.Message m =
+                    org.telegram.tgnet.TLRPC.Message.TLdeserialize(data, constructor, false);
+            if (m == null) return null;
+            return new org.telegram.messenger.MessageObject(account, m, false, false);
+        } catch (Exception ex) {
+            FileLog.e(ex);
+            return null;
+        }
+    }
+
     public synchronized int size() {
         return entries.size();
     }

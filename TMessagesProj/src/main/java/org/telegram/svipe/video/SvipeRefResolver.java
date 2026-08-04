@@ -104,6 +104,32 @@ public class SvipeRefResolver {
     private SvipeRefResolver() {}
 
     /**
+     * Every MTProto step here is bounded. Two reasons, both measured: tgnet swallows a 420 FLOOD_WAIT
+     * unless RequestFlagFailOnServerErrors is set (it re-queues the request behind the wait — seen at
+     * 74 minutes — and the callback simply never runs), and contacts.resolveUsername is exactly the
+     * call a fresh account floods on first, since the feed resolves one channel per item. An unbounded
+     * resolve leaves {@code resolving} true forever, so every later attempt returns early at the
+     * in-flight check and the reel spins until the app is restarted.
+     */
+    private static final long STEP_TIMEOUT_MS = 8_000;
+    private static final int FAIL_FAST = ConnectionsManager.RequestFlagFailOnServerErrors;
+
+    /** Arms a one-shot timeout that reports a retryable failure if the step never answers. */
+    private static void guard(final java.util.concurrent.atomic.AtomicBoolean answered,
+                              final Ref ref, final Delegate delegate, final String step) {
+        AndroidUtilities.runOnUIThread(() -> {
+            if (!answered.compareAndSet(false, true)) return;
+            FileLog.d("svipe: resolve " + step + " timed out for @" + ref.username() + "/" + ref.messageId());
+            ref.setResolving(false);
+            if (delegate != null) {
+                delegate.onFailed(ref, true);
+            } else {
+                drainCallbacks(ref); // no retry policy on this caller — at least never leave it hanging
+            }
+        }, STEP_TIMEOUT_MS);
+    }
+
+    /**
      * Resolve a reference's channel + message over MTProto (2 round-trips) and cache the
      * MessageObject on the Ref. Reused for both the visible item (then play) and read-ahead prefetch
      * (no play). Idempotent: skips if already resolved or a resolve is in flight.
@@ -127,7 +153,9 @@ public class SvipeRefResolver {
         ref.setResolving(true);
         TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
         req.username = ref.username().toLowerCase();
+        final java.util.concurrent.atomic.AtomicBoolean resolved = new java.util.concurrent.atomic.AtomicBoolean();
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
+            if (!resolved.compareAndSet(false, true)) return; // the timeout already reported this step
             if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
                 if (delegate != null) delegate.onFailed(ref, true); // transient network failure — retry
                 return;
@@ -154,7 +182,9 @@ public class SvipeRefResolver {
             TLRPC.TL_channels_getMessages gm = new TLRPC.TL_channels_getMessages();
             gm.channel = inputChannel;
             gm.id.add(ref.messageId());
+            final java.util.concurrent.atomic.AtomicBoolean fetched = new java.util.concurrent.atomic.AtomicBoolean();
             ConnectionsManager.getInstance(account).sendRequest(gm, (resp2, err2) -> {
+                if (!fetched.compareAndSet(false, true)) return; // the timeout already reported this step
                 if (err2 != null || !(resp2 instanceof TLRPC.messages_Messages)) {
                     if (delegate != null) delegate.onFailed(ref, true); // transient network failure — retry
                     return;
@@ -179,8 +209,10 @@ public class SvipeRefResolver {
                     if (delegate != null) delegate.onResolved(ref);
                     drainCallbacks(ref); // wakes the caller's queued start-playback intent
                 });
-            });
-        });
+            }, FAIL_FAST);
+            guard(fetched, ref, delegate, "channels.getMessages");
+        }, FAIL_FAST);
+        guard(resolved, ref, delegate, "contacts.resolveUsername");
     }
 
     /** Fill only the missing {@code chat} on a queue-restored item (one resolveUsername round-trip). */
@@ -189,7 +221,9 @@ public class SvipeRefResolver {
         ref.setResolving(true);
         TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
         req.username = ref.username().toLowerCase();
+        final java.util.concurrent.atomic.AtomicBoolean answered = new java.util.concurrent.atomic.AtomicBoolean();
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
+            if (!answered.compareAndSet(false, true)) return; // the timeout already gave up on this one
             AndroidUtilities.runOnUIThread(() -> {
                 ref.setResolving(false);
                 if (error == null && response instanceof TLRPC.TL_contacts_resolvedPeer) {
@@ -205,7 +239,14 @@ public class SvipeRefResolver {
                 }
                 if (onResolved != null) onResolved.run();
             });
-        });
+        }, FAIL_FAST);
+        // Chat-only enrichment has no retry policy and nothing waiting on playback, so its timeout
+        // just releases the in-flight flag — a later attempt is then free to try again.
+        AndroidUtilities.runOnUIThread(() -> {
+            if (!answered.compareAndSet(false, true)) return;
+            ref.setResolving(false);
+            if (onResolved != null) onResolved.run();
+        }, STEP_TIMEOUT_MS);
     }
 
     /** Run and clear every queued waiter for this reference (safe on success or on give-up). */

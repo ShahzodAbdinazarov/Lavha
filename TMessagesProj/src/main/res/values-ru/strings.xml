@@ -411,7 +411,7 @@
 
     <!-- Svipe reels -->
     <string name="SvipeReelsLoadingFeed">Лента загружается…</string>
-    <string name="SvipeReelsConnectFailed">Не удалось связаться со Svipe. Повторим, когда вернётся интернет.</string>
+    <string name="SvipeReelsConnectFailed">Не удалось связаться со Svipe. Пробуем ещё раз…</string>
     <string name="SvipeReelsNoInternet">Нет интернета. Лента загрузится, как только появится связь…</string>
     <string name="SvipeReelsLoadFailed">Не удалось загрузить ленту (%1$s)</string>
     <string name="SvipeReelsEmpty">Пока нет видео</string>
