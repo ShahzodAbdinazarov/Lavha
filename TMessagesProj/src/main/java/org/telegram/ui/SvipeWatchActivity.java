@@ -256,6 +256,25 @@ public class SvipeWatchActivity extends BaseFragment {
      * window, which a presented fragment does on a phone — this screen is not laid out for the tablet
      * two-column stack.
      */
+    /**
+     * The videos tapped to get here, oldest first. Bounded: a long chain is a trail, not an archive,
+     * and every entry holds a resolved row.
+     */
+    private final java.util.ArrayList<Row> history = new java.util.ArrayList<>();
+    private static final int MAX_HISTORY = 32;
+
+    @Override
+    public boolean onBackPressed(boolean invoked) {
+        if (!history.isEmpty()) {
+            if (invoked) {
+                final Row previous = history.remove(history.size() - 1);
+                openRow(previous, false);
+            }
+            return false;   // handled here: the page stays, the video steps back
+        }
+        return super.onBackPressed(invoked);
+    }
+
     /** Where this page was opened from, so the player can grow out of it. Set before presenting. */
     public void setOpenFromRect(Rect windowRect) {
         openFromRect = windowRect == null ? null : new Rect(windowRect);
@@ -300,8 +319,25 @@ public class SvipeWatchActivity extends BaseFragment {
      * paints its title, channel and actions immediately instead of blanking them for a round-trip.
      */
     private void openRow(Row row) {
+        openRow(row, true);
+    }
+
+    /**
+     * @param remember false when this swap is a step BACK through the chain — the video being
+     *                 restored must not be pushed onto the history it is coming out of.
+     */
+    private void openRow(Row row, boolean remember) {
         if (row.ref == null || watched.ref != null && keyOf(row.ref).equals(keyOf(watched.ref))) {
             return;
+        }
+        if (remember && watched.ref != null) {
+            // Tapping through related videos builds a trail, and back should walk it. Without this
+            // the whole chain collapsed to one screen: five videos deep, one back press and the user
+            // was on the home grid with everything they had been watching gone.
+            history.add(watched);
+            while (history.size() > MAX_HISTORY) {
+                history.remove(0);
+            }
         }
         watched = row;
         related.clear();
