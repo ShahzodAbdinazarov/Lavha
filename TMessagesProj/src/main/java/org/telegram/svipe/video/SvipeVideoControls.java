@@ -86,8 +86,6 @@ public class SvipeVideoControls extends FrameLayout {
     private final SeekBarHost seekHost;
     private final VideoPlayerSeekBar seekBar;
 
-    private final TextView miniTitle;
-    private final TextView miniSubtitle;
     private final ImageView miniPlayButton;
     private final PlayPauseDrawable miniPlayDrawable = new PlayPauseDrawable(20);
 
@@ -199,28 +197,17 @@ public class SvipeVideoControls extends FrameLayout {
         mainChrome.addView(seekHost, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 32,
                 Gravity.BOTTOM | Gravity.LEFT, 10, 0, 10, 30));
 
+        // The mini player is a floating card, and its chrome lies OVER the picture: pause on the
+        // left, ✕ on the right, nothing else. The old layout put a title and channel line beside a
+        // thumbnail in a full-width bar — that is the YouTube of several versions ago, and it spent
+        // most of the bar on text nobody reads while the video it exists for was a postage stamp.
         miniChrome = new LinearLayout(context);
         miniChrome.setOrientation(LinearLayout.HORIZONTAL);
         miniChrome.setGravity(Gravity.CENTER_VERTICAL);
-        miniChrome.setBackgroundColor(0xFF141414);
+        // A scrim, not a background: the video has to stay visible under the two buttons.
+        miniChrome.setBackgroundColor(0x40000000);
         miniChrome.setVisibility(GONE);
         addView(miniChrome, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
-        final LinearLayout miniTexts = new LinearLayout(context);
-        miniTexts.setOrientation(LinearLayout.VERTICAL);
-        miniTitle = new TextView(context);
-        miniTitle.setTextColor(0xFFFFFFFF);
-        miniTitle.setTextSize(13);
-        miniTitle.setMaxLines(2);
-        miniTitle.setEllipsize(TextUtils.TruncateAt.END);
-        miniTexts.addView(miniTitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        miniSubtitle = new TextView(context);
-        miniSubtitle.setTextColor(0x99FFFFFF);
-        miniSubtitle.setTextSize(11);
-        miniSubtitle.setMaxLines(1);
-        miniSubtitle.setEllipsize(TextUtils.TruncateAt.END);
-        miniTexts.addView(miniSubtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 1, 0, 0));
-        miniChrome.addView(miniTexts, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f, Gravity.CENTER_VERTICAL, 10, 0, 4, 0));
 
         miniPlayButton = new ImageView(context);
         miniPlayDrawable.setCallback(miniPlayButton);
@@ -230,11 +217,15 @@ public class SvipeVideoControls extends FrameLayout {
         miniPlayButton.setBackground(Theme.createSelectorDrawable(0x30ffffff, Theme.RIPPLE_MASK_CIRCLE_20DP));
         miniPlayButton.setContentDescription(LocaleController.getString(R.string.AccActionPlay));
         miniPlayButton.setOnClickListener(v -> togglePlayPause());
-        miniChrome.addView(miniPlayButton, LayoutHelper.createLinear(40, 40, Gravity.CENTER_VERTICAL));
+        miniChrome.addView(miniPlayButton, LayoutHelper.createLinear(44, 44, Gravity.CENTER_VERTICAL, 6, 0, 0, 0));
+
+        // The gap between the two buttons is the video: tapping it restores the page, which is why
+        // nothing else may live there.
+        miniChrome.addView(new View(context), LayoutHelper.createLinear(0, 1, 1f));
 
         final ImageView miniCloseButton = iconButton(context, R.drawable.msg_close, R.string.Close,
                 v -> SvipeVideoPlayerController.getInstance().close());
-        miniChrome.addView(miniCloseButton, LayoutHelper.createLinear(40, 40, Gravity.CENTER_VERTICAL, 0, 0, 4, 0));
+        miniChrome.addView(miniCloseButton, LayoutHelper.createLinear(44, 44, Gravity.CENTER_VERTICAL, 0, 0, 6, 0));
 
         levelIndicator = new LevelIndicator(context);
         levelIndicator.setVisibility(GONE);
@@ -449,11 +440,8 @@ public class SvipeVideoControls extends FrameLayout {
         }
     }
 
-    /** The video changed (open, or an in-place swap to a related one) — refresh the mini row's labels. */
+    /** The video changed (open, or an in-place swap to a related one) — reset the progress line. */
     public void setVideo(MessageObject mo, TLRPC.Chat chat) {
-        final CharSequence caption = SvipeWideVideoCell.captionOf(mo);
-        miniTitle.setText(caption != null ? caption : "");
-        miniSubtitle.setText(chat != null && chat.title != null ? chat.title : "");
         seekBar.setProgress(0f);
         seekBar.setBufferedProgress(0f);
         updateProgress();

@@ -5,6 +5,7 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Outline;
 import android.graphics.Rect;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -12,6 +13,7 @@ import android.view.MotionEvent;
 import android.view.ViewConfiguration;
 import android.view.TextureView;
 import android.view.View;
+import android.view.ViewOutlineProvider;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -61,7 +63,10 @@ public class SvipeVideoStage extends FrameLayout {
     private static final int NO_DRAG = -1;
 
     /** Mini bar height; the picture inside it is this tall and 16:9 wide. */
-    private static final int MINI_HEIGHT_DP = 58;
+    /** The floating mini card: 16:9, capped at half the screen so it never dominates the page. */
+    private static final int MINI_WIDTH_DP = 190;
+    private static final int MINI_MARGIN_DP = 12;
+    private static final int MINI_RADIUS_DP = 12;
 
     private final FrameLayout content;
     private final AspectRatioFrameLayout aspect;
@@ -251,6 +256,7 @@ public class SvipeVideoStage extends FrameLayout {
             return;
         }
         controls.setMode(mode);
+        applyMiniCardLook(mode == SvipeVideoPlayerController.MODE_MINI);
         boolean wasVisible = getVisibility() == VISIBLE;
         setVisibility(VISIBLE);
         cancelTransition();
@@ -277,6 +283,34 @@ public class SvipeVideoStage extends FrameLayout {
             transition = 1f;
         }
         requestLayout();
+    }
+
+    /**
+     * The floating card is rounded and casts a shadow; every other mode is a plain rectangle. Applied
+     * on the mode change rather than per-frame so a drag does not round and un-round the picture
+     * while the finger is moving.
+     */
+    private void applyMiniCardLook(boolean mini) {
+        if (mini) {
+            final float radius = AndroidUtilities.dp(MINI_RADIUS_DP);
+            content.setOutlineProvider(new ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, Outline outline) {
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
+                }
+            });
+            content.setClipToOutline(true);
+            content.setElevation(AndroidUtilities.dp(8));
+            // Elevation reorders drawing, not just shadows: raising the picture alone put it OVER the
+            // chrome and the pause/✕ vanished. The chrome rides one step higher so it stays on the
+            // card it belongs to.
+            controls.setElevation(AndroidUtilities.dp(9));
+        } else {
+            content.setOutlineProvider(null);
+            content.setClipToOutline(false);
+            content.setElevation(0);
+            controls.setElevation(0);
+        }
     }
 
     /**
@@ -314,9 +348,15 @@ public class SvipeVideoStage extends FrameLayout {
             return;
         }
         if (mode == SvipeVideoPlayerController.MODE_MINI) {
-            final int barHeight = AndroidUtilities.dp(MINI_HEIGHT_DP);
-            final int bottom = h - miniBottomClearance();
-            out.set(0, bottom - barHeight, Math.round(barHeight * 16f / 9f), bottom);
+            // A floating 16:9 card in the bottom-right corner, not a bar across the screen. The bar
+            // spent its width on a title nobody reads and left the video a postage stamp; this is
+            // the shape YouTube uses now, and it is also the honest one — the thing being minimised
+            // is a video, so what stays on screen should be the video.
+            final int cardWidth = Math.min(AndroidUtilities.dp(MINI_WIDTH_DP), Math.round(w * .5f));
+            final int cardHeight = Math.round(cardWidth * 9f / 16f);
+            final int margin = AndroidUtilities.dp(MINI_MARGIN_DP);
+            final int bottom = h - miniBottomClearance() - margin;
+            out.set(w - margin - cardWidth, bottom - cardHeight, w - margin, bottom);
             return;
         }
         // Inline: exactly the watch page's placeholder. Until it reports one, a 16:9 strip under the
@@ -333,11 +373,9 @@ public class SvipeVideoStage extends FrameLayout {
 
     /** The chrome rect: over the picture, except in mini where it is the rest of the bar. */
     private void chromeRectFor(int mode, Rect playerRect, Rect out) {
-        if (mode == SvipeVideoPlayerController.MODE_MINI) {
-            out.set(playerRect.right, playerRect.top, getMeasuredWidth(), playerRect.bottom);
-        } else {
-            out.set(playerRect);
-        }
+        // The mini chrome lies OVER the card now (pause and ✕ on the picture), so every mode uses
+        // the player's own rect. It used to be the strip beside a thumbnail — the old bar layout.
+        out.set(playerRect);
     }
 
     /**
