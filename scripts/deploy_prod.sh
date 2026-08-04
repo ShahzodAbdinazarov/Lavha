@@ -2,10 +2,12 @@
 # Ship a .web release APK to prod (svipe.uz). Every step is checked; nothing is
 # replaced until the copy on the server is proven byte-identical.
 #
-# Usage: ./deploy_prod.sh <version_name> <version_code> "<changelog ASCII only>"
+# Usage: ./deploy_prod.sh [version_name] [version_code] ["<changelog ASCII only>"]
+# The version is read from the APK; passing it is optional and only used as a cross-check
+# that refuses to publish on a mismatch (see the == 0 == step).
 set -euo pipefail
 
-VN="$1"; VC="$2"; CHANGELOG="$3"
+VN="${1-}"; VC="${2-}"; CHANGELOG="${3-}"
 HOST=root@23.88.110.173           # prod since the 2026-06-29 migration; 49.12.47.209 is dev now
 KEY=~/.ssh/lavha_deploy
 APK="C:/Users/99897/AndroidStudioProjects/Telegram/TMessagesProj_App/build/outputs/apk/afat/standalone/app.apk"
@@ -15,6 +17,28 @@ WANT_CERT="C0:BB:87:FF:64:DD:96:33:A3:0E:8F:89:83:8B:68:17:0B:A1:93:50:6A:FB:E5:
 
 export MSYS_NO_PATHCONV=1
 sh() { ssh -i "$KEY" -o StrictHostKeyChecking=no "$HOST" "$@"; }
+
+echo "== 0. version, read from the APK itself =="
+# Never taken on trust: an afat APK carries versionCode = code*10 + abi (779) while
+# gradle.properties and the Play bundle say 77, and the updater compares the server's number
+# against the INSTALLED apk's own. Publishing the smaller one puts the release beyond every
+# existing install's reach — it is simply never offered. Mirrors deploy_prod_mac.sh.
+AAPT=$(ls /c/Users/99897/AppData/Local/Android/Sdk/build-tools/*/aapt2.exe 2>/dev/null | tail -1)
+[ -n "$AAPT" ] || { echo "!! no aapt2 in the Android SDK build-tools"; exit 1; }
+# Read it all, then take the first line: piping aapt2 into head closes the pipe early and, under
+# `set -o pipefail`, that SIGPIPE kills the script before it can say why.
+BADGING=$(printf '%s\n' "$("$AAPT" dump badging "$APK")" | sed -n '1p')
+APK_VC=$(echo "$BADGING" | grep -oE "versionCode='[0-9]+'" | grep -oE "[0-9]+")
+APK_VN=$(echo "$BADGING" | grep -oE "versionName='[^']+'" | sed "s/versionName='//; s/'//")
+[ -n "$APK_VC" ] && [ -n "$APK_VN" ] || { echo "!! could not read the version out of $APK"; exit 1; }
+echo "apk says: $APK_VN (vc $APK_VC)"
+if [ -n "$VC" ] && [ "$VC" != "$APK_VC" ]; then
+  echo "!! passed vc $VC but the APK is $APK_VC - refusing (a lower number is offered to nobody)"; exit 1
+fi
+if [ -n "$VN" ] && [ "$VN" != "$APK_VN" ]; then
+  echo "!! passed $VN but the APK is $APK_VN - refusing"; exit 1
+fi
+VN="$APK_VN"; VC="$APK_VC"
 
 echo "== 1. signature =="
 APKSIGNER=$(ls /c/Users/99897/AppData/Local/Android/Sdk/build-tools/*/apksigner.bat 2>/dev/null | tail -1)
