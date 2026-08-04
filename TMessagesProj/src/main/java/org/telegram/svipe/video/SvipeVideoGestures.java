@@ -45,8 +45,11 @@ public class SvipeVideoGestures {
     /** A backwards jump that would land this far before zero is a mis-tap, not a seek. */
     private static final long BACK_SEEK_TOLERANCE_MS = 9_000;
     private static final float BOOST_SPEED = 2f;
-    /** Long-press hold before 2× engages; short enough to feel instant, long enough not to fire on taps. */
-    private static final long LONG_PRESS_MS = 250;
+    /**
+     * Long-press hold before 2× engages. 250ms was short enough that an ordinary press — a tap held
+     * a moment, the start of a drag — kept turning the speed up by itself.
+     */
+    private static final long LONG_PRESS_MS = 400;
 
     private static final int DRAG_NONE = 0;
     /** A mode transition the finger is dragging through: the stage lerps between the two rects. */
@@ -395,6 +398,11 @@ public class SvipeVideoGestures {
     }
 
     // ---------------- long-press 2x ----------------
+
+    /** The stage asks: while this is true the gesture stream belongs to us, boost and all. */
+    public boolean isSpeedBoosted() {
+        return speedBoosted;
+    }
 
     private void startSpeedBoost() {
         final SvipeVideoPlayerController controller = SvipeVideoPlayerController.getInstance();

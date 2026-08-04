@@ -655,12 +655,25 @@ public class SvipeVideoStage extends FrameLayout {
         if (!interceptCandidate) {
             return false;
         }
+        if (gestures.isSpeedBoosted()) {
+            // The long-press 2x engaged, so the rest of this gesture is ours: without claiming it
+            // here the finger's UP went to whatever child was under it, our pipeline never heard the
+            // gesture end, and the video stayed at 2x with nobody holding it.
+            return true;
+        }
         if (action == MotionEvent.ACTION_MOVE) {
             final float dx = Math.abs(event.getX() - interceptDownX);
             final float dy = Math.abs(event.getY() - interceptDownY);
             if (dy > touchSlop && dy > dx) {
                 return true;   // a vertical drag is ours: fullscreen / mini live here
             }
+        }
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            // A gesture we anchored but never claimed still has to be CLOSED, or its transient state
+            // (the speed boost, the seek ripple) outlives the finger. Reported as "it went to 2x by
+            // itself" — it had, and nothing was left to turn it off.
+            gestures.onTouch(event);
+            interceptCandidate = false;
         }
         return false;
     }
