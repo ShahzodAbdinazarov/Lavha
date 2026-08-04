@@ -735,10 +735,6 @@ public class SvipeWatchActivity extends BaseFragment {
     // ---------------- related list ----------------
 
     /**
-     * Page the related list. Phase A source (see {@link SvipeDiscover#relatedVideos}): the same
-     * long-form pipe the Video tab uses, minus the video being watched and anything already listed.
-     */
-    /**
      * Save the watched post into the user's "Saved Videos" list. Requires the message to be resolved
      * — the list stores a real forwarded copy, not a reference, which is what makes it survive the
      * source channel deleting the post.
@@ -787,6 +783,8 @@ public class SvipeWatchActivity extends BaseFragment {
         }
         final Row seed = watched;
         final int offset = relatedOffset;
+        // Retrieved from the video on screen (see SvipeDiscover#relatedVideos): the next episode of
+        // its show, then the nearest videos by caption embedding, then more from its channel.
         SvipeDiscover.relatedVideos(currentAccount, seed.ref.channelId, seed.ref.messageId,
                 offset, RELATED_PAGE_SIZE, (items, next, error) -> {
                     loadingRelated = false;

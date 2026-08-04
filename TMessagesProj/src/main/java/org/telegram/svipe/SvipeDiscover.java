@@ -201,26 +201,31 @@ public class SvipeDiscover {
     }
 
     /**
-     * The watch page's RELATED list: more long-form videos to show under the one being watched.
+     * The watch page's RELATED list: what belongs beside the video being watched.
      *
-     * <p><b>Phase A (this build).</b> The seed is not on the wire yet — {@code GET /v1/videos} takes
-     * only {@code category/limit/offset/refresh}, and seeding {@code /v1/feed} instead is not an option
-     * because that endpoint hard-filters to short videos. So related = the same globally-ranked
-     * long-form pipe, minus the video being watched, which is exactly what the owner authorised as the
-     * interim source. Phase B (plan step 13) adds {@code seed_channel_id}/{@code seed_message_id} to
-     * /v1/videos with a seed-bearing cache key, and only the query string here changes.
+     * <p>Asks {@code GET /v1/videos/related} with the seed on the wire, so the list is retrieved FROM
+     * the video on screen — the next episode of its show first, then the nearest videos by caption
+     * embedding, then more from its channel. Before this it was {@code GET /v1/videos} minus the seed:
+     * a perfectly good feed and a poor related list, because it answered "what should this user watch"
+     * rather than "what goes with THIS".
      *
-     * <p>{@code refresh} is deliberately absent: /v1/videos rotates the user's own Video-tab window on
-     * refresh, and opening a watch page must never reshuffle the tab the user came from.
+     * <p>The seed is still dropped here as well as server-side — one line of belt and braces, so a
+     * ranking change that ever lets the seed back in cannot show a video as related to itself.
+     *
+     * <p>A server without the route answers 404, which {@link #feedGet} surfaces as a failed page; the
+     * caller retries as an ordinary paging failure. {@code refresh} is deliberately absent: opening a
+     * watch page must never reshuffle the Video tab the user came from.
      */
     public static void relatedVideos(int account, long seedChannelId, int seedMessageId,
                                      int offset, int limit, Callback cb) {
-        feedGet(account, "/v1/videos?limit=" + limit + "&offset=" + offset, (items, next, error) -> {
+        final String path = "/v1/videos/related?seed_channel_id=" + seedChannelId
+                + "&seed_message_id=" + seedMessageId
+                + "&limit=" + limit + "&offset=" + offset;
+        feedGet(account, path, (items, next, error) -> {
             if (items == null) {
                 cb.onResult(null, next, error);
                 return;
             }
-            // Drop the seed itself. Server-side once Phase B lands (its keep() filter), here until then.
             final ArrayList<Item> out = new ArrayList<>(items.size());
             for (Item it : items) {
                 if (it.channelId == seedChannelId && it.messageId == seedMessageId) {
