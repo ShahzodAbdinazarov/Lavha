@@ -43,6 +43,10 @@ public class SvipeConfig {
      *  just pointless — Telegram can extend the wait for it. */
     public static final String PREF_AUTH_BOT_FLOOD_UNTIL = "svipe_auth_bot_flood_until";
 
+    /** Buffered performance samples awaiting upload (JSON array) — see SvipePerf. Survives a kill:
+     *  a session that ended offline is exactly the session whose numbers we most want. */
+    public static final String PREF_PERF_BUFFER = "svipe_perf_buffer";
+
     /** Persisted offline ready-queue (JSON blob) and the watched-reel ledger (JSON array). */
     public static final String PREF_REEL_QUEUE = "svipe_reel_queue";
     public static final String PREF_REEL_WATCHED = "svipe_reel_watched";

@@ -79,8 +79,14 @@ public class SvipeAuth {
         // Completes EXACTLY once, from whichever comes first: the chain or its deadline. A late real
         // answer is not wasted — the token it stores is picked up by the next ensureToken call.
         final AtomicBoolean settled = new AtomicBoolean();
+        final long startedAt = System.currentTimeMillis();
         final TokenCallback finish = token -> {
             if (!settled.compareAndSet(false, true)) return;
+            // Auth is the first thing standing between a new user and their first reel, and the one
+            // step we cannot see from a log line on someone else's phone.
+            SvipePerf.sample("auth_latency", System.currentTimeMillis() - startedAt)
+                    .context(token != null ? "ok" : "failed")
+                    .submit(account);
             final java.util.ArrayList<TokenCallback> waiters;
             synchronized (inFlight) {
                 waiters = inFlight.remove(account);

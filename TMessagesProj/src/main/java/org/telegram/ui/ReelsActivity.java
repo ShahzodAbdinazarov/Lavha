@@ -48,6 +48,7 @@ import org.telegram.svipe.SvipeAuth;
 import org.telegram.svipe.SvipeBlockedChannels;
 import org.telegram.svipe.SvipeColdStart;
 import org.telegram.svipe.SvipeFeedRetry;
+import org.telegram.svipe.SvipePerf;
 import org.telegram.svipe.SvipePreloadPlan;
 import org.telegram.svipe.SvipeSavedChannels;
 import org.telegram.svipe.SvipeQueuePlan;
@@ -171,6 +172,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     private Runnable coldStartWatchdog;
     private int coldStartAttempts;
     private boolean statusIsFailure; // a failure message is on screen; progress chatter must not hide it
+    // Telemetry context for the next first frame: the FIRST reel of a tab open is a different
+    // measurement from a swipe (nothing is warmed yet), and they must not be averaged together.
+    private boolean coldStartTtffPending = true;
+    private String playbackSource;  // local_cache / network_auto / network — what the player was given
+    private int playbackRungs;      // ABR rungs available (0 = no ladder)
     private boolean feedExhausted;  // the backend ran out of pages (null cursor); reset on a fresh load
     private int emptyAppendStreak;  // consecutive append pages that added 0 new items — bounds cursor-chaining
 
@@ -1112,7 +1118,15 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             } catch (java.io.UnsupportedEncodingException ignore) {
                 path = "/v1/feed";
             }
+            final long feedSentAt = System.currentTimeMillis();
             SvipeApi.get(path, token, (res, code, err) -> {
+                // How long the backend took, as the client saw it — auth is excluded because it is
+                // measured on its own and would otherwise hide behind a good feed.
+                SvipePerf.sample("feed_latency", System.currentTimeMillis() - feedSentAt)
+                        .surface("reels")
+                        .context(append ? "page" : "first")
+                        .extra("http", code)
+                        .submit(account);
                 if (generation != feedRequestGeneration) return; // superseded by a newer request
                 loadingFeed = false;
                 if (code == 401 && !retried) {
@@ -1812,7 +1826,23 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                                 ensureFullDownloadsAhead(pos);
                             }
                         }
-                        FileLog.d("svipe: first frame pos=" + pos + " in " + (System.currentTimeMillis() - playRequestMs) + "ms prepared=" + prepared);
+                        final long toFirstFrame = System.currentTimeMillis() - playRequestMs;
+                        FileLog.d("svipe: first frame pos=" + pos + " in " + toFirstFrame + "ms prepared=" + prepared);
+                        // The number this whole screen is judged by. Reported with what explains it:
+                        // whether the reel was the tab's first (nothing warmed yet) or a swipe, and
+                        // whether it played from disk or off the wire.
+                        if (currentPosition == pos) {
+                            SvipePerf.sample("ttff", toFirstFrame)
+                                    .surface("reels")
+                                    .context(coldStartTtffPending ? "cold_start" : "swipe")
+                                    .source(playbackSource)
+                                    .prepared(prepared)
+                                    .ladder(playbackRungs > 0)
+                                    .extra("rungs", playbackRungs)
+                                    .extra("from_queue", item.fromQueue)
+                                    .submit(account);
+                            coldStartTtffPending = false;
+                        }
                         // The screen is busy with a playing video — perfect moment to warm the next one.
                         if (currentPosition == pos && nextPlayerPos != pos + 1) {
                             prepareNextPlayer(pos + 1);
@@ -1832,6 +1862,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     // offline); otherwise AUTO — ExoPlayer starts on a rung the bandwidth estimate
                     // sustains and adapts mid-play instead of buffering.
                     VideoPlayer.Quality cached = SvipeVideoLadder.cachedQualityOf(qualities);
+                    playbackSource = cached != null ? "local_cache" : "network_auto";
+                    playbackRungs = qualities.size();
                     FileLog.d("svipe: play pos=" + pos + " hls rungs=" + qualities.size()
                             + " source=" + (cached != null ? "LOCAL-cache" : "network-auto")
                             + " fromQueue=" + item.fromQueue);
@@ -1839,6 +1871,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 } else {
                     int reference = FileLoader.getInstance(account).getFileReference(mo);
                     VideoPlayer.VideoUri vu = VideoPlayer.VideoUri.of(account, doc, null, reference, false);
+                    playbackSource = vu.isCached() ? "local_cache" : "network";
+                    playbackRungs = 0;
                     FileLog.d("svipe: play pos=" + pos + " source=" + (vu.isCached() ? "LOCAL-cache" : "network")
                             + " fromQueue=" + item.fromQueue);
                     player.preparePlayer(vu.uri, "other");
@@ -2015,6 +2049,15 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         currentReelFirstFrame = false;
         FileLog.d("svipe: recovering stuck reel pos=" + pos + " attempt=" + stuckRecoveryAttempts
                 + " cause=" + cause + " resumeMs=" + resumeMs);
+        // A stall is the other half of the story a first-frame time tells: TTFF can look healthy
+        // while reels keep freezing mid-play, and that is the complaint people actually voice.
+        SvipePerf.sample("stall", Math.max(0, now - playRequestMs))
+                .surface("reels")
+                .context(cause)
+                .source(playbackSource)
+                .extra("attempt", stuckRecoveryAttempts)
+                .extra("mid_play", resumeMs > 0)
+                .submit(account);
         // First attempts only: cooldown-paced repeats add no information (the final count rides in
         // the 'recovered' diag) and each diag is a blocking POST on the shared globalQueue — worst
         // exactly when the network is bad, which is when long recovery loops happen.

@@ -54,6 +54,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
+import org.telegram.svipe.SvipePerf;
 import org.telegram.svipe.SvipeReelWarmer;
 import org.telegram.svipe.SvipeUnreadRecountThrottle;
 import org.telegram.tgnet.TLRPC;
@@ -394,6 +395,10 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         // late enough not to compete with the chat list and quietly enough that nothing on screen
         // moves, means the tab has something to play the moment it is tapped.
         SvipeReelWarmer.warmSoon(currentAccount, REELS_WARM_UP_DELAY_MS);
+        // Drain whatever performance samples the last session left on disk, then keep a slow
+        // heartbeat so a user who just reads their chats still reports what they measured.
+        SvipePerf.start(currentAccount);
+        SvipePerf.flush(currentAccount);
         return contentView;
     }
 
