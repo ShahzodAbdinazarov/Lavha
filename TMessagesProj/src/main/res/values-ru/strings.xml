@@ -503,4 +503,17 @@
     <string name="SvipeSavedToList">Сохранено</string>
     <string name="SvipeReelsSave">Сохранить</string>
     <string name="SvipeSaveToList">Сохранить в видео</string>
+    <string name="SvipeNotificationsBots">Боты</string>
+    <string name="SvipeNotificationsBotsMute">Отключить все боты</string>
+    <string name="SvipeNotificationsBotsInfo">Telegram считает ботов личными чатами, поэтому отключить их — значит отключить и друзей. Здесь отключаются только боты, включая новые.</string>
+    <string name="SvipeNotificationsBotsExceptions">Боты, которые уведомляют</string>
+    <string name="SvipeNotificationsBotsExceptionsInfo">Включите бота, чтобы он уведомлял, пока остальные молчат.</string>
+    <string name="SvipeNotificationsBotsOn">Включены</string>
+    <string name="SvipeNotificationsBotsOff">Отключены</string>
+    <string name="SvipeNotificationsBotOn">Уведомляет</string>
+    <string name="SvipeNotificationsBotOff">Отключён</string>
+    <string name="SvipeNotificationsBotsExceptionsCount_one">%1$d исключение</string>
+    <string name="SvipeNotificationsBotsExceptionsCount_few">%1$d исключения</string>
+    <string name="SvipeNotificationsBotsExceptionsCount_many">%1$d исключений</string>
+    <string name="SvipeNotificationsBotsExceptionsCount_other">%1$d исключений</string>
 </resources>

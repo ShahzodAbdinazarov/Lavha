@@ -238,4 +238,15 @@
     <string name="SvipeSavedToList">Saqlandi</string>
     <string name="SvipeReelsSave">Saqlash</string>
     <string name="SvipeSaveToList">Saqlanganlarga qo\'shish</string>
+    <string name="SvipeNotificationsBots">Botlar</string>
+    <string name="SvipeNotificationsBotsMute">Barcha botlarni o\'chirish</string>
+    <string name="SvipeNotificationsBotsInfo">Telegram botlarni shaxsiy chat deb hisoblaydi, ya\'ni ularni o\'chirsangiz do\'stlaringiz ham o\'chadi. Bu esa faqat botlarni o\'chiradi — yangilarini ham.</string>
+    <string name="SvipeNotificationsBotsExceptions">Bildirishnoma yuboradigan botlar</string>
+    <string name="SvipeNotificationsBotsExceptionsInfo">Botni yoqsangiz, qolganlari jim turganda u bildirishnoma yuboraveradi.</string>
+    <string name="SvipeNotificationsBotsOn">Yoqilgan</string>
+    <string name="SvipeNotificationsBotsOff">O\'chirilgan</string>
+    <string name="SvipeNotificationsBotOn">Yuboradi</string>
+    <string name="SvipeNotificationsBotOff">O\'chirilgan</string>
+    <string name="SvipeNotificationsBotsExceptionsCount_one">%1$d ta istisno</string>
+    <string name="SvipeNotificationsBotsExceptionsCount_other">%1$d ta istisno</string>
 </resources>

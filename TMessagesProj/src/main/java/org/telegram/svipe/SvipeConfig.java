@@ -51,6 +51,15 @@ public class SvipeConfig {
     /** Has this user ever opened the Video tab? Same gate as PREF_MUSIC_USED, same reason. */
     public static final String PREF_VIDEO_USED = "svipe_video_used";
 
+    // ---- Bots as their own notification category (SvipeBotMute) ----
+    // Telegram files bots under "Private chats", so silencing bots means silencing everyone. These
+    // hold OUR rule; the mutes themselves are Telegram's own per-peer settings.
+    public static final String PREF_BOT_MUTE = "svipe_bot_mute";
+    public static final String PREF_BOT_MUTE_EXCEPTIONS = "svipe_bot_mute_exceptions";
+    /** Peers WE muted, so switching the rule off never unmutes a bot the user silenced by hand. */
+    public static final String PREF_BOT_MUTE_APPLIED = "svipe_bot_mute_applied";
+    public static final String PREF_BOT_MUTE_UPDATED = "svipe_bot_mute_updated";
+
     /** Buffered performance samples awaiting upload (JSON array) — see SvipePerf. Survives a kill:
      *  a session that ended offline is exactly the session whose numbers we most want. */
     public static final String PREF_PERF_BUFFER = "svipe_perf_buffer";

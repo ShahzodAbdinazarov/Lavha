@@ -10729,6 +10729,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             return;
         }
         if (id == NotificationCenter.dialogsNeedReload) {
+            // A bot chat that starts today must obey a rule set last week, or "mute bots" quietly
+            // means "mute the bots I had that day" (see SvipeBotMute).
+            org.telegram.svipe.SvipeBotMute.applyToNewDialogs(currentAccount);
             if (viewPages == null || dialogsListFrozen) {
                 return;
             }

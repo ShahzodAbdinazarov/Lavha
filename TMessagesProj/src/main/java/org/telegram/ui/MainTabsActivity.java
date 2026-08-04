@@ -57,6 +57,7 @@ import org.telegram.messenger.UserObject;
 import org.telegram.svipe.SvipeMusicWarmer;
 import org.telegram.svipe.SvipePerf;
 import org.telegram.svipe.SvipeReelWarmer;
+import org.telegram.svipe.SvipeSettingsSync;
 import org.telegram.svipe.SvipeVideoWarmer;
 import org.telegram.svipe.SvipeWarmup;
 import org.telegram.svipe.SvipeUnreadRecountThrottle;
@@ -399,12 +400,16 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         // moves, means the tab has something to play the moment it is tapped.
         // One at a time, in the order a user is most likely to want them: music starts the moment
         // reels is finished, not at a guessed delay after it (see SvipeWarmup).
+        // Settings the user changed on another device come first: they are one small GET, and a
+        // rule adopted after the media warm-ups would have applied a beat late.
+        SvipeWarmup.enqueue("settings", (acc, done) -> { SvipeSettingsSync.pull(acc); done.run(); });
         SvipeWarmup.enqueue("reels", SvipeReelWarmer::warm);
         SvipeWarmup.enqueue("video", SvipeVideoWarmer::warm);
         SvipeWarmup.enqueue("music", SvipeMusicWarmer::warm);
         SvipeWarmup.start(currentAccount);
         // Drain whatever performance samples the last session left on disk, then keep a slow
         // heartbeat so a user who just reads their chats still reports what they measured.
+        org.telegram.svipe.SvipeBotMute.watch(currentAccount);
         SvipePerf.start(currentAccount);
         SvipePerf.flush(currentAccount);
         return contentView;

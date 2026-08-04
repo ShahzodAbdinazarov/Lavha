@@ -107,6 +107,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
     private int notificationsSectionRow;
     @Keep
     private int privateRow;
+    private int botsRow;   // Svipe: bots are their own category (Telegram files them under private chats)
     @Keep
     private int groupRow;
     @Keep
@@ -178,6 +179,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
 
         notificationsSectionRow = rowCount++;
         privateRow = rowCount++;
+        botsRow = rowCount++;
         groupRow = rowCount++;
         channelsRow = rowCount++;
         storiesRow = rowCount++;
@@ -507,6 +509,10 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
         listView.setOnItemClickListener((view, position, x, y) -> {
             boolean enabled = false;
             if (getParentActivity() == null) {
+                return;
+            }
+            if (position == botsRow) {
+                presentFragment(new org.telegram.svipe.SvipeBotNotificationsActivity());
                 return;
             }
             if (position == privateRow || position == groupRow || position == channelsRow || position == storiesRow || position == reactionsRow) {
@@ -968,6 +974,9 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 case 5:
                     view = new TextSettingsCell(mContext, resourceProvider);
                     break;
+                case 7:
+                    view = new NotificationsCheckCell(mContext, 21, 64, true, resourceProvider);
+                    break;
                 case 6:
                 default:
                     view = new TextInfoPrivacyCell(mContext, resourceProvider);
@@ -1042,6 +1051,16 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                     if (position == resetNotificationsRow) {
                         settingsCell.setTextAndValue(getString("ResetAllNotifications", R.string.ResetAllNotifications), getString("UndoAllCustom", R.string.UndoAllCustom), false);
                     }
+                    break;
+                }
+                case 7: {
+                    // Bots. The switch is the rule itself; tapping the row opens the exceptions.
+                    NotificationsCheckCell checkCell = (NotificationsCheckCell) holder.itemView;
+                    checkCell.setTextAndValueAndCheck(
+                            getString(R.string.SvipeNotificationsBots),
+                            org.telegram.svipe.SvipeBotNotificationsActivity.rowValue(currentAccount),
+                            !org.telegram.svipe.SvipeBotMute.isEnabled(currentAccount),
+                            0, true, true);
                     break;
                 }
                 case 3: {
@@ -1207,6 +1226,8 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 return 1;
             } else if (position == resetNotificationsRow) {
                 return 2;
+            } else if (position == botsRow) {
+                return 7;   // Svipe: same cell as the categories above, but our own rule behind it
             } else if (position == privateRow || position == groupRow || position == channelsRow || position == storiesRow || position == reactionsRow) {
                 return 3;
             } else if (position == eventsSection2Row || position == notificationsSection2Row || position == otherSection2Row ||
