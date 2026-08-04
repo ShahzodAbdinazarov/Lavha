@@ -1051,6 +1051,7 @@ public class SvipeVideoPlayerController {
                 } catch (Exception ignore) {}
                 buried.add(new BuriedPage(watchPage, current, at, wasPlaying));
             }
+            FileLog.d("svipe: page OPENED, buried=" + buried.size());
             handingOverToNewPage = false;
             watchPage = page;
             restoreItem = page.getWatchItem();
@@ -1101,6 +1102,8 @@ public class SvipeVideoPlayerController {
             // every fragment, so an inline player would hang over a screen it has nothing to do with.
             // A page buried by ANOTHER watch page is a different thing entirely — that is the stack
             // growing, and the page must stay alive to be returned to.
+            FileLog.d("svipe: page HIDDEN handover=" + handingOverToNewPage + " buried=" + isBuried(page)
+                    + " isCurrent=" + (page == watchPage));
             if (handingOverToNewPage || isBuried(page)) return;
             if (page != watchPage) return;
             syncRelatedSnapshot();   // last chance: autoplay in the mini bar has no page to ask
@@ -1121,6 +1124,7 @@ public class SvipeVideoPlayerController {
 
         @Override
         public void onWatchPageClosed(SvipeWatchActivity page) {
+            FileLog.d("svipe: page CLOSED isCurrent=" + (page == watchPage) + " buried=" + buried.size());
             if (watchPage == page) {
                 syncRelatedSnapshot();
                 watchPage = null;
@@ -1134,6 +1138,8 @@ public class SvipeVideoPlayerController {
                 // Back to the video underneath — the one the user was watching before this tap —
                 // resumed where they left it and PAUSED, because they came back to it deliberately.
                 final BuriedPage previous = buried.remove(buried.size() - 1);
+                FileLog.d("svipe: RESTORING previous page, wasPlaying=" + previous.wasPlaying
+                        + " at=" + previous.positionMs);
                 watchPage = previous.page;
                 resumeMs = previous.positionMs;
                 // Come back to the state it was left in: a video the user had paused before opening
