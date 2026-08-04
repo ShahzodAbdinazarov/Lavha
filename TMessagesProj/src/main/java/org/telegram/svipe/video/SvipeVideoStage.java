@@ -21,6 +21,7 @@ import android.widget.TextView;
 import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.ui.SvipeWatchActivity;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LocaleController;
@@ -105,6 +106,8 @@ public class SvipeVideoStage extends FrameLayout {
 
     private int dragTarget = NO_DRAG;
     private float dragProgress;
+    /** Where the hosting page currently is horizontally; the picture rides along with it. */
+    private float pageSlideX;
     private ValueAnimator dismissAnimator;
 
     public SvipeVideoStage(Context context) {
@@ -167,10 +170,49 @@ public class SvipeVideoStage extends FrameLayout {
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         SvipeVideoPlayerController.getInstance().attachStage(this);
+        getViewTreeObserver().addOnPreDrawListener(pageSlideWatcher);
     }
+
+    /**
+     * Follow the watch page sideways.
+     *
+     * The hole is reported as pure geometry from x=0 — deliberately, so a present/dismiss animation
+     * cannot hand the overlay a rect a screen-width off. The cost was that the player ignored the
+     * page moving under it: swipe the page towards the back gesture and the video stayed pinned to
+     * the window while its own page slid out from under it, then had to snap back when the swipe was
+     * cancelled. Reading where the page actually IS each frame, and carrying the picture with it,
+     * costs one location lookup per frame and only while a page is hosting the player.
+     */
+    private final android.view.ViewTreeObserver.OnPreDrawListener pageSlideWatcher = this::followPageSlide;
+
+    /** Runs before every frame; see the note on {@link #pageSlideWatcher}. */
+    private boolean followPageSlide() {
+        final SvipeVideoPlayerController controller = SvipeVideoPlayerController.getInstance();
+        if (controller.getMode() != SvipeVideoPlayerController.MODE_INLINE || dragTarget != NO_DRAG) {
+            if (pageSlideX != 0) {
+                pageSlideX = 0;
+                content.setTranslationX(0);
+                controls.setTranslationX(0);
+            }
+            return true;
+        }
+        final SvipeWatchActivity page = controller.getWatchPage();
+        final View pageView = page != null ? page.getFragmentView() : null;
+        if (pageView == null) return true;
+        pageView.getLocationInWindow(location);
+        final float x = location[0];
+        if (x != pageSlideX) {
+            pageSlideX = x;
+            content.setTranslationX(x);
+            controls.setTranslationX(x);
+        }
+        return true;
+    }
+
 
     @Override
     protected void onDetachedFromWindow() {
+        getViewTreeObserver().removeOnPreDrawListener(pageSlideWatcher);
         super.onDetachedFromWindow();
         cancelTransition();
         if (dismissAnimator != null) {

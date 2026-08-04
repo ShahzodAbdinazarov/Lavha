@@ -335,6 +335,11 @@ public class SvipeVideoPlayerController {
         if (page != null) page.resetDragAway();
     }
 
+    /** The page the player is hosted in, or null when it is playing over something else. */
+    public SvipeWatchActivity getWatchPage() {
+        return watchPage;
+    }
+
     public void toMini() {
         if (!isOpen() || mode == MODE_MINI) return;
         setMode(MODE_MINI, true);
