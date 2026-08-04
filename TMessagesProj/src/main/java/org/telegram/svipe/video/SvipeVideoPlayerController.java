@@ -420,13 +420,21 @@ public class SvipeVideoPlayerController {
         activity.presentFragment(new SvipeWatchActivity(item));
     }
 
-    /** The chrome's back chevron: fullscreen collapses to inline, inline closes the player. */
+    /**
+     * The chrome's back chevron: fullscreen collapses to inline; inline steps back through the
+     * videos the user opened and only closes once that trail is empty — the same rule the back key
+     * follows. Wiring it straight to close() made every related tap a one-way trip.
+     */
     public void onBackAffordance() {
         if (mode == MODE_FULLSCREEN) {
             exitFullscreen();
-        } else {
-            close();
+            return;
         }
+        final SvipeWatchActivity page = watchPage;
+        if (page != null && page.stepBackInHistory()) {
+            return;
+        }
+        close();
     }
 
     /**

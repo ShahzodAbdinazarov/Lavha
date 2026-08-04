@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -263,14 +264,31 @@ public class SvipeWatchActivity extends BaseFragment {
     private final java.util.ArrayList<Row> history = new java.util.ArrayList<>();
     private static final int MAX_HISTORY = 32;
 
+    /**
+     * Step back one video in the trail. Returns false when there is nothing to step back to, which
+     * is the caller's cue to close the page instead. Shared by the back key, the chrome's chevron
+     * and the swipe gesture, so all three mean the same thing.
+     */
+    /** How close to the left edge a back swipe has to start. */
+    private static final int EDGE_DP = 40;
+
+    public boolean stepBackInHistory() {
+        if (history.isEmpty()) return false;
+        openRow(history.remove(history.size() - 1), false);
+        return true;
+    }
+
     @Override
     public boolean onBackPressed(boolean invoked) {
         if (!history.isEmpty()) {
             if (invoked) {
-                final Row previous = history.remove(history.size() - 1);
-                openRow(previous, false);
+                stepBackInHistory();
+                return false;   // handled here: the page stays, the video steps back
             }
-            return false;   // handled here: the page stays, the video steps back
+            // A QUERY (invoked=false) is the framework's swipe-back asking whether it may close
+            // this page. It may not: while a trail exists the page handles that gesture itself (see
+            // the root view above) and walks the trail instead of throwing it away.
+            return false;
         }
         return super.onBackPressed(invoked);
     }
@@ -395,7 +413,61 @@ public class SvipeWatchActivity extends BaseFragment {
         // No action bar: the top of this screen belongs to the player, whose own chrome carries back.
         actionBar.setAddToContainer(false);
 
-        FrameLayout root = new FrameLayout(context);
+        // The page owns the edge-swipe while there is a trail to walk. The framework's own
+        // swipe-back closes the whole fragment, which would throw the chain away exactly like the
+        // chevron used to — so here the gesture means "one video back", the same as the other two
+        // ways of going back, and only falls through to the framework when the trail is empty.
+        FrameLayout root = new FrameLayout(context) {
+            private float downX, downY;
+            private boolean tracking, decided;
+
+            @Override
+            public boolean onInterceptTouchEvent(MotionEvent ev) {
+                if (history.isEmpty()) return super.onInterceptTouchEvent(ev);
+                final int action = ev.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN) {
+                    downX = ev.getX();
+                    downY = ev.getY();
+                    tracking = false;
+                    decided = downX > dp(EDGE_DP);   // started too far in: not ours, ever
+                } else if (action == MotionEvent.ACTION_MOVE && !decided) {
+                    final float dx = ev.getX() - downX;
+                    final float dy = Math.abs(ev.getY() - downY);
+                    if (Math.abs(dx) > AndroidUtilities.getPixelsInCM(.3f, true) || dy > AndroidUtilities.getPixelsInCM(.3f, false)) {
+                        decided = true;
+                        tracking = dx > 0 && dx > dy;   // rightward and horizontal: a back swipe
+                        return tracking;
+                    }
+                }
+                return super.onInterceptTouchEvent(ev);
+            }
+
+            @Override
+            public boolean onTouchEvent(MotionEvent ev) {
+                if (!tracking) return super.onTouchEvent(ev);
+                final int action = ev.getActionMasked();
+                final float dx = Math.max(0, ev.getX() - downX);
+                if (action == MotionEvent.ACTION_MOVE) {
+                    setDragAway(0, 1f);
+                    listView.setTranslationX(dx);
+                    listView.setAlpha(Math.max(0f, 1f - dx / (getWidth() * .6f)));
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    tracking = false;
+                    final boolean commit = action == MotionEvent.ACTION_UP && dx > getWidth() * .25f;
+                    if (commit && stepBackInHistory()) {
+                        // The video underneath has already swapped; bring its page in from the left
+                        // so the movement reads as going back rather than as a page bouncing.
+                        listView.setTranslationX(-getWidth() * .25f);
+                        listView.setAlpha(0f);
+                    }
+                    listView.animate().translationX(0).alpha(1f).setDuration(180).start();
+                    return true;
+                }
+                return super.onTouchEvent(ev);
+            }
+        };
         root.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
         fragmentView = root;
 
