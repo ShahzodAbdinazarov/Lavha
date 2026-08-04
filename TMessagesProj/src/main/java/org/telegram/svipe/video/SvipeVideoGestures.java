@@ -57,8 +57,6 @@ public class SvipeVideoGestures {
     private static final int DRAG_RECT = 1;
     /** Side-swipe on the mini bar. */
     private static final int DRAG_DISMISS = 4;
-    /** The hosting page's back gesture, started on the picture and handed to the page. */
-    private static final int DRAG_PAGE_BACK = 5;
 
     private final SvipeVideoStage stage;
     private final SvipeVideoControls controls;
@@ -76,7 +74,6 @@ public class SvipeVideoGestures {
     private boolean dragUp;
     /** This drag moves the picture with the finger instead of lerping between the two rects. */
     private boolean followsFinger;
-    private SvipeWatchActivity backPage;
     private boolean doubleTapArmed;
     private boolean suppressDrag;
     private boolean speedBoosted;
@@ -220,9 +217,6 @@ public class SvipeVideoGestures {
             case DRAG_DISMISS:
                 stage.setDrag(SvipeVideoPlayerController.MODE_MINI, 0, dx, 0);
                 break;
-            case DRAG_PAGE_BACK:
-                if (backPage != null) backPage.backDragMove(dx);
-                break;
         }
     }
 
@@ -233,17 +227,6 @@ public class SvipeVideoGestures {
         switch (controller.getMode()) {
             case SvipeVideoPlayerController.MODE_INLINE:
                 if (!vertical) {
-                    // A rightward drag that began at the screen's left edge is the page's back
-                    // gesture. The picture covers the top third of the page, so most attempts to
-                    // start that gesture land here — swallowing them made the swipe simply not work
-                    // wherever the user naturally begins it.
-                    final SvipeWatchActivity page = controller.getWatchPage();
-                    if (page != null && page.hasHistory() && moveDx > 0
-                            && downX <= AndroidUtilities.dp(40)) {
-                        dragKind = DRAG_PAGE_BACK;
-                        backPage = page;
-                        break;
-                    }
                     return;
                 }
                 dragKind = DRAG_RECT;
@@ -314,13 +297,6 @@ public class SvipeVideoGestures {
                 stage.endDrag(commit);
                 if (commit) {
                     commitTransition(dragTargetMode);
-                }
-                break;
-            }
-            case DRAG_PAGE_BACK: {
-                if (backPage != null) {
-                    backPage.backDragEnd(moveDx, up);
-                    backPage = null;
                 }
                 break;
             }

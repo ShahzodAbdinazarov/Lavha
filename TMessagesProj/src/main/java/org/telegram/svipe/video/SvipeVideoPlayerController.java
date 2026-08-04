@@ -104,6 +104,35 @@ public class SvipeVideoPlayerController {
 
     /** The watch page currently showing this video, if any — the one that owns the inline hole. */
     private SvipeWatchActivity watchPage;
+    /**
+     * Watch pages this one was opened from, newest last, each with the video it was showing and
+     * where it had got to. A related tap stacks a new page rather than swapping the video in place,
+     * so closing the top one puts the previous video back on screen exactly where it was left —
+     * paused, because the user came back to look at it, not to be carried off again.
+     */
+    private final java.util.ArrayList<BuriedPage> buried = new java.util.ArrayList<>();
+    /** Set while presenting one watch page from another, so the buried one is not minimised. */
+    private boolean handingOverToNewPage;
+
+    private static class BuriedPage {
+        final SvipeWatchActivity page;
+        final SvipeRefResolver.VideoRef ref;
+        final long positionMs;
+        /** Whether it was running when it was buried — what it should do when it is uncovered. */
+        final boolean wasPlaying;
+
+        BuriedPage(SvipeWatchActivity page, SvipeRefResolver.VideoRef ref, long positionMs, boolean wasPlaying) {
+            this.page = page;
+            this.ref = ref;
+            this.positionMs = positionMs;
+            this.wasPlaying = wasPlaying;
+        }
+    }
+
+    /** The page is about to present another watch page over itself. */
+    public void expectHandover() {
+        handingOverToNewPage = true;
+    }
     /** What to re-present when the mini bar is dragged back up. Outlives the page. */
     private SvipeDiscover.Item restoreItem;
 
@@ -127,6 +156,8 @@ public class SvipeVideoPlayerController {
      * player is not touched by a transition.
      */
     private long resumeMs;
+    /** The next video opens paused: set when returning to a page the user backed out to. */
+    private boolean startPaused;
 
     /**
      * Watch clock + event poster. Owned rather than observed: the leave event is built from the
@@ -276,7 +307,8 @@ public class SvipeVideoPlayerController {
         releaseCurrentVideo();
         account = UserConfig.selectedAccount;
         current = ref;
-        resumeMs = 0;
+        // A paused return carries the position it is returning TO; every other open starts fresh.
+        if (!startPaused) resumeMs = 0;
         final boolean autoplayed = pendingAutoplay;
         pendingAutoplay = false;
         telemetry.onOpen(account, ref, autoplayed);
@@ -333,6 +365,19 @@ public class SvipeVideoPlayerController {
     public void notifyPageDragCancelled() {
         final SvipeWatchActivity page = watchPage;
         if (page != null) page.resetDragAway();
+    }
+
+    private boolean isBuried(SvipeWatchActivity page) {
+        for (int i = 0; i < buried.size(); i++) {
+            if (buried.get(i).page == page) return true;
+        }
+        return false;
+    }
+
+    private void removeBuried(SvipeWatchActivity page) {
+        for (int i = buried.size() - 1; i >= 0; i--) {
+            if (buried.get(i).page == page) buried.remove(i);
+        }
     }
 
     /** The page the player is hosted in, or null when it is playing over something else. */
@@ -430,8 +475,11 @@ public class SvipeVideoPlayerController {
             exitFullscreen();
             return;
         }
+        // Same as back: close THIS page. If another watch page is underneath, onWatchPageClosed
+        // brings it back with its own video, paused; if not, the player closes.
         final SvipeWatchActivity page = watchPage;
-        if (page != null && page.stepBackInHistory()) {
+        if (page != null) {
+            page.finishFragment();
             return;
         }
         close();
@@ -794,6 +842,12 @@ public class SvipeVideoPlayerController {
                 FileLog.d("svipe: long-form play source=" + (vu.isCached() ? "LOCAL-cache" : "network"));
                 p.preparePlayer(vu.uri, "other");
             }
+            if (startPaused) {
+                // Returning to a video the user had paused: it stays paused. (A video that was
+                // running when it was buried takes the ordinary autoplay path below.)
+                startPaused = false;
+                p.setPlayWhenReady(false);
+            }
             if (resumeMs > 0) {
                 try { p.seekTo(resumeMs); } catch (Exception ignore) {}
             }
@@ -986,6 +1040,18 @@ public class SvipeVideoPlayerController {
     private final SvipeWatchActivity.PlayerHoleListener holeListener = new SvipeWatchActivity.PlayerHoleListener() {
         @Override
         public void onWatchPageOpened(SvipeWatchActivity page) {
+            if (watchPage != null && watchPage != page) {
+                // Remember where the page underneath was, so coming back to it is coming back to
+                // the same moment of the same video.
+                long at = 0;
+                boolean wasPlaying = false;
+                try {
+                    at = player != null ? Math.max(0, player.getCurrentPosition()) : resumeMs;
+                    wasPlaying = isPlaying();
+                } catch (Exception ignore) {}
+                buried.add(new BuriedPage(watchPage, current, at, wasPlaying));
+            }
+            handingOverToNewPage = false;
             watchPage = page;
             restoreItem = page.getWatchItem();
             final SvipeRefResolver.VideoRef ref = SvipeRefResolver.VideoRef.of(page.getWatchItem());
@@ -1033,6 +1099,9 @@ public class SvipeVideoPlayerController {
         public void onWatchPageHidden(SvipeWatchActivity page) {
             // Something was presented over the page (a channel, a profile). The overlay draws above
             // every fragment, so an inline player would hang over a screen it has nothing to do with.
+            // A page buried by ANOTHER watch page is a different thing entirely — that is the stack
+            // growing, and the page must stay alive to be returned to.
+            if (handingOverToNewPage || isBuried(page)) return;
             if (page != watchPage) return;
             syncRelatedSnapshot();   // last chance: autoplay in the mini bar has no page to ask
             watchPage = null;
@@ -1055,12 +1124,27 @@ public class SvipeVideoPlayerController {
             if (watchPage == page) {
                 syncRelatedSnapshot();
                 watchPage = null;
+            } else {
+                // A page from deeper in the stack went away (its own close, or the stack unwinding).
+                removeBuried(page);
+                return;
             }
             if (mode == MODE_CLOSED || mode == MODE_MINI) return;
-            // Back closes the video. Parking it in the mini bar on the way out reads as the player
-            // refusing to leave: the user asked for the page to go away, and a video still playing
-            // over the next screen is not what they asked for. Minimising stays available on
-            // purpose — the drag-down gesture — where it is something the user did deliberately.
+            if (!buried.isEmpty()) {
+                // Back to the video underneath — the one the user was watching before this tap —
+                // resumed where they left it and PAUSED, because they came back to it deliberately.
+                final BuriedPage previous = buried.remove(buried.size() - 1);
+                watchPage = previous.page;
+                resumeMs = previous.positionMs;
+                // Come back to the state it was left in: a video the user had paused before opening
+                // the next one stays paused; one that was running carries on from where it got to.
+                startPaused = !previous.wasPlaying;
+                final Rect hole = new Rect();
+                open(previous.ref, previous.page.getPlayerHoleRect(hole) ? hole : null, false);
+                return;
+            }
+            // Nothing underneath: back closes the video. Parking it in the mini bar on the way out
+            // reads as the player refusing to leave.
             close();
         }
     };

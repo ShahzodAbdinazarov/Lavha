@@ -257,75 +257,6 @@ public class SvipeWatchActivity extends BaseFragment {
      * window, which a presented fragment does on a phone — this screen is not laid out for the tablet
      * two-column stack.
      */
-    /**
-     * The videos tapped to get here, oldest first. Bounded: a long chain is a trail, not an archive,
-     * and every entry holds a resolved row.
-     */
-    private final java.util.ArrayList<Row> history = new java.util.ArrayList<>();
-    private static final int MAX_HISTORY = 32;
-
-    /**
-     * Step back one video in the trail. Returns false when there is nothing to step back to, which
-     * is the caller's cue to close the page instead. Shared by the back key, the chrome's chevron
-     * and the swipe gesture, so all three mean the same thing.
-     */
-    /** How close to the left edge a back swipe has to start. */
-    private static final int EDGE_DP = 40;
-
-    /**
-     * The back-swipe, driven from wherever the finger happens to be.
-     *
-     * The picture is an overlay on the window, NOT a child of this page, so a swipe that starts on
-     * the video never reaches this view at all — it is swallowed by the player. Which is most of the
-     * screen's top third, and the most natural place to start the gesture. So the player forwards it
-     * here, and both entry points run the same two methods.
-     */
-    public void backDragMove(float dx) {
-        if (listView == null) return;
-        listView.setTranslationX(Math.max(0, dx));
-        final int w = fragmentView == null ? 1 : Math.max(1, fragmentView.getWidth());
-        listView.setAlpha(Math.max(0f, 1f - Math.max(0, dx) / (w * .6f)));
-    }
-
-    public void backDragEnd(float dx, boolean released) {
-        if (listView == null) return;
-        final int w = fragmentView == null ? 1 : Math.max(1, fragmentView.getWidth());
-        if (released && dx > w * .25f && stepBackInHistory()) {
-            // The video underneath has already swapped; bring its page in from the left so the
-            // movement reads as going back rather than as a page bouncing.
-            listView.setTranslationX(-w * .25f);
-            listView.setAlpha(0f);
-        }
-        listView.animate().cancel();
-        listView.animate().translationX(0).alpha(1f).setDuration(180).start();
-    }
-
-    /** Does this page have somewhere to go back TO? The player asks before claiming a drag. */
-    public boolean hasHistory() {
-        return !history.isEmpty();
-    }
-
-    public boolean stepBackInHistory() {
-        if (history.isEmpty()) return false;
-        openRow(history.remove(history.size() - 1), false);
-        return true;
-    }
-
-    @Override
-    public boolean onBackPressed(boolean invoked) {
-        if (!history.isEmpty()) {
-            if (invoked) {
-                stepBackInHistory();
-                return false;   // handled here: the page stays, the video steps back
-            }
-            // A QUERY (invoked=false) is the framework's swipe-back asking whether it may close
-            // this page. It may not: while a trail exists the page handles that gesture itself (see
-            // the root view above) and walks the trail instead of throwing it away.
-            return false;
-        }
-        return super.onBackPressed(invoked);
-    }
-
     /** Where this page was opened from, so the player can grow out of it. Set before presenting. */
     public void setOpenFromRect(Rect windowRect) {
         openFromRect = windowRect == null ? null : new Rect(windowRect);
@@ -370,25 +301,8 @@ public class SvipeWatchActivity extends BaseFragment {
      * paints its title, channel and actions immediately instead of blanking them for a round-trip.
      */
     private void openRow(Row row) {
-        openRow(row, true);
-    }
-
-    /**
-     * @param remember false when this swap is a step BACK through the chain — the video being
-     *                 restored must not be pushed onto the history it is coming out of.
-     */
-    private void openRow(Row row, boolean remember) {
         if (row.ref == null || watched.ref != null && keyOf(row.ref).equals(keyOf(watched.ref))) {
             return;
-        }
-        if (remember && watched.ref != null) {
-            // Tapping through related videos builds a trail, and back should walk it. Without this
-            // the whole chain collapsed to one screen: five videos deep, one back press and the user
-            // was on the home grid with everything they had been watching gone.
-            history.add(watched);
-            while (history.size() > MAX_HISTORY) {
-                history.remove(0);
-            }
         }
         watched = row;
         related.clear();
@@ -446,52 +360,7 @@ public class SvipeWatchActivity extends BaseFragment {
         // No action bar: the top of this screen belongs to the player, whose own chrome carries back.
         actionBar.setAddToContainer(false);
 
-        // The page owns the edge-swipe while there is a trail to walk. The framework's own
-        // swipe-back closes the whole fragment, which would throw the chain away exactly like the
-        // chevron used to — so here the gesture means "one video back", the same as the other two
-        // ways of going back, and only falls through to the framework when the trail is empty.
-        FrameLayout root = new FrameLayout(context) {
-            private float downX, downY;
-            private boolean tracking, decided;
-
-            @Override
-            public boolean onInterceptTouchEvent(MotionEvent ev) {
-                if (history.isEmpty()) return super.onInterceptTouchEvent(ev);
-                final int action = ev.getActionMasked();
-                if (action == MotionEvent.ACTION_DOWN) {
-                    downX = ev.getX();
-                    downY = ev.getY();
-                    tracking = false;
-                    decided = downX > dp(EDGE_DP);   // started too far in: not ours, ever
-                } else if (action == MotionEvent.ACTION_MOVE && !decided) {
-                    final float dx = ev.getX() - downX;
-                    final float dy = Math.abs(ev.getY() - downY);
-                    if (Math.abs(dx) > AndroidUtilities.getPixelsInCM(.3f, true) || dy > AndroidUtilities.getPixelsInCM(.3f, false)) {
-                        decided = true;
-                        tracking = dx > 0 && dx > dy;   // rightward and horizontal: a back swipe
-                        return tracking;
-                    }
-                }
-                return super.onInterceptTouchEvent(ev);
-            }
-
-            @Override
-            public boolean onTouchEvent(MotionEvent ev) {
-                if (!tracking) return super.onTouchEvent(ev);
-                final int action = ev.getActionMasked();
-                final float dx = Math.max(0, ev.getX() - downX);
-                if (action == MotionEvent.ACTION_MOVE) {
-                    backDragMove(dx);
-                    return true;
-                }
-                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                    tracking = false;
-                    backDragEnd(dx, action == MotionEvent.ACTION_UP);
-                    return true;
-                }
-                return super.onTouchEvent(ev);
-            }
-        };
+        FrameLayout root = new FrameLayout(context);
         root.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
         fragmentView = root;
 
@@ -506,7 +375,11 @@ public class SvipeWatchActivity extends BaseFragment {
         listView.setOnItemClickListener((view, position) -> {
             final Row row = relatedRowAt(position);
             if (row != null) {
-                openRow(row);
+                // A related video opens ON TOP of this one. Stacking rather than swapping is what
+                // makes back mean "the video I was watching": this page stays alive underneath with
+                // its scroll and its playback position, and the player hands itself over.
+                org.telegram.svipe.video.SvipeVideoPlayerController.getInstance().expectHandover();
+                presentFragment(new SvipeWatchActivity(row.ref));
             }
         });
         listView.addOnScrollListener(new RecyclerView.OnScrollListener() {
