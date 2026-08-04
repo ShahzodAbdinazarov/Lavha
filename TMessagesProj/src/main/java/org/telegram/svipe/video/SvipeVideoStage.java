@@ -460,9 +460,23 @@ public class SvipeVideoStage extends FrameLayout {
 
     // ---------------- finger-driven transitions ----------------
 
-    /** Finger travel for a full inline<->fullscreen / inline<->mini transition. */
-    public float dragTravel() {
+    /**
+     * Finger travel for a full transition.
+     *
+     * The two are not the same gesture. Fullscreen is a hint the finger gives and the animation
+     * completes, so a short throw is right. Putting the page away into the mini card is the user
+     * physically moving the screen out of the way, and it should last as long as that motion does —
+     * half the screen, by which point the page is gone and only the card is left.
+     */
+    public float dragTravel(int targetMode) {
+        if (targetMode == SvipeVideoPlayerController.MODE_MINI) {
+            return Math.max(AndroidUtilities.dp(180), getMeasuredHeight() * .5f);
+        }
         return AndroidUtilities.dp(180);
+    }
+
+    public float dragTravel() {
+        return dragTravel(SvipeVideoPlayerController.MODE_FULLSCREEN);
     }
 
     /** Travel past which letting go commits the transition instead of springing back. */
@@ -491,6 +505,13 @@ public class SvipeVideoStage extends FrameLayout {
     public void setDrag(int targetMode, float progress, float offsetX, float offsetY) {
         dragTarget = targetMode;
         dragProgress = Math.max(0f, Math.min(1f, progress));
+        if (targetMode == SvipeVideoPlayerController.MODE_MINI && offsetX == 0) {
+            // The page travels with the picture and is gone by the time the finger reaches the
+            // middle of the screen — one screen being put away, rather than a video sliding off a
+            // page that stayed behind.
+            SvipeVideoPlayerController.getInstance().notifyPageDragAway(
+                    dragProgress * dragTravel(targetMode), 1f - dragProgress);
+        }
         content.setTranslationX(offsetX);
         content.setTranslationY(offsetY);
         controls.setTranslationX(offsetX);
@@ -536,6 +557,9 @@ public class SvipeVideoStage extends FrameLayout {
      * animation starts from the rect the drag left behind; on a cancel the player springs back.
      */
     public void endDrag(boolean commit) {
+        if (!commit) {
+            SvipeVideoPlayerController.getInstance().notifyPageDragCancelled();
+        }
         if (followDrag != 0) {
             // Spring the hint back either way: on a commit the mode change animates over it, on a
             // cancel this IS the way back.

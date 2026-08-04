@@ -320,6 +320,21 @@ public class SvipeVideoPlayerController {
         setMode(MODE_INLINE, true);
     }
 
+    /**
+     * Forward a drag-towards-mini to the page underneath so it travels with the picture. Only the
+     * page the player is actually hosted in ever hears about it.
+     */
+    public void notifyPageDragAway(float translationY, float alpha) {
+        final SvipeWatchActivity page = watchPage;
+        if (page != null) page.setDragAway(translationY, alpha);
+    }
+
+    /** The drag ended without committing: the page comes back. */
+    public void notifyPageDragCancelled() {
+        final SvipeWatchActivity page = watchPage;
+        if (page != null) page.resetDragAway();
+    }
+
     public void toMini() {
         if (!isOpen() || mode == MODE_MINI) return;
         setMode(MODE_MINI, true);

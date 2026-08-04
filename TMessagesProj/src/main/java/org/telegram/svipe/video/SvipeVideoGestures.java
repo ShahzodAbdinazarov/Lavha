@@ -206,7 +206,7 @@ public class SvipeVideoGestures {
                     // backwards — the gesture said "up", the picture went "down".
                     stage.setFollowDrag(travelled * (dragUp ? -1f : 1f));
                 } else {
-                    stage.setDrag(dragTargetMode, Math.min(1f, travelled / stage.dragTravel()), 0, 0);
+                    stage.setDrag(dragTargetMode, Math.min(1f, travelled / stage.dragTravel(dragTargetMode)), 0, 0);
                 }
                 break;
             }
@@ -285,7 +285,10 @@ public class SvipeVideoGestures {
             case DRAG_RECT: {
                 final float travelled = Math.max(0, dragUp ? -moveDy : moveDy);
                 final float directional = dragUp ? -velocityY : velocityY;
-                final boolean commit = up && (travelled >= stage.dragCommit()
+                // A long gesture needs a proportional commit point: a quarter of its own travel,
+                // never less than the flick distance that commits a short one.
+                final float needed = Math.max(stage.dragCommit(), stage.dragTravel(dragTargetMode) * .25f);
+                final boolean commit = up && (travelled >= needed
                         || directional >= AndroidUtilities.dp(700));
                 stage.endDrag(commit);
                 if (commit) {

@@ -322,6 +322,27 @@ public class SvipeWatchActivity extends BaseFragment {
 
     // ---------------- fragment ----------------
 
+    /**
+     * The page being dragged away under the player, on the way to the mini card.
+     *
+     * The list holds everything below the picture — title, actions, related — and the player itself
+     * is an overlay above it, so moving the list IS moving "the rest of the page". Without this the
+     * video slid to the corner while the page it belonged to stayed put, which read as two unrelated
+     * things happening at once instead of one screen being put away.
+     */
+    public void setDragAway(float translationY, float alpha) {
+        if (listView == null) return;
+        listView.setTranslationY(translationY);
+        listView.setAlpha(alpha);
+    }
+
+    /** Put the page back after a drag that did not commit. */
+    public void resetDragAway() {
+        if (listView == null) return;
+        listView.animate().cancel();
+        listView.animate().translationY(0).alpha(1f).setDuration(180).start();
+    }
+
     @Override
     public View createView(Context context) {
         // No action bar: the top of this screen belongs to the player, whose own chrome carries back.
