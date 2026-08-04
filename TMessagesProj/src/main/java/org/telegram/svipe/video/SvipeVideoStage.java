@@ -400,6 +400,16 @@ public class SvipeVideoStage extends FrameLayout {
         gestures.draw(canvas, drawRect);
     }
 
+    /**
+     * Hold the display awake while the video plays. On the VIEW rather than the window: a view's
+     * keep-screen-on is dropped the moment it detaches, so no exit path can leave a phone burning
+     * its battery on a black screen.
+     */
+    public void setKeepScreenOn(boolean on) {
+        super.setKeepScreenOn(on);
+        content.setKeepScreenOn(on);
+    }
+
     /** The player rect currently on screen, in this view's coordinates. Read-only — never mutate it. */
     public Rect getPlayerRect() {
         return drawRect;
@@ -456,10 +466,45 @@ public class SvipeVideoStage extends FrameLayout {
     }
 
     /**
+     * A fullscreen transition drag, moving with the finger.
+     *
+     * The geometric lerp the mini transition uses is wrong here: the inline picture sits in a hole at
+     * the top of the page, so growing it towards fullscreen moves it DOWNWARD while the finger goes
+     * up — the gesture and the picture disagree, and it reads as the animation running backwards.
+     * Following the finger (damped, and bounded so the picture never leaves) says "yes, this drag is
+     * doing something" and lets the mode change itself play out on release.
+     */
+    public void setFollowDrag(float dy) {
+        final float damped = dy * FOLLOW_DAMPING;
+        final float max = FOLLOW_MAX_PX();
+        followDrag = Math.max(-max, Math.min(max, damped));
+        content.setTranslationY(followDrag);
+        controls.setTranslationY(followDrag);
+        content.setTranslationX(0);
+        controls.setTranslationX(0);
+    }
+
+    /** A drag should hint at the transition, not perform it — the finger outruns the picture. */
+    private static final float FOLLOW_DAMPING = 0.35f;
+
+    private static float FOLLOW_MAX_PX() {
+        return AndroidUtilities.dp(56);
+    }
+
+    private float followDrag;
+
+    /**
      * The finger let go. On a commit the caller immediately asks the controller for the new mode, whose
      * animation starts from the rect the drag left behind; on a cancel the player springs back.
      */
     public void endDrag(boolean commit) {
+        if (followDrag != 0) {
+            // Spring the hint back either way: on a commit the mode change animates over it, on a
+            // cancel this IS the way back.
+            content.animate().translationY(0).setDuration(180).start();
+            controls.animate().translationY(0).setDuration(180).start();
+            followDrag = 0;
+        }
         resetDragVisuals();
         if (!commit) {
             onModeChanged(SvipeVideoPlayerController.getInstance().getMode(), true);
@@ -490,6 +535,7 @@ public class SvipeVideoStage extends FrameLayout {
     }
 
     private void resetDragVisuals() {
+        followDrag = 0f;
         dragTarget = NO_DRAG;
         dragProgress = 0f;
         content.setTranslationX(0);

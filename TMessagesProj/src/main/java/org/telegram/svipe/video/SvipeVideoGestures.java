@@ -29,7 +29,8 @@ import org.telegram.ui.Components.VideoForwardDrawable;
  *       nothing, because that is where the vertical exit drag lives</li>
  *   <li>long press → 2× while held, 1× on release</li>
  *   <li>inline: drag up → fullscreen, drag down → mini</li>
- *   <li>fullscreen: left third = brightness, right third = volume, middle third drag down → inline</li>
+ *   <li>fullscreen: drag down anywhere → inline (no brightness/volume edge swipes: YouTube
+ *       dropped them and one-handed use fires them by accident)</li>
  *   <li>mini: drag up → restore, drag sideways → dismiss</li>
  * </ul>
  *
@@ -50,8 +51,6 @@ public class SvipeVideoGestures {
     private static final int DRAG_NONE = 0;
     /** A mode transition the finger is dragging through: the stage lerps between the two rects. */
     private static final int DRAG_RECT = 1;
-    private static final int DRAG_BRIGHTNESS = 2;
-    private static final int DRAG_VOLUME = 3;
     /** Side-swipe on the mini bar. */
     private static final int DRAG_DISMISS = 4;
 
@@ -69,7 +68,8 @@ public class SvipeVideoGestures {
     private int dragKind = DRAG_NONE;
     private int dragTargetMode;
     private boolean dragUp;
-    private float dragStartValue;
+    /** This drag moves the picture with the finger instead of lerping between the two rects. */
+    private boolean followsFinger;
     private boolean doubleTapArmed;
     private boolean suppressDrag;
     private boolean speedBoosted;
@@ -199,18 +199,15 @@ public class SvipeVideoGestures {
                 // Travel is measured along the initiating direction only, so dragging back past the
                 // start collapses the transition instead of re-opening it the other way.
                 final float travelled = Math.max(0, dragUp ? -dy : dy);
-                stage.setDrag(dragTargetMode, Math.min(1f, travelled / stage.dragTravel()), 0, 0);
-                break;
-            }
-            case DRAG_BRIGHTNESS: {
-                final float value = clamp01(dragStartValue - dy / adjustTravel());
-                applyBrightness(stage.getContext(), value);
-                controls.showLevel(SvipeVideoControls.LEVEL_BRIGHTNESS, value);
-                break;
-            }
-            case DRAG_VOLUME: {
-                final float value = clamp01(dragStartValue - dy / adjustTravel());
-                controls.showLevel(SvipeVideoControls.LEVEL_VOLUME, applyVolume(stage.getContext(), value));
+                if (followsFinger) {
+                    // Entering or leaving fullscreen: the picture moves WITH the finger and the mode
+                    // flips on release. Lerping the rect instead made the video grow downwards out of
+                    // its hole while the finger went up, which reads as the animation running
+                    // backwards — the gesture said "up", the picture went "down".
+                    stage.setFollowDrag(travelled * (dragUp ? -1f : 1f));
+                } else {
+                    stage.setDrag(dragTargetMode, Math.min(1f, travelled / stage.dragTravel()), 0, 0);
+                }
                 break;
             }
             case DRAG_DISMISS:
@@ -221,6 +218,7 @@ public class SvipeVideoGestures {
 
     private void beginDrag(boolean vertical, boolean up) {
         dragUp = up;
+        followsFinger = false;
         final SvipeVideoPlayerController controller = SvipeVideoPlayerController.getInstance();
         switch (controller.getMode()) {
             case SvipeVideoPlayerController.MODE_INLINE:
@@ -230,21 +228,20 @@ public class SvipeVideoGestures {
                 dragKind = DRAG_RECT;
                 dragTargetMode = up ? SvipeVideoPlayerController.MODE_FULLSCREEN
                         : SvipeVideoPlayerController.MODE_MINI;
+                // Up into fullscreen follows the finger; down into the mini bar keeps the geometric
+                // lerp, because there the picture really is travelling to the corner it lands in.
+                followsFinger = up;
                 break;
             case SvipeVideoPlayerController.MODE_FULLSCREEN:
                 if (!vertical) {
                     return;
                 }
-                final int third = thirdOf(downX);
-                if (third < 0) {
-                    dragKind = DRAG_BRIGHTNESS;
-                    dragStartValue = currentBrightness(stage.getContext());
-                } else if (third > 0) {
-                    dragKind = DRAG_VOLUME;
-                    dragStartValue = currentVolume(stage.getContext());
-                } else if (!up) {
+                // No brightness/volume edge swipes. YouTube dropped them, and on a phone held in
+                // one hand they fire constantly by accident — the whole width is now the exit drag.
+                if (!up) {
                     dragKind = DRAG_RECT;
                     dragTargetMode = SvipeVideoPlayerController.MODE_INLINE;
+                    followsFinger = true;
                 }
                 break;
             case SvipeVideoPlayerController.MODE_MINI:
@@ -445,8 +442,9 @@ public class SvipeVideoGestures {
     }
 
     /**
-     * Screen brightness is a WINDOW attribute, so there is exactly one of it and it MUST be handed
-     * back — see {@link #releaseBrightness}. Same mechanism the story recorder's flash uses.
+     * Kept for one reason only: releasing an override. The player no longer SETS brightness (the
+     * edge swipes are gone), but a user upgrading from a build that did could otherwise be left with
+     * a window brightness override we never hand back.
      *
      * Writing it is a WindowManager round-trip, so a value the screen cannot tell apart is dropped
      * rather than pushed on every touch move.
@@ -480,52 +478,8 @@ public class SvipeVideoGestures {
         applyBrightness(context, WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE);
     }
 
-    private static float currentBrightness(Context context) {
-        final Activity activity = activityOf(context);
-        if (activity != null && activity.getWindow() != null) {
-            final float override = activity.getWindow().getAttributes().screenBrightness;
-            if (override >= 0) {
-                return override;
-            }
-        }
-        // No override yet: start the drag from where the system actually is, so the first pixel of
-        // movement does not jump the screen.
-        try {
-            return Settings.System.getInt(context.getContentResolver(), Settings.System.SCREEN_BRIGHTNESS) / 255f;
-        } catch (Exception ignore) {
-            return .5f;
-        }
-    }
 
-    private static float currentVolume(Context context) {
-        try {
-            final AudioManager am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
-            final int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-            return max <= 0 ? 0 : am.getStreamVolume(AudioManager.STREAM_MUSIC) / (float) max;
-        } catch (Exception ignore) {
-            return 0;
-        }
-    }
 
-    /** Returns the level actually applied — the stream is quantised, so the meter must follow it. */
-    private static float applyVolume(Context context, float value) {
-        try {
-            final AudioManager am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
-            final int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-            if (max <= 0) {
-                return 0;
-            }
-            final int target = Math.max(0, Math.min(max, Math.round(value * max)));
-            // The stream is quantised, so most touch moves land on the step it is already at.
-            if (target != am.getStreamVolume(AudioManager.STREAM_MUSIC)) {
-                am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0);
-            }
-            return target / (float) max;
-        } catch (Exception e) {
-            FileLog.e(e);
-            return value;
-        }
-    }
 
     /** The stage forwards its own detach so no boost or override outlives the surface. */
     public void onDetached(View host) {

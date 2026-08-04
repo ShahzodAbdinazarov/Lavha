@@ -392,12 +392,12 @@ public class SvipeVideoPlayerController {
         activity.presentFragment(new SvipeWatchActivity(item));
     }
 
-    /** The chrome's back chevron: fullscreen collapses to inline, inline collapses to the mini bar. */
+    /** The chrome's back chevron: fullscreen collapses to inline, inline closes the player. */
     public void onBackAffordance() {
         if (mode == MODE_FULLSCREEN) {
             exitFullscreen();
         } else {
-            minimise();
+            close();
         }
     }
 
@@ -772,6 +772,11 @@ public class SvipeVideoPlayerController {
     }
 
     private void notifyPlaying(boolean playing) {
+        // Watching a video is the one activity where the user touches nothing for minutes, so the
+        // screen timeout has to be held off while — and only while — something is actually playing.
+        // Hung on the stage view rather than the window: a view's keep-screen-on is released when it
+        // detaches, so no code path can leave the display pinned on after the player is gone.
+        if (stage != null) stage.setKeepScreenOn(playing);
         if (stage != null) stage.getControls().setPlaying(playing);
         telemetry.onPlayingChanged(playing);
         for (int i = 0; i < observers.size(); i++) observers.get(i).onPlayingChanged(playing);
@@ -1013,9 +1018,11 @@ public class SvipeVideoPlayerController {
                 watchPage = null;
             }
             if (mode == MODE_CLOSED || mode == MODE_MINI) return;
-            // Back out of the watch page keeps the video in the mini bar; dismissing is explicit
-            // (the bar's ✕ or a side-swipe).
-            toMini();
+            // Back closes the video. Parking it in the mini bar on the way out reads as the player
+            // refusing to leave: the user asked for the page to go away, and a video still playing
+            // over the next screen is not what they asked for. Minimising stays available on
+            // purpose — the drag-down gesture — where it is something the user did deliberately.
+            close();
         }
     };
 
