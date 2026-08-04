@@ -203,7 +203,9 @@ public class SvipeVideoControls extends FrameLayout {
         // most of the bar on text nobody reads while the video it exists for was a postage stamp.
         miniChrome = new LinearLayout(context);
         miniChrome.setOrientation(LinearLayout.HORIZONTAL);
-        miniChrome.setGravity(Gravity.CENTER_VERTICAL);
+        // Top corners, not the middle: centred buttons sit on the subject of the shot, which is the
+        // part of a card this small that the user is actually looking at.
+        miniChrome.setGravity(Gravity.TOP);
         // A scrim, not a background: the video has to stay visible under the two buttons.
         miniChrome.setBackgroundColor(0x40000000);
         miniChrome.setVisibility(GONE);
@@ -217,7 +219,7 @@ public class SvipeVideoControls extends FrameLayout {
         miniPlayButton.setBackground(Theme.createSelectorDrawable(0x30ffffff, Theme.RIPPLE_MASK_CIRCLE_20DP));
         miniPlayButton.setContentDescription(LocaleController.getString(R.string.AccActionPlay));
         miniPlayButton.setOnClickListener(v -> togglePlayPause());
-        miniChrome.addView(miniPlayButton, LayoutHelper.createLinear(44, 44, Gravity.CENTER_VERTICAL, 6, 0, 0, 0));
+        miniChrome.addView(miniPlayButton, LayoutHelper.createLinear(40, 40, Gravity.TOP, 4, 4, 0, 0));
 
         // The gap between the two buttons is the video: tapping it restores the page, which is why
         // nothing else may live there.
@@ -225,7 +227,7 @@ public class SvipeVideoControls extends FrameLayout {
 
         final ImageView miniCloseButton = iconButton(context, R.drawable.msg_close, R.string.Close,
                 v -> SvipeVideoPlayerController.getInstance().close());
-        miniChrome.addView(miniCloseButton, LayoutHelper.createLinear(44, 44, Gravity.CENTER_VERTICAL, 0, 0, 6, 0));
+        miniChrome.addView(miniCloseButton, LayoutHelper.createLinear(40, 40, Gravity.TOP, 0, 4, 4, 0));
 
         levelIndicator = new LevelIndicator(context);
         levelIndicator.setVisibility(GONE);

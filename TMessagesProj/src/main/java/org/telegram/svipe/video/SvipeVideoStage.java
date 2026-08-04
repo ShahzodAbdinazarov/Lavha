@@ -67,6 +67,12 @@ public class SvipeVideoStage extends FrameLayout {
     private static final int MINI_WIDTH_DP = 190;
     private static final int MINI_MARGIN_DP = 12;
     private static final int MINI_RADIUS_DP = 12;
+    /**
+     * The page finishes fading well before the gesture does — at this fraction of the travel, so it
+     * is already gone by the halfway point rather than only reaching zero there. The last stretch of
+     * the drag is then about the card alone, with nothing dissolving behind it.
+     */
+    private static final float PAGE_FADE_FRACTION = .6f;
 
     private final FrameLayout content;
     private final AspectRatioFrameLayout aspect;
@@ -510,7 +516,8 @@ public class SvipeVideoStage extends FrameLayout {
             // middle of the screen — one screen being put away, rather than a video sliding off a
             // page that stayed behind.
             SvipeVideoPlayerController.getInstance().notifyPageDragAway(
-                    dragProgress * dragTravel(targetMode), 1f - dragProgress);
+                    dragProgress * dragTravel(targetMode),
+                    Math.max(0f, 1f - dragProgress / PAGE_FADE_FRACTION));
         }
         content.setTranslationX(offsetX);
         content.setTranslationY(offsetY);
