@@ -6,6 +6,7 @@ import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.svipe.SvipeDiscover;
 import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 
 import java.util.ArrayList;
@@ -114,27 +115,133 @@ public class SvipeRefResolver {
     private static final long STEP_TIMEOUT_MS = 8_000;
     private static final int FAIL_FAST = ConnectionsManager.RequestFlagFailOnServerErrors;
 
-    /** Arms a one-shot timeout that reports a retryable failure if the step never answers. */
-    private static void guard(final java.util.concurrent.atomic.AtomicBoolean answered,
-                              final Ref ref, final Delegate delegate, final String step) {
-        AndroidUtilities.runOnUIThread(() -> {
-            if (!answered.compareAndSet(false, true)) return;
-            FileLog.d("svipe: resolve " + step + " timed out for @" + ref.username() + "/" + ref.messageId());
-            ref.setResolving(false);
-            if (delegate != null) {
-                delegate.onFailed(ref, true);
-            } else {
-                drainCallbacks(ref); // no retry policy on this caller — at least never leave it hanging
-            }
-        }, STEP_TIMEOUT_MS);
+    // ---- channel cache: one resolveUsername per channel, not per item ----
+
+    /** Channels we have already resolved, per account. Cleared only by an explicit forget. */
+    private static final java.util.concurrent.ConcurrentHashMap<Integer, java.util.concurrent.ConcurrentHashMap<String, TLRPC.Chat>>
+            chatCache = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Callers waiting on a resolveUsername that is already in the air, keyed {@code account:username}. */
+    private static final java.util.HashMap<String, ArrayList<ChatCallback>> pendingResolves = new java.util.HashMap<>();
+
+    /** Receives the channel, or null when it could not be resolved this time. */
+    public interface ChatCallback {
+        void run(TLRPC.Chat chat);
+    }
+
+    private static java.util.concurrent.ConcurrentHashMap<String, TLRPC.Chat> cacheFor(int account) {
+        java.util.concurrent.ConcurrentHashMap<String, TLRPC.Chat> map = chatCache.get(account);
+        if (map == null) {
+            map = new java.util.concurrent.ConcurrentHashMap<>();
+            java.util.concurrent.ConcurrentHashMap<String, TLRPC.Chat> prev = chatCache.putIfAbsent(account, map);
+            if (prev != null) map = prev;
+        }
+        return map;
     }
 
     /**
-     * Resolve a reference's channel + message over MTProto (2 round-trips) and cache the
-     * MessageObject on the Ref. Reused for both the visible item (then play) and read-ahead prefetch
-     * (no play). Idempotent: skips if already resolved or a resolve is in flight.
+     * A channel we can use without asking the server — ours, or one Telegram already resolved for
+     * some other part of the app. A "min" chat is refused: its access_hash is not usable for
+     * channels.getMessages, and caching one would turn a cheap win into a permanent failure.
      */
+    private static TLRPC.Chat cachedChat(int account, String username) {
+        TLRPC.Chat mine = cacheFor(account).get(username);
+        if (mine != null) return mine;
+        try {
+            TLObject known = MessagesController.getInstance(account).getUserOrChat(username);
+            if (known instanceof TLRPC.Chat) {
+                TLRPC.Chat chat = (TLRPC.Chat) known;
+                if (!chat.min && chat.access_hash != 0) {
+                    cacheFor(account).put(username, chat);
+                    return chat;
+                }
+            }
+        } catch (Exception ignore) {}
+        return null;
+    }
+
     /**
+     * Forget a channel — call this when the server rejects the peer we cached, so the next attempt
+     * pays for a fresh resolve instead of repeating a request that can no longer work.
+     */
+    public static void forgetChat(int account, String username) {
+        if (username == null) return;
+        cacheFor(account).remove(username.toLowerCase());
+    }
+
+    /**
+     * The channel behind a username, resolved at most once.
+     *
+     * Two savings, and the second is the one that matters: repeat resolves of the same channel are
+     * served from memory, and callers arriving while a resolve is in the air WAIT for it instead of
+     * firing their own. The feed hands out several items per channel and more than one surface asks
+     * about the same item (the pager, the read-ahead, a poster binder), so the old code sent the
+     * same contacts.resolveUsername twice within milliseconds — measured on a device. That call is
+     * the most flood-limited one we make, and a flood on it is what used to take the whole Svipe
+     * layer down until the app was restarted (see SvipeAuth).
+     */
+    private static void withChat(final int account, final String username, final long channelId,
+                                 final ChatCallback cb) {
+        TLRPC.Chat cached = cachedChat(account, username);
+        if (cached != null) {
+            cb.run(cached);
+            return;
+        }
+        final String key = account + ":" + username;
+        synchronized (pendingResolves) {
+            ArrayList<ChatCallback> waiters = pendingResolves.get(key);
+            if (waiters != null) { // someone already asked — ride along on their answer
+                waiters.add(cb);
+                return;
+            }
+            waiters = new ArrayList<>();
+            waiters.add(cb);
+            pendingResolves.put(key, waiters);
+        }
+        TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
+        req.username = username;
+        final java.util.concurrent.atomic.AtomicBoolean answered = new java.util.concurrent.atomic.AtomicBoolean();
+        ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
+            if (!answered.compareAndSet(false, true)) return; // the timeout already gave up on this one
+            TLRPC.Chat chat = null;
+            if (error == null && response instanceof TLRPC.TL_contacts_resolvedPeer) {
+                TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
+                MessagesController.getInstance(account).putUsers(rp.users, false);
+                MessagesController.getInstance(account).putChats(rp.chats, false);
+                if (rp.chats != null) {
+                    for (int i = 0; i < rp.chats.size(); i++) {
+                        if (rp.chats.get(i).id == channelId) { chat = rp.chats.get(i); break; }
+                    }
+                    if (chat == null && !rp.chats.isEmpty()) chat = rp.chats.get(0);
+                }
+                if (chat != null) cacheFor(account).put(username, chat);
+            } else if (error != null) {
+                FileLog.d("svipe: resolve @" + username + " failed: " + error.text);
+            }
+            drainResolve(key, chat);
+        }, FAIL_FAST);
+        AndroidUtilities.runOnUIThread(() -> {
+            if (!answered.compareAndSet(false, true)) return;
+            FileLog.d("svipe: resolve @" + username + " timed out");
+            drainResolve(key, null);
+        }, STEP_TIMEOUT_MS);
+    }
+
+    private static void drainResolve(String key, TLRPC.Chat chat) {
+        final ArrayList<ChatCallback> waiters;
+        synchronized (pendingResolves) {
+            waiters = pendingResolves.remove(key);
+        }
+        if (waiters == null) return;
+        for (int i = 0; i < waiters.size(); i++) {
+            try { waiters.get(i).run(chat); } catch (Exception e) { FileLog.e(e); }
+        }
+    }
+
+    /**
+     * Resolve a reference's channel + message over MTProto and cache the MessageObject on the Ref.
+     * Reused for both the visible item (then play) and read-ahead prefetch (no play). Idempotent:
+     * skips if already resolved or a resolve is in flight.
+     *
      * @param delegate optional — pass null when the caller only wants the {@code onResolved} runnable
      *                 (a poster or avatar binder has no retry policy to run). Every dispatch below is
      *                 null-guarded for exactly that case.
@@ -142,7 +249,7 @@ public class SvipeRefResolver {
     public static void resolve(final int account, final Ref ref, final Runnable onResolved, final Delegate delegate) {
         if (ref.message() != null && ref.chat() != null) { if (onResolved != null) onResolved.run(); return; }
         // Queue-restored item: we already hold a playable MessageObject, only the chat is missing
-        // (needed for the action rail). Fill it with one resolveUsername round-trip — skip getMessages.
+        // (needed for the action rail). That is a cache lookup now, usually free.
         if (ref.message() != null && ref.chat() == null) { resolveChatOnly(account, ref, onResolved); return; }
         // Full resolve (no mo yet). Queue the caller's callback so an already-in-flight resolve (e.g.
         // one started by prefetch/read-ahead) still notifies THIS caller when it completes — otherwise
@@ -151,102 +258,96 @@ public class SvipeRefResolver {
         if (onResolved != null) ref.resolveCallbacks().add(onResolved);
         if (ref.isResolving()) return;
         ref.setResolving(true);
-        TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
-        req.username = ref.username().toLowerCase();
-        final java.util.concurrent.atomic.AtomicBoolean resolved = new java.util.concurrent.atomic.AtomicBoolean();
-        ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
-            if (!resolved.compareAndSet(false, true)) return; // the timeout already reported this step
-            if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
-                if (delegate != null) delegate.onFailed(ref, true); // transient network failure — retry
-                return;
-            }
-            TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
-            MessagesController.getInstance(account).putUsers(rp.users, false);
-            MessagesController.getInstance(account).putChats(rp.chats, false);
-            TLRPC.Chat chat = null;
-            if (rp.chats != null) {
-                for (int i = 0; i < rp.chats.size(); i++) {
-                    if (rp.chats.get(i).id == ref.channelId()) { chat = rp.chats.get(i); break; }
-                }
-                if (chat == null && !rp.chats.isEmpty()) chat = rp.chats.get(0);
-            }
+        final String username = ref.username().toLowerCase();
+        withChat(account, username, ref.channelId(), chat -> {
             if (chat == null) {
-                if (delegate != null) delegate.onFailed(ref, false); // channel not found — give up
+                fail(ref, delegate, true); // network/flood/timeout — the caller's policy decides
                 return;
             }
-            final TLRPC.Chat fchat = chat;
-
-            TLRPC.TL_inputChannel inputChannel = new TLRPC.TL_inputChannel();
-            inputChannel.channel_id = chat.id;
-            inputChannel.access_hash = chat.access_hash;
-            TLRPC.TL_channels_getMessages gm = new TLRPC.TL_channels_getMessages();
-            gm.channel = inputChannel;
-            gm.id.add(ref.messageId());
-            final java.util.concurrent.atomic.AtomicBoolean fetched = new java.util.concurrent.atomic.AtomicBoolean();
-            ConnectionsManager.getInstance(account).sendRequest(gm, (resp2, err2) -> {
-                if (!fetched.compareAndSet(false, true)) return; // the timeout already reported this step
-                if (err2 != null || !(resp2 instanceof TLRPC.messages_Messages)) {
-                    if (delegate != null) delegate.onFailed(ref, true); // transient network failure — retry
-                    return;
-                }
-                TLRPC.messages_Messages mm = (TLRPC.messages_Messages) resp2;
-                MessagesController.getInstance(account).putUsers(mm.users, false);
-                MessagesController.getInstance(account).putChats(mm.chats, false);
-                if (mm.messages == null || mm.messages.isEmpty()) {
-                    if (delegate != null) delegate.onFailed(ref, false); // message gone — give up
-                    return;
-                }
-                final MessageObject mo = new MessageObject(account, mm.messages.get(0), false, true);
-                TLRPC.Document doc = mo.getDocument();
-                if (doc == null || !MessageObject.isVideoDocument(doc)) {
-                    if (delegate != null) delegate.onFailed(ref, false); // not a playable video — give up
-                    return;
-                }
-                AndroidUtilities.runOnUIThread(() -> {
-                    ref.setResolving(false);
-                    ref.setMessage(mo);
-                    ref.setChat(fchat);
-                    if (delegate != null) delegate.onResolved(ref);
-                    drainCallbacks(ref); // wakes the caller's queued start-playback intent
-                });
-            }, FAIL_FAST);
-            guard(fetched, ref, delegate, "channels.getMessages");
-        }, FAIL_FAST);
-        guard(resolved, ref, delegate, "contacts.resolveUsername");
+            fetchMessage(account, ref, username, chat, delegate);
+        });
     }
 
-    /** Fill only the missing {@code chat} on a queue-restored item (one resolveUsername round-trip). */
+    /** Second round-trip: the post itself. */
+    private static void fetchMessage(final int account, final Ref ref, final String username,
+                                     final TLRPC.Chat chat, final Delegate delegate) {
+        TLRPC.TL_inputChannel inputChannel = new TLRPC.TL_inputChannel();
+        inputChannel.channel_id = chat.id;
+        inputChannel.access_hash = chat.access_hash;
+        TLRPC.TL_channels_getMessages gm = new TLRPC.TL_channels_getMessages();
+        gm.channel = inputChannel;
+        gm.id.add(ref.messageId());
+        final java.util.concurrent.atomic.AtomicBoolean fetched = new java.util.concurrent.atomic.AtomicBoolean();
+        ConnectionsManager.getInstance(account).sendRequest(gm, (resp2, err2) -> {
+            if (!fetched.compareAndSet(false, true)) return; // the timeout already reported this step
+            if (err2 != null || !(resp2 instanceof TLRPC.messages_Messages)) {
+                if (err2 != null && isStalePeer(err2.text)) {
+                    // The peer we cached is no longer usable. Drop it so the retry re-resolves
+                    // instead of repeating a request that can only fail the same way.
+                    forgetChat(account, username);
+                }
+                fail(ref, delegate, true); // transient network failure — retry
+                return;
+            }
+            TLRPC.messages_Messages mm = (TLRPC.messages_Messages) resp2;
+            MessagesController.getInstance(account).putUsers(mm.users, false);
+            MessagesController.getInstance(account).putChats(mm.chats, false);
+            if (mm.messages == null || mm.messages.isEmpty()) {
+                fail(ref, delegate, false); // message gone — give up
+                return;
+            }
+            final MessageObject mo = new MessageObject(account, mm.messages.get(0), false, true);
+            TLRPC.Document doc = mo.getDocument();
+            if (doc == null || !MessageObject.isVideoDocument(doc)) {
+                fail(ref, delegate, false); // not a playable video — give up
+                return;
+            }
+            AndroidUtilities.runOnUIThread(() -> {
+                ref.setResolving(false);
+                ref.setMessage(mo);
+                ref.setChat(chat);
+                if (delegate != null) delegate.onResolved(ref);
+                drainCallbacks(ref); // wakes the caller's queued start-playback intent
+            });
+        }, FAIL_FAST);
+        AndroidUtilities.runOnUIThread(() -> {
+            if (!fetched.compareAndSet(false, true)) return;
+            FileLog.d("svipe: getMessages timed out for @" + username + "/" + ref.messageId());
+            fail(ref, delegate, true);
+        }, STEP_TIMEOUT_MS);
+    }
+
+    /** Errors that mean "the peer you used is wrong", as opposed to "the network was". */
+    private static boolean isStalePeer(String error) {
+        if (error == null) return false;
+        return error.contains("CHANNEL_INVALID") || error.contains("PEER_ID_INVALID")
+                || error.contains("CHANNEL_PRIVATE") || error.contains("USERNAME_NOT_OCCUPIED");
+    }
+
+    /**
+     * Release the in-flight flag and report. The flag is cleared HERE rather than left to the
+     * delegate: a caller that passes none (a poster binder) would otherwise leave the reference
+     * marked resolving forever, and every later attempt would return early at that check.
+     */
+    private static void fail(final Ref ref, final Delegate delegate, final boolean retryable) {
+        ref.setResolving(false);
+        if (delegate != null) {
+            delegate.onFailed(ref, retryable);
+        } else {
+            drainCallbacks(ref);
+        }
+    }
+
+    /** Fill only the missing {@code chat} on a queue-restored item — from cache when we have it. */
     public static void resolveChatOnly(final int account, final Ref ref, final Runnable onResolved) {
         if (ref.isResolving()) return;
         ref.setResolving(true);
-        TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
-        req.username = ref.username().toLowerCase();
-        final java.util.concurrent.atomic.AtomicBoolean answered = new java.util.concurrent.atomic.AtomicBoolean();
-        ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
-            if (!answered.compareAndSet(false, true)) return; // the timeout already gave up on this one
-            AndroidUtilities.runOnUIThread(() -> {
-                ref.setResolving(false);
-                if (error == null && response instanceof TLRPC.TL_contacts_resolvedPeer) {
-                    TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
-                    MessagesController.getInstance(account).putUsers(rp.users, false);
-                    MessagesController.getInstance(account).putChats(rp.chats, false);
-                    if (rp.chats != null) {
-                        for (int i = 0; i < rp.chats.size(); i++) {
-                            if (rp.chats.get(i).id == ref.channelId()) { ref.setChat(rp.chats.get(i)); break; }
-                        }
-                        if (ref.chat() == null && !rp.chats.isEmpty()) ref.setChat(rp.chats.get(0));
-                    }
-                }
-                if (onResolved != null) onResolved.run();
-            });
-        }, FAIL_FAST);
-        // Chat-only enrichment has no retry policy and nothing waiting on playback, so its timeout
-        // just releases the in-flight flag — a later attempt is then free to try again.
-        AndroidUtilities.runOnUIThread(() -> {
-            if (!answered.compareAndSet(false, true)) return;
-            ref.setResolving(false);
-            if (onResolved != null) onResolved.run();
-        }, STEP_TIMEOUT_MS);
+        withChat(account, ref.username().toLowerCase(), ref.channelId(), chat ->
+                AndroidUtilities.runOnUIThread(() -> {
+                    ref.setResolving(false);
+                    if (chat != null) ref.setChat(chat);
+                    if (onResolved != null) onResolved.run();
+                }));
     }
 
     /** Run and clear every queued waiter for this reference (safe on success or on give-up). */
