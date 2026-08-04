@@ -54,6 +54,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
+import org.telegram.svipe.SvipeMusicWarmer;
 import org.telegram.svipe.SvipePerf;
 import org.telegram.svipe.SvipeReelWarmer;
 import org.telegram.svipe.SvipeUnreadRecountThrottle;
@@ -395,6 +396,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         // late enough not to compete with the chat list and quietly enough that nothing on screen
         // moves, means the tab has something to play the moment it is tapped.
         SvipeReelWarmer.warmSoon(currentAccount, REELS_WARM_UP_DELAY_MS);
+        // Music follows reels rather than racing it: two warm-ups pulling at once would compete for
+        // the same link the user's chat list is still loading over.
+        SvipeMusicWarmer.warmSoon(currentAccount, MUSIC_WARM_UP_DELAY_MS);
         // Drain whatever performance samples the last session left on disk, then keep a slow
         // heartbeat so a user who just reads their chats still reports what they measured.
         SvipePerf.start(currentAccount);
@@ -404,6 +408,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     /** Long enough for the chat list to finish loading and drawing; short enough to be ready first. */
     private static final long REELS_WARM_UP_DELAY_MS = 4000;
+    private static final long MUSIC_WARM_UP_DELAY_MS = 9000;
 
     // The cached main unread count can get stuck (forum topic reads synced from
     // another device never decrement it), so re-derive it from the database when

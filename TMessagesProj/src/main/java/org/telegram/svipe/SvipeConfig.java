@@ -43,6 +43,11 @@ public class SvipeConfig {
      *  just pointless — Telegram can extend the wait for it. */
     public static final String PREF_AUTH_BOT_FLOOD_UNTIL = "svipe_auth_bot_flood_until";
 
+    /** Has this user ever opened the Music tab? Gates the app-start vibe warm-up: music is a place
+     *  you choose to go, and warming it for someone who never goes there spends their data and their
+     *  resolveUsername budget for nothing. See SvipeMusicWarmer. */
+    public static final String PREF_MUSIC_USED = "svipe_music_used";
+
     /** Buffered performance samples awaiting upload (JSON array) — see SvipePerf. Survives a kill:
      *  a session that ended offline is exactly the session whose numbers we most want. */
     public static final String PREF_PERF_BUFFER = "svipe_perf_buffer";

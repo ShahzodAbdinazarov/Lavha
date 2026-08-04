@@ -57,6 +57,7 @@ import org.telegram.svipe.SvipeFavouritesSet;
 import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.svipe.SvipeMusicResolver;
+import org.telegram.svipe.SvipeMusicWarmer;
 import org.telegram.svipe.SvipeMusicSearchHistory;
 import org.telegram.svipe.SvipeMusicTelemetry;
 import org.telegram.svipe.SvipeSearchLog;
@@ -288,6 +289,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     @SuppressLint("ClickableViewAccessibility")
     @Override
     public View createView(Context context) {
+        // This user does use Music: from the next launch the vibe page is prepared in advance.
+        SvipeMusicWarmer.markUsed(currentAccount);
         hasOwnBackground = true;
         actionBar.setAddToContainer(false);
 
@@ -2135,6 +2138,13 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         if (vibeLoading) {
             return;
         }
+        // The app-start warm-up may already hold a resolved page — then this is instant and no
+        // network stands between the tap and the first note.
+        SvipeMusicWarmer.Warm warm = SvipeMusicWarmer.take();
+        if (warm != null && warm.items != null && !warm.items.isEmpty()) {
+            installVibe(warm.items, warm.resolved, warm.recommendationId, warm.cursor);
+            return;
+        }
         vibeLoading = true;
         refreshVibe();
         SvipeMusic.vibe(currentAccount, null, null, null, (items, recId, cursor, error) -> {
@@ -2146,20 +2156,35 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             // Fresh My Vibe session (cursor was null; pagination uses a separate path). Tells the
             // backend to rotate the vibe epoch for the next session. Rides on the first item since the
             // event needs a reference; the backend ignores the track for VIBE_OPEN.
-            SvipeMusic.sendEvent(currentAccount, items.get(0), "VIBE_OPEN", null);
-            SvipeMusicQueue queue = new SvipeMusicQueue(currentAccount, SvipeMusicQueue.SOURCE_VIBE, getString(R.string.MusicMyVibe), true);
-            queue.recommendationId = recId;
-            queue.setCursor(cursor);
-            SvipeMusicResolver.resolve(currentAccount, items, resolved -> {
-                vibeLoading = false;
-                cacheResolved(resolved);
-                queue.appendResolved(items, resolved);
-                if (!queue.list.isEmpty()) {
-                    queue.play(queue.list.get(0));
-                }
-                refreshVibe();
-            });
+            SvipeMusicResolver.resolve(currentAccount, items, resolved ->
+                    installVibe(items, resolved, recId, cursor));
         });
+    }
+
+    /**
+     * Build the vibe queue and start playing. Shared by the live path and the warmed one, so a
+     * pre-fetched page goes through exactly the same installation — including VIBE_OPEN, which
+     * marks the session the USER started and must not fire when a background warm-up fetched a page
+     * they may never listen to.
+     */
+    private void installVibe(java.util.List<SvipeMusic.Track> items,
+                             java.util.Map<String, org.telegram.tgnet.TLRPC.Message> resolved,
+                             String recId, String cursor) {
+        vibeLoading = false;
+        if (items == null || items.isEmpty()) {
+            refreshVibe();
+            return;
+        }
+        SvipeMusic.sendEvent(currentAccount, items.get(0), "VIBE_OPEN", null);
+        SvipeMusicQueue queue = new SvipeMusicQueue(currentAccount, SvipeMusicQueue.SOURCE_VIBE, getString(R.string.MusicMyVibe), true);
+        queue.recommendationId = recId;
+        queue.setCursor(cursor);
+        cacheResolved(resolved);
+        queue.appendResolved(items, resolved);
+        if (!queue.list.isEmpty()) {
+            queue.play(queue.list.get(0));
+        }
+        refreshVibe();
     }
 
     private void onTrackTap(Row row) {
