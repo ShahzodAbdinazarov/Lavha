@@ -294,6 +294,40 @@ public class SvipeVideoStage extends FrameLayout {
      * animates the rect when the change is a user-visible transition. The rect it animates FROM is
      * wherever the player currently is, including mid-drag, so letting go of a drag continues it.
      */
+    /**
+     * Where the player should GROW FROM on its first appearance — the card the user tapped, in
+     * window coordinates. Consumed once: a later mode change is a transition between the player's
+     * own rects and has nothing to do with the grid.
+     */
+    public void setOpenFromRect(Rect windowRect) {
+        if (windowRect == null || windowRect.isEmpty()) {
+            openFromRect = null;
+            return;
+        }
+        openFromRect = new Rect(windowRect);
+    }
+
+    private Rect openFromRect;
+
+    /**
+     * Leave to the right, with the page. Used by close(): the picture and the page it belongs to
+     * exit as one movement instead of the video blinking out and an empty page sliding after it.
+     */
+    public void animateOutToRight(Runnable after) {
+        animate().cancel();
+        animate().translationX(getMeasuredWidth()).alpha(0f)
+                .setDuration(EXIT_MS)
+                .setInterpolator(CubicBezierInterpolator.EASE_OUT)
+                .withEndAction(() -> {
+                    setTranslationX(0);
+                    setAlpha(1f);
+                    if (after != null) after.run();
+                })
+                .start();
+    }
+
+    private static final long EXIT_MS = 200;
+
     public void onModeChanged(int mode, boolean animated) {
         if (mode == SvipeVideoPlayerController.MODE_CLOSED) {
             cancelTransition();
@@ -308,25 +342,25 @@ public class SvipeVideoStage extends FrameLayout {
         boolean wasVisible = getVisibility() == VISIBLE;
         setVisibility(VISIBLE);
         cancelTransition();
+        if (openFromRect != null && mode == SvipeVideoPlayerController.MODE_INLINE) {
+            // First appearance: start at the tapped card, in this view's coordinates, and let the
+            // ordinary transition carry it into the hole.
+            getLocationInWindow(location);
+            fromRect.set(openFromRect);
+            fromRect.offset(-location[0], -location[1]);
+            openFromRect = null;
+            fromChromeRect.set(fromRect);
+            transition = 0f;
+            setVisibility(VISIBLE);
+            startTransitionAnimator();
+            requestLayout();
+            return;
+        }
         if (animated && wasVisible && !drawRect.isEmpty()) {
             fromRect.set(drawRect);
             fromChromeRect.set(chromeRect);
             transition = 0f;
-            transitionAnimator = ValueAnimator.ofFloat(0f, 1f);
-            transitionAnimator.setDuration(TRANSITION_MS);
-            transitionAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
-            transitionAnimator.addUpdateListener(a -> {
-                transition = (float) a.getAnimatedValue();
-                requestLayout();
-            });
-            transitionAnimator.addListener(new AnimatorListenerAdapter() {
-                @Override
-                public void onAnimationEnd(Animator animation) {
-                    transition = 1f;
-                    requestLayout();
-                }
-            });
-            transitionAnimator.start();
+            startTransitionAnimator();
         } else {
             transition = 1f;
         }
@@ -359,6 +393,24 @@ public class SvipeVideoStage extends FrameLayout {
             content.setElevation(0);
             controls.setElevation(0);
         }
+    }
+
+    private void startTransitionAnimator() {
+        transitionAnimator = ValueAnimator.ofFloat(transition, 1f);
+        transitionAnimator.setDuration(TRANSITION_MS);
+        transitionAnimator.setInterpolator(CubicBezierInterpolator.DEFAULT);
+        transitionAnimator.addUpdateListener(a -> {
+            transition = (float) a.getAnimatedValue();
+            requestLayout();
+        });
+        transitionAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                transition = 1f;
+                requestLayout();
+            }
+        });
+        transitionAnimator.start();
     }
 
     /**

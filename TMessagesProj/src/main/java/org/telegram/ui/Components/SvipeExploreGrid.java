@@ -4,6 +4,7 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.graphics.Rect;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
@@ -167,6 +168,8 @@ public class SvipeExploreGrid extends RecyclerListView {
     private boolean startedFirstLoad;
     private Integer nextOffset = 0;  // single-stream cursor; null when that stream is exhausted
     private OnReelTapListener tapListener;
+    /** Where the last tapped cell's picture is, in window coordinates — the open animation starts there. */
+    private final Rect lastTapRect = new Rect();
     /**
      * Host fragment, needed by the wide cards' ⋮ menu. ItemOptions.downFragment special-cases a
      * DialogsActivity that has the main tabs and redirects the popup to the MainTabsActivity layer —
@@ -413,6 +416,7 @@ public class SvipeExploreGrid extends RecyclerListView {
             for (GridItem gi : items) {
                 refs.add(gi.ref);
             }
+            rememberTapRect(view);
             tapListener.onReelTap(refs, idx);
         });
 
@@ -591,6 +595,29 @@ public class SvipeExploreGrid extends RecyclerListView {
             // than a silent no-op that would look like a dead feed.
             SvipeDiscover.load(account, null, offset, limit, refresh, cb);
         }
+    }
+
+    /**
+     * The picture of the cell that was tapped, in window coordinates. A wide card's poster is its
+     * top 16:9 — the title row underneath is not part of what the player should grow out of.
+     */
+    private void rememberTapRect(View cell) {
+        if (cell == null) {
+            lastTapRect.setEmpty();
+            return;
+        }
+        final int[] loc = new int[2];
+        cell.getLocationInWindow(loc);
+        final int w = cell.getWidth();
+        final int posterHeight = Math.min(cell.getHeight(), Math.round(w * 9f / 16f));
+        lastTapRect.set(loc[0], loc[1], loc[0] + w, loc[1] + posterHeight);
+    }
+
+    /** Hand the last tap's rect to whoever is about to open a player from it. */
+    public boolean getLastTapRect(Rect out) {
+        if (lastTapRect.isEmpty()) return false;
+        out.set(lastTapRect);
+        return true;
     }
 
     /** True while showing OUR video-search results (vs the browse grid) — the host uses it to log clicks. */

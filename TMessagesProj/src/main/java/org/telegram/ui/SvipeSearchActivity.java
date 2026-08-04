@@ -72,7 +72,14 @@ public class SvipeSearchActivity extends DialogsActivity {
             // A full-width long-form card opens the YouTube-shaped watch page; a vertical short keeps
             // opening the reels player, seeded so its swipe feed continues from the tapped reel.
             if (ref != null && ref.isLongForm()) {
-                presentFragment(new SvipeWatchActivity(ref));
+                final SvipeWatchActivity page = new SvipeWatchActivity(ref);
+                // Open OUT OF the tapped card: the player grows from the picture the user pressed
+                // rather than appearing from nowhere at the top of a new screen.
+                final android.graphics.Rect from = new android.graphics.Rect();
+                if (exploreGrid.getLastTapRect(from)) {
+                    page.setOpenFromRect(from);
+                }
+                presentFragment(page);
             } else {
                 presentFragment(ReelsActivity.ofDiscoverSeed(items, position));
             }

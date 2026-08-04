@@ -256,6 +256,17 @@ public class SvipeWatchActivity extends BaseFragment {
      * window, which a presented fragment does on a phone — this screen is not laid out for the tablet
      * two-column stack.
      */
+    /** Where this page was opened from, so the player can grow out of it. Set before presenting. */
+    public void setOpenFromRect(Rect windowRect) {
+        openFromRect = windowRect == null ? null : new Rect(windowRect);
+    }
+
+    public Rect getOpenFromRect() {
+        return openFromRect;
+    }
+
+    private Rect openFromRect;
+
     public boolean getPlayerHoleRect(Rect out) {
         if (playerHole == null || playerHole.getWidth() <= 0) {
             return false;

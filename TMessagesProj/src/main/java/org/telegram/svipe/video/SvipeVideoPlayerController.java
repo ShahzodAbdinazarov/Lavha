@@ -355,6 +355,14 @@ public class SvipeVideoPlayerController {
         final SvipeWatchActivity page = watchPage;
         watchPage = null;
         restoreItem = null;
+        if (page != null && stage != null && mode != MODE_CLOSED && mode != MODE_MINI) {
+            // Leave the way the page leaves: the picture slides out to the right with it. Releasing
+            // the player first would blink the video away and then slide an empty page, which is the
+            // exit reading as two events instead of one.
+            stage.animateOutToRight(this::closePlayback);
+            page.finishFragment();
+            return;
+        }
         closePlayback();
         // A watch page still in the stack would be left showing a black hole where the video was.
         if (page != null) page.finishFragment();
@@ -979,6 +987,9 @@ public class SvipeVideoPlayerController {
             // telemetry's, so it is attached here.
             ref.recId = page.getWatchItem().recId;
             final Rect hole = new Rect();
+            // Where the user tapped, so the picture grows out of that card instead of appearing from
+            // nowhere. Handed over before open() so the very first layout can start there.
+            if (stage != null) stage.setOpenFromRect(page.getOpenFromRect());
             // resolveHere=false: the page is already spending the two MTProto round-trips and hands
             // the message over through onWatchItemResolved.
             open(ref, page.getPlayerHoleRect(hole) ? hole : null, false);
