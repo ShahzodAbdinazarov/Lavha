@@ -6,13 +6,15 @@
 # uses the BSD equivalents (stat -f %z, shasum -a 256).
 #
 # Usage:
-#   ./scripts/deploy_prod_mac.sh <version_name> <version_code> ["<changelog ASCII only>"]
+#   ./scripts/deploy_prod_mac.sh [version_name] [version_code] ["<changelog ASCII only>"]
+# The version is read from the APK; passing it is optional and only used as a cross-check
+# that refuses to publish on a mismatch.
 # Omit the changelog to keep the one already live. That is the correct mode for a
 # same-version APK re-publish, where only the bytes change (so only SIZE + SHA256
 # move) and the current changelog is legitimately non-ASCII Uzbek.
 set -euo pipefail
 
-VN="$1"; VC="$2"; CHANGELOG="${3-}"
+VN="${1-}"; VC="${2-}"; CHANGELOG="${3-}"
 HOST=root@23.88.110.173           # prod since the 2026-06-29 migration; 49.12.47.209 is dev now
 KEY=~/.ssh/lavha_deploy
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,6 +24,29 @@ APK="$ROOT/TMessagesProj_App/build/outputs/apk/afat/standalone/app.apk"
 WANT_CERT="C0:BB:87:FF:64:DD:96:33:A3:0E:8F:89:83:8B:68:17:0B:A1:93:50:6A:FB:E5:96:36:E9:E3:D8:51:FD:3D:2C"
 
 rsh() { ssh -i "$KEY" -o StrictHostKeyChecking=no "$HOST" "$@"; }
+
+echo "== 0. version, read from the APK itself =="
+# The version code is NOT taken on trust. An afat APK carries versionCode = code*10 + abi (779),
+# while gradle.properties and the Play bundle say 77 — and the updater compares the server's number
+# against the INSTALLED apk's own. Publishing 77 once meant every existing install was already
+# "newer" than the release, so nobody would ever have been offered it. The artifact is the only
+# thing that knows its real version, so it is the only thing asked.
+AAPT=$(ls "$HOME"/Library/Android/sdk/build-tools/*/aapt2 2>/dev/null | tail -1)
+[ -n "$AAPT" ] || { echo "!! no aapt2 in the Android SDK build-tools"; exit 1; }
+# Read it all, then take the first line in the shell. Piping aapt2 into head closes the pipe early,
+# and with `set -o pipefail` that SIGPIPE takes the whole script down with exit 141.
+BADGING=$(printf '%s\n' "$("$AAPT" dump badging "$APK")" | sed -n '1p')
+APK_VC=$(echo "$BADGING" | grep -oE "versionCode='[0-9]+'" | grep -oE "[0-9]+")
+APK_VN=$(echo "$BADGING" | grep -oE "versionName='[^']+'" | sed "s/versionName='//; s/'//")
+[ -n "$APK_VC" ] && [ -n "$APK_VN" ] || { echo "!! could not read the version out of $APK"; exit 1; }
+echo "apk says: $APK_VN (vc $APK_VC)"
+if [ -n "$VC" ] && [ "$VC" != "$APK_VC" ]; then
+  echo "!! passed vc $VC but the APK is $APK_VC - refusing (a lower number is offered to nobody)"; exit 1
+fi
+if [ -n "$VN" ] && [ "$VN" != "$APK_VN" ]; then
+  echo "!! passed $VN but the APK is $APK_VN - refusing"; exit 1
+fi
+VN="$APK_VN"; VC="$APK_VC"
 
 echo "== 1. signature =="
 APKSIGNER=$(ls "$HOME"/Library/Android/sdk/build-tools/*/apksigner 2>/dev/null | tail -1)
