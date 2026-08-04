@@ -57,6 +57,7 @@ import org.telegram.messenger.UserObject;
 import org.telegram.svipe.SvipeMusicWarmer;
 import org.telegram.svipe.SvipePerf;
 import org.telegram.svipe.SvipeReelWarmer;
+import org.telegram.svipe.SvipeWarmup;
 import org.telegram.svipe.SvipeUnreadRecountThrottle;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
@@ -395,10 +396,11 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         // first open is otherwise a chain of network steps behind a "Loading" label; doing it here,
         // late enough not to compete with the chat list and quietly enough that nothing on screen
         // moves, means the tab has something to play the moment it is tapped.
-        SvipeReelWarmer.warmSoon(currentAccount, REELS_WARM_UP_DELAY_MS);
-        // Music follows reels rather than racing it: two warm-ups pulling at once would compete for
-        // the same link the user's chat list is still loading over.
-        SvipeMusicWarmer.warmSoon(currentAccount, MUSIC_WARM_UP_DELAY_MS);
+        // One at a time, in the order a user is most likely to want them: music starts the moment
+        // reels is finished, not at a guessed delay after it (see SvipeWarmup).
+        SvipeWarmup.enqueue("reels", SvipeReelWarmer::warm);
+        SvipeWarmup.enqueue("music", SvipeMusicWarmer::warm);
+        SvipeWarmup.start(currentAccount);
         // Drain whatever performance samples the last session left on disk, then keep a slow
         // heartbeat so a user who just reads their chats still reports what they measured.
         SvipePerf.start(currentAccount);
@@ -406,9 +408,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         return contentView;
     }
 
-    /** Long enough for the chat list to finish loading and drawing; short enough to be ready first. */
-    private static final long REELS_WARM_UP_DELAY_MS = 4000;
-    private static final long MUSIC_WARM_UP_DELAY_MS = 9000;
+
 
     // The cached main unread count can get stuck (forum topic reads synced from
     // another device never decrement it), so re-derive it from the database when

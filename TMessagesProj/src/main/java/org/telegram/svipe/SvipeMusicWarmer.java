@@ -62,20 +62,20 @@ public final class SvipeMusicWarmer {
         }
     }
 
-    /** Kick the warm-up once per process, after the given settle delay. Best-effort throughout. */
-    public static void warmSoon(final int account, long delayMs) {
-        if (started) return;
-        started = true;
-        AndroidUtilities.runOnUIThread(() -> warm(account), delayMs);
-    }
-
-    private static void warm(final int account) {
+    /**
+     * Run the warm-up, reporting completion so {@link SvipeWarmup} can move on. Every exit reports;
+     * a silent return would hold the queue until its deadline.
+     */
+    public static void warm(final int account, final Runnable done) {
         try {
-            if (!UserConfig.getInstance(account).isClientActivated()) return;
-            if (!isUsed(account)) return; // they have never opened Music — do not spend anything
+            if (started) { done.run(); return; }
+            started = true;
+            if (!UserConfig.getInstance(account).isClientActivated()) { done.run(); return; }
+            if (!isUsed(account)) { done.run(); return; } // never opened Music — spend nothing
             SvipeMusic.vibe(account, null, null, null, (items, recId, cursor, error) -> {
                 if (items == null || items.isEmpty()) {
                     FileLog.d("svipe: music warm-up got nothing (" + error + ")");
+                    done.run();
                     return;
                 }
                 // Deliberately NOT sending VIBE_OPEN here: that event starts a listening session and
@@ -92,10 +92,12 @@ public final class SvipeMusicWarmer {
                     FileLog.d("svipe: music warm-up holds " + items.size() + " tracks ("
                             + (resolved != null ? resolved.size() : 0) + " resolved)");
                     preloadFirst(account, items, resolved);
+                    done.run();
                 });
             });
         } catch (Exception e) {
             FileLog.e(e);
+            done.run();
         }
     }
 

@@ -58,17 +58,14 @@ public final class SvipeReelWarmer {
     private SvipeReelWarmer() {}
 
     /**
-     * Kick the warm-up once per process, after the given settle delay. Safe to call from anywhere;
-     * everything inside is guarded and best-effort.
+     * Run the warm-up, reporting completion so {@link SvipeWarmup} can start the next one. Every
+     * exit below ends in {@code done} — a warm-up that quietly returns would hold up the queue
+     * until its deadline, which is exactly the class of bug this codebase keeps meeting.
      */
-    public static void warmSoon(final int account, long delayMs) {
-        if (started) return;
+    public static void warm(final int account, final Runnable done) {
+        if (started) { done.run(); return; }
         started = true;
-        AndroidUtilities.runOnUIThread(() -> warm(account), delayMs);
-    }
-
-    private static void warm(final int account) {
-        if (!UserConfig.getInstance(account).isClientActivated()) return;
+        if (!UserConfig.getInstance(account).isClientActivated()) { done.run(); return; }
         // The queue blob and the watched ledger are parsed off the UI thread — they are the two
         // biggest JSON blobs this app keeps in preferences, and this runs during app start, when
         // the main thread has better things to do (the reels cold start reads them the same way).
@@ -86,16 +83,21 @@ public final class SvipeReelWarmer {
                 }
                 if (ready >= QUEUE_COMFORTABLE) {
                     FileLog.d("svipe: warm-up skipped, " + ready + " reels already on disk");
+                    done.run();
                     return;
                 }
                 final SvipeWatchedSet watched = new SvipeWatchedSet(account);
                 final SvipeBlockedChannels blocked = new SvipeBlockedChannels(account);
                 AndroidUtilities.runOnUIThread(() -> SvipeAuth.ensureToken(account, token -> {
-                    if (token == null) return; // auth will be retried by whoever needs it next
-                    fetchPage(account, token, watched, blocked);
+                    if (token == null) { // auth will be retried by whoever needs it next
+                        done.run();
+                        return;
+                    }
+                    fetchPage(account, token, watched, blocked, done);
                 }));
             } catch (Exception e) {
                 FileLog.e(e);
+                done.run();
             }
         });
     }
@@ -121,10 +123,12 @@ public final class SvipeReelWarmer {
     }
 
     private static void fetchPage(final int account, String token,
-                                  final SvipeWatchedSet watched, final SvipeBlockedChannels blocked) {
+                                  final SvipeWatchedSet watched, final SvipeBlockedChannels blocked,
+                                  final Runnable done) {
         SvipeApi.get("/v1/feed", token, (res, code, err) -> {
             if (res == null || !res.has("items")) {
                 FileLog.d("svipe: warm-up feed failed (" + code + ")");
+                done.run();
                 return;
             }
             final Warm w = new Warm();
@@ -148,21 +152,24 @@ public final class SvipeReelWarmer {
                 ref.recId = w.recommendationId;
                 w.items.add(ref);
             }
-            if (w.items.isEmpty()) return;
+            if (w.items.isEmpty()) { done.run(); return; }
             warm = w;
             warmedAtMs = System.currentTimeMillis();
             FileLog.d("svipe: warm-up holds " + w.items.size() + " reels, resolving the head");
-            resolveHead(account, w, 0);
+            resolveHead(account, w, 0, done);
         });
     }
 
     /** Resolve the first few items one at a time — serial on purpose, to stay off the flood ceiling. */
-    private static void resolveHead(final int account, final Warm w, final int index) {
-        if (index >= RESOLVE_AHEAD || index >= w.items.size()) return;
+    private static void resolveHead(final int account, final Warm w, final int index, final Runnable done) {
+        if (index >= RESOLVE_AHEAD || index >= w.items.size()) {
+            done.run();
+            return;
+        }
         final SvipeRefResolver.VideoRef ref = w.items.get(index);
         SvipeRefResolver.resolve(account, ref, () -> {
             if (index == 0) preloadHead(account, ref);
-            resolveHead(account, w, index + 1);
+            resolveHead(account, w, index + 1, done);
         }, null);
     }
 
