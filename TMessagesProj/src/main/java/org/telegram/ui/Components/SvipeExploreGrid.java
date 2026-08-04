@@ -29,6 +29,7 @@ import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
 import org.telegram.svipe.SvipeDiscover;
+import org.telegram.svipe.SvipeVideoWarmer;
 import org.telegram.svipe.SvipeMovies;
 import org.telegram.svipe.SvipeVideoSearchHistory;
 import org.telegram.tgnet.ConnectionsManager;
@@ -148,6 +149,8 @@ public class SvipeExploreGrid extends RecyclerListView {
      */
     private static final int MOVIE_SPAN_COUNT = 2;
     private static final int MOVIE_PAGE_SIZE = 30;
+    /** The app-start warm-up is offered to the grid once per instance, on its first browse load. */
+    private boolean warmTried;
 
     private final int account;
     private final GridLayoutManager layoutManager;
@@ -1163,6 +1166,19 @@ public class SvipeExploreGrid extends RecyclerListView {
     private void loadBothPipes() {
         final int seq = contentSeq;   // pin these requests to the current browse content
         final boolean wasIdle = !isLoading();
+        // First browse load of the session: the app-start warm-up may already hold both page-0s.
+        // They go through the ordinary page path, so composition, cursors and failure handling are
+        // identical to a live fetch — the only difference is that nothing was waited for.
+        if (!warmTried && !searchActive && pageLoader == null
+                && shorts.isEmpty() && longs.isEmpty() && !loadingShorts && !loadingLongs) {
+            warmTried = true;
+            SvipeVideoWarmer.Warm warm = SvipeVideoWarmer.take();
+            if (warm != null) {
+                onPipePage(seq, false, warm.shorts, warm.shortsNext);
+                onPipePage(seq, true, warm.longs, warm.longsNext);
+                return;
+            }
+        }
         if (!loadingShorts && shortsOffset != null
                 && shorts.size() - composedShorts < SPAN_COUNT * SHORTS_ROWS_PER_LONG * PREFETCH_UNITS) {
             loadingShorts = true;

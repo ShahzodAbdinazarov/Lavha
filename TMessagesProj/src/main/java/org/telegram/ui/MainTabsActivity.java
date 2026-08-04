@@ -57,6 +57,7 @@ import org.telegram.messenger.UserObject;
 import org.telegram.svipe.SvipeMusicWarmer;
 import org.telegram.svipe.SvipePerf;
 import org.telegram.svipe.SvipeReelWarmer;
+import org.telegram.svipe.SvipeVideoWarmer;
 import org.telegram.svipe.SvipeWarmup;
 import org.telegram.svipe.SvipeUnreadRecountThrottle;
 import org.telegram.tgnet.TLRPC;
@@ -399,6 +400,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         // One at a time, in the order a user is most likely to want them: music starts the moment
         // reels is finished, not at a guessed delay after it (see SvipeWarmup).
         SvipeWarmup.enqueue("reels", SvipeReelWarmer::warm);
+        SvipeWarmup.enqueue("video", SvipeVideoWarmer::warm);
         SvipeWarmup.enqueue("music", SvipeMusicWarmer::warm);
         SvipeWarmup.start(currentAccount);
         // Drain whatever performance samples the last session left on disk, then keep a slow

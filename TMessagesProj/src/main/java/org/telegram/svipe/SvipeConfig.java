@@ -48,6 +48,9 @@ public class SvipeConfig {
      *  resolveUsername budget for nothing. See SvipeMusicWarmer. */
     public static final String PREF_MUSIC_USED = "svipe_music_used";
 
+    /** Has this user ever opened the Video tab? Same gate as PREF_MUSIC_USED, same reason. */
+    public static final String PREF_VIDEO_USED = "svipe_video_used";
+
     /** Buffered performance samples awaiting upload (JSON array) — see SvipePerf. Survives a kill:
      *  a session that ended offline is exactly the session whose numbers we most want. */
     public static final String PREF_PERF_BUFFER = "svipe_perf_buffer";

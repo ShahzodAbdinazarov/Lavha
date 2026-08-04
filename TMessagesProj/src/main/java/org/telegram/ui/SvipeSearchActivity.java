@@ -35,6 +35,9 @@ public class SvipeSearchActivity extends DialogsActivity {
 
     @Override
     protected View svipeCreateExploreGrid(Context context) {
+        // This user does use the Video tab: from the next launch its first screen is prepared at
+        // app start (see SvipeVideoWarmer — a tab you never visit should cost you nothing).
+        org.telegram.svipe.SvipeVideoWarmer.markUsed(currentAccount);
         exploreGrid = new SvipeExploreGrid(context, currentAccount);
         // Needed by the horizontal cards' ⋮ menu (ItemOptions routes the popup above the bottom tabs
         // via the fragment), plus the share sheet and the report flow.
