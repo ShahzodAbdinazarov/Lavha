@@ -7653,7 +7653,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             svipeNativeLogPending = null;
         }
         final String q = text == null ? "" : text.trim();
-        if (q.length() < 2) {
+        if (q.isEmpty()) {
             svipeNativeSearchLog = null;    // field emptied -> this search visit is over
             svipeLastNativeText = null;
             return;
@@ -7668,27 +7668,63 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         AndroidUtilities.runOnUIThread(svipeNativeLogPending, 500);
     }
 
-    /** A tapped native-search result. PUBLIC entities only — see svipeLogNativeQuery. */
+    /**
+     * A tapped native-search result. Two different things are recorded, and the difference IS the
+     * privacy model.
+     *
+     * <p><b>A public channel is public.</b> Its handle and its title go up, because that is catalogue
+     * data — the same thing the crawler would store about it anyway.
+     *
+     * <p><b>Anything else is a doorway, not content.</b> For a private chat only the numeric Telegram
+     * id is kept: no name, no title, no photo. The admin panel renders it as a link that opens that
+     * person IN TELEGRAM, so what is visible is whatever they themselves chose to show — we never
+     * hold a copy of it.
+     *
+     * <p>A tapped MESSAGE is the sharpest case: the match was a fragment of somebody's conversation,
+     * so the text is never recorded at all. Only the chat it belongs to is, by the rule above.
+     */
     private void svipeLogNativeClick(Object obj) {
         if (svipeNativeSearchLog == null || obj == null) {
             return;
         }
-        String handle = null;
+        Object target = obj;
+        if (obj instanceof MessageObject) {
+            // The message text never leaves the device — only where it lives.
+            final MessageObject mo = (MessageObject) obj;
+            final long did = mo.getDialogId();
+            target = did < 0
+                    ? getMessagesController().getChat(-did)
+                    : getMessagesController().getUser(did);
+            if (target == null) {
+                return;
+            }
+        }
+        String ref = null;
+        String label = null;
         String kind = null;
-        if (obj instanceof TLRPC.Chat) {
-            final TLRPC.Chat chat = (TLRPC.Chat) obj;
-            handle = ChatObject.getPublicUsername(chat);
-            // The admin panel's vocabulary: a broadcast channel is what the catalogue cares about, a
-            // supergroup is not the same thing and must not be counted as one.
-            kind = ChatObject.isChannel(chat) && !chat.megagroup ? "channel" : "group";
-        } else if (obj instanceof TLRPC.User) {
-            handle = UserObject.getPublicUsername((TLRPC.User) obj);
+        if (target instanceof TLRPC.Chat) {
+            final TLRPC.Chat chat = (TLRPC.Chat) target;
+            final String handle = ChatObject.getPublicUsername(chat);
+            // A broadcast channel is what the catalogue cares about; a supergroup is not the same
+            // thing and must not be counted as one.
+            final boolean broadcast = ChatObject.isChannel(chat) && !chat.megagroup;
+            kind = broadcast ? "channel" : "group";
+            if (handle != null && !handle.isEmpty() && broadcast) {
+                ref = handle;
+                label = chat.title;          // public channel: catalogue data, kept in full
+            } else {
+                ref = String.valueOf(chat.id);   // private/group: the id alone, nothing else
+            }
+        } else if (target instanceof TLRPC.User) {
+            final TLRPC.User user = (TLRPC.User) target;
+            final String handle = UserObject.getPublicUsername(user);
             kind = "user";
+            ref = handle != null && !handle.isEmpty() ? handle : String.valueOf(user.id);
         }
-        if (handle == null || handle.isEmpty()) {
-            return;     // no public handle: nothing about it may leave the device
+        if (ref == null || ref.isEmpty()) {
+            return;
         }
-        svipeNativeSearchLog.click(svipeLastNativeText, kind, handle, null);
+        svipeNativeSearchLog.click(svipeLastNativeText, kind, ref, label);
     }
 
     /**
@@ -8233,6 +8269,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 MessageObject messageObject = msg = (MessageObject) obj;
                 dialogId = messageObject.getDialogId();
                 message_id = messageObject.getId();
+                svipeLogNativeClick(obj);
                 TLRPC.Chat chat = getMessagesController().getChat(-dialogId);
                 if (ChatObject.isForum(chat)) {
                     topicId = MessageObject.getTopicId(messageObject.currentAccount, messageObject.messageOwner, true);
