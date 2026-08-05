@@ -1402,7 +1402,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             hideLoadingFor(item);
             int idx = items.indexOf(item);
             boolean awaited = idx == currentPosition || !item.resolveCallbacks.isEmpty();
-            if (retryable && awaited && item.resolveAttempts < MAX_RESOLVE_RETRIES) {
+            // A resolve refused because contacts.resolveUsername is inside a flood window is not
+            // transient in any useful sense — the window is measured in hours. Retrying three times
+            // at 1.5 s spends the user's patience on an answer that cannot change.
+            final boolean blocked = org.telegram.svipe.SvipeChannelResolve.blocked(currentAccount);
+            if (retryable && !blocked && awaited && item.resolveAttempts < MAX_RESOLVE_RETRIES) {
                 item.resolveAttempts++;
                 final int attempt = item.resolveAttempts;
                 AndroidUtilities.runOnUIThread(() -> {
@@ -1413,8 +1417,32 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 }, RESOLVE_RETRY_DELAY_MS);
             } else {
                 SvipeRefResolver.drainCallbacks(item); // give up cleanly so no queued play intent leaks
+                svipeSkipDeadReel(item);
             }
         });
+    }
+
+    /**
+     * Move off a reel that can never start. Giving up used to just stop the spinner, which left the
+     * user parked on a frame that would never play — the "stuck reel" they fix by hand every time by
+     * swiping past it and back. The feed has hundreds more, so the honest response to "this one
+     * cannot be resolved" is the next one.
+     *
+     * <p>Only for the reel actually on screen, only while it still has no message, and only forward:
+     * a reel that resolves late is not disturbed, and the last item is left alone so a failure at the
+     * end of the feed cannot fight the pager.
+     */
+    private void svipeSkipDeadReel(FeedItem item) {
+        final int idx = items.indexOf(item);
+        if (idx < 0 || idx != currentPosition || item.mo != null) {
+            return;
+        }
+        if (idx + 1 >= items.size()) {
+            loadMore();     // nothing to move to yet; the next page may bring one
+            return;
+        }
+        FileLog.d("svipe: skipping unresolvable reel at " + idx);
+        layoutManager.smoothScrollToPosition(listView, null, idx + 1);
     }
 
     /** Resolve (if needed) and start the reel at {@code pos} — recovers a reel stuck before playback. */
