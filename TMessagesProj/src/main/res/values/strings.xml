@@ -11124,6 +11124,7 @@
     <string name="SvipeVideoDownload">Download</string>
     <string name="SvipeVideoDownloaded">Downloaded</string>
     <string name="SvipeVideoPlaybackFailed">Couldn\'t play this video</string>
+    <string name="SvipeMusicPlaybackFailed">Couldn\'t play this track right now</string>
     <string name="SvipeWatchInPlayer">Watch in Svipe</string>
 
     <!-- Svipe self-update -->

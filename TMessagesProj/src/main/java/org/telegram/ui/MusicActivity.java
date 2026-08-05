@@ -1551,6 +1551,12 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         }
         SvipeFavourite f = favourites.get(position);
         MessageObject mo = favMo.get(f.key);
+        // One line that says which of the three outcomes a tap took. Worth keeping: "the row does
+        // nothing" was reported twice and the three causes (not resolved yet, resolved but playback
+        // refused, no queue) are indistinguishable from the outside.
+        FileLog.d("svipe: fav tap pos=" + position + " key=" + f.key + " mo=" + (mo != null)
+                + " queue=" + (favQueue != null) + " resolving=" + favResolving
+                + " resolveBlockedFor=" + org.telegram.svipe.SvipeChannelResolve.blockedForSeconds(currentAccount) + "s");
         if (mo != null && favQueue != null) {
             MediaController mc = MediaController.getInstance();
             MessageObject playing = mc.getPlayingMessageObject();
@@ -1573,10 +1579,23 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         // Nothing playable here (a private copy, or the channel would not resolve) — open where it
         // lives so it can still be played, rather than leaving the tap dead.
         if (f.messageId == 0) {
+            svipeUnplayable();
             return;     // no message to open; the row is not enabled either (see FavAdapter.isEnabled)
+        }
+        // The fallback needs a chat we can actually open, and that is the SAME thing the playback
+        // path just failed to get. While contacts.resolveUsername is in a flood window a channel the
+        // user is not a member of can be neither resolved nor opened, and ChatActivity answers that
+        // by closing itself — which is indistinguishable from the tap doing nothing at all. Say it
+        // instead. (checkCanOpenChat below returns true here, so it cannot be the guard.)
+        if (f.channelId != 0
+                && org.telegram.svipe.SvipeChannelResolve.known(currentAccount, f.channelId) == null
+                && org.telegram.svipe.SvipeChannelResolve.blocked(currentAccount)) {
+            svipeUnplayable();
+            return;
         }
         long dialogId = f.dialogId != 0 ? f.dialogId : (f.channelId != 0 ? -f.channelId : 0);
         if (dialogId == 0) {
+            svipeUnplayable();
             return;
         }
         android.os.Bundle args = new android.os.Bundle();
@@ -1588,7 +1607,25 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         args.putInt("message_id", f.messageId);
         if (MessagesController.getInstance(currentAccount).checkCanOpenChat(args, MusicActivity.this)) {
             presentFragment(new ChatActivity(args));
+        } else {
+            svipeUnplayable();
         }
+    }
+
+    /**
+     * Say the tap did not work. Every path that reaches here has already failed to turn the song into
+     * a Telegram message AND failed to open the chat it lives in — which is one state, not two: both
+     * need the channel resolved, so when {@code contacts.resolveUsername} is in a flood window the row
+     * looks tappable and does absolutely nothing. Silence there reads as a broken app rather than as
+     * "not right now", and it is the exact complaint this came from.
+     */
+    private void svipeUnplayable() {
+        if (getContext() == null) {
+            return;
+        }
+        org.telegram.ui.Components.BulletinFactory.of(this)
+                .createErrorBulletin(getString(R.string.SvipeMusicPlaybackFailed))
+                .show();
     }
 
     /**

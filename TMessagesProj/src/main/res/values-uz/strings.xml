@@ -188,6 +188,7 @@
     <string name="SvipeVideoDownload">Yuklab olish</string>
     <string name="SvipeVideoDownloaded">Yuklab olindi</string>
     <string name="SvipeVideoPlaybackFailed">Bu videoni ijro etib bo\'lmadi</string>
+    <string name="SvipeMusicPlaybackFailed">Bu qo\'shiqni hozir ijro etib bo\'lmadi</string>
     <string name="SvipeWatchInPlayer">Svipe\'da ko\'rish</string>
     <string name="SvipeSearchVideos">Videolarni qidirish</string>
     <string name="SvipeListenTimeLabel">%1$s • %2$d marta</string>

@@ -76,17 +76,42 @@ public class SvipeMusicResolver {
             return;
         }
 
+        // The reference already carries the channel id, so a channel this device has ever seen is
+        // addressable from its stored access_hash. Asking that first is what stops every cold start
+        // re-resolving the same handles — the traffic that earns the hours-long FLOOD_WAIT which
+        // leaves favourites unplayable. See SvipeChannelResolve.
+        final long channelId = group.get(0).channelId;
+        SvipeChannelResolve.lookup(account, channelId, local -> {
+            if (local != null) {
+                chats.put(username, local);
+                fetchMessages(account, local, group, resolved, done);
+                return;
+            }
+            sendResolve(account, username, group, resolved, done, chats);
+        });
+    }
+
+    private static void sendResolve(int account, String username, ArrayList<SvipeMusic.Track> group,
+                                    Map<String, TLRPC.Message> resolved, Runnable done,
+                                    ConcurrentHashMap<String, TLRPC.Chat> chats) {
+        if (SvipeChannelResolve.blocked(account)) {
+            // Telegram is already making this account wait. Asking anyway is not merely useless: a
+            // call inside an open flood window is what makes Telegram extend it.
+            done.run();
+            return;
+        }
         TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
         req.username = username;
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
             if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
+                SvipeChannelResolve.noteError(account, error);
                 done.run();
                 return;
             }
             TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
-            MessagesController mc = MessagesController.getInstance(account);
-            mc.putUsers(rp.users, false);
-            mc.putChats(rp.chats, false);
+            // Persisted, not just cached in memory: this call is expensive enough that paying it
+            // once per launch is what put the account in a flood window in the first place.
+            SvipeChannelResolve.remember(account, rp);
             TLRPC.Chat chat = null;
             long channelId = group.get(0).channelId;
             if (rp.chats != null && !rp.chats.isEmpty()) {

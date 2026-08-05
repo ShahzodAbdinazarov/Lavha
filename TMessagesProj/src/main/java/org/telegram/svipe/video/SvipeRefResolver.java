@@ -189,6 +189,28 @@ public class SvipeRefResolver {
             cb.run(cached);
             return;
         }
+        // Nothing in memory. Before paying for a resolve, ask the local database: a channel resolved
+        // in ANY previous session is stored there, and reading it costs no network. Without this the
+        // whole cache above is per-process, so every cold start re-resolves every channel the feed
+        // mentions — the burst that earns the hours-long FLOOD_WAIT (see SvipeChannelResolve).
+        org.telegram.svipe.SvipeChannelResolve.lookup(account, channelId, local -> {
+            if (local != null) {
+                cacheFor(account).put(username, local);
+                cb.run(local);
+                return;
+            }
+            sendResolve(account, username, channelId, cb);
+        });
+    }
+
+    private static void sendResolve(final int account, final String username, final long channelId,
+                                    final ChatCallback cb) {
+        if (org.telegram.svipe.SvipeChannelResolve.blocked(account)) {
+            // Inside an open flood window. Asking again is what makes Telegram extend it.
+            FileLog.d("svipe: resolve @" + username + " skipped, flood window open");
+            cb.run(null);
+            return;
+        }
         final String key = account + ":" + username;
         synchronized (pendingResolves) {
             ArrayList<ChatCallback> waiters = pendingResolves.get(key);
@@ -208,8 +230,8 @@ public class SvipeRefResolver {
             TLRPC.Chat chat = null;
             if (error == null && response instanceof TLRPC.TL_contacts_resolvedPeer) {
                 TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
-                MessagesController.getInstance(account).putUsers(rp.users, false);
-                MessagesController.getInstance(account).putChats(rp.chats, false);
+                // Persisted as well as cached, so the next launch does not pay for this again.
+                org.telegram.svipe.SvipeChannelResolve.remember(account, rp);
                 if (rp.chats != null) {
                     for (int i = 0; i < rp.chats.size(); i++) {
                         if (rp.chats.get(i).id == channelId) { chat = rp.chats.get(i); break; }
@@ -218,6 +240,7 @@ public class SvipeRefResolver {
                 }
                 if (chat != null) cacheFor(account).put(username, chat);
             } else if (error != null) {
+                org.telegram.svipe.SvipeChannelResolve.noteError(account, error);
                 FileLog.d("svipe: resolve @" + username + " failed: " + error.text);
             }
             drainResolve(key, chat);

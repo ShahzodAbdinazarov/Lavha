@@ -736,12 +736,36 @@ public class SvipeWatchActivity extends BaseFragment {
             fetchMessages(cached, group, done);
             return;
         }
-        final MessagesController mc = MessagesController.getInstance(currentAccount);
+        // A related list is a dozen DIFFERENT channels, so this page is the app's biggest single
+        // source of contacts.resolveUsername — measured at 20 inside the same 100 ms. Anything the
+        // device already knows must come from memory or the local database instead; only a genuinely
+        // new channel is worth an RPC. See SvipeChannelResolve.
+        org.telegram.svipe.SvipeChannelResolve.lookup(currentAccount, head.ref.channelId, local -> {
+            if (local != null) {
+                resolvedChats.put(username, local);
+                fetchMessages(local, group, done);
+                return;
+            }
+            sendResolveGroup(username, group, done);
+        });
+    }
+
+    private void sendResolveGroup(final String username, final ArrayList<Row> group, final Runnable done) {
+        final Row head = group.get(0);
+        if (org.telegram.svipe.SvipeChannelResolve.blocked(currentAccount)) {
+            // Inside an open flood window: asking again is what makes Telegram extend it.
+            for (Row r : group) {
+                r.resolving = false;
+            }
+            if (done != null) done.run();
+            return;
+        }
         TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
         req.username = username;
         ConnectionsManager.getInstance(currentAccount).sendRequest(req, (response, error) ->
                 AndroidUtilities.runOnUIThread(() -> {
                     if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
+                        org.telegram.svipe.SvipeChannelResolve.noteError(currentAccount, error);
                         for (Row r : group) {
                             r.resolving = false;
                         }
@@ -749,8 +773,8 @@ public class SvipeWatchActivity extends BaseFragment {
                         return;
                     }
                     TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
-                    mc.putUsers(rp.users, false);
-                    mc.putChats(rp.chats, false);
+                    // Persisted as well as cached: this page's resolves are the ones that add up.
+                    org.telegram.svipe.SvipeChannelResolve.remember(currentAccount, rp);
                     TLRPC.Chat chat = null;
                     if (rp.chats != null && !rp.chats.isEmpty()) {
                         for (int i = 0; i < rp.chats.size(); i++) {
