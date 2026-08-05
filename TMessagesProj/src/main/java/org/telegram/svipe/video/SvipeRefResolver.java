@@ -71,6 +71,8 @@ public class SvipeRefResolver {
         public String shareUrl;     // owned svipe.uz/<code> preview link, supplied by the backend
         public Integer topicId;
         public String recId;        // recommendation_id of the page this item arrived with
+        /** Not a public channel post — see {@link SvipeDiscover.Item#local}. Nothing about it is posted. */
+        public boolean local;
         public MessageObject mo;    // filled after MTProto resolution
         public TLRPC.Chat chat;
         public boolean resolving;
@@ -83,6 +85,7 @@ public class SvipeRefResolver {
             r.username = item.username;
             r.shareUrl = item.shareUrl;
             r.topicId = item.topicId;
+            r.local = item.local;
             return r;
         }
 

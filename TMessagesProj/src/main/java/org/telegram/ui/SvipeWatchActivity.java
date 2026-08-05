@@ -191,10 +191,72 @@ public class SvipeWatchActivity extends BaseFragment {
     private final Rect holeProbe = new Rect();   // reused: notifyHoleChanged runs inside a layout pass
 
     public SvipeWatchActivity(SvipeDiscover.Item ref) {
+        this(ref, null, null);
+    }
+
+    /**
+     * A video the user ran into somewhere else in the app, opened here with the Telegram message
+     * ALREADY in hand — see {@code SvipeVideoOpen}, which is the only caller.
+     *
+     * <p>A seeded page never resolves, and that is not an optimisation. For a {@code local}
+     * reference there is no public handle to resolve, so the resolve would fail and leave a black
+     * player behind a retry button that can never work; for a public one it would spend a
+     * resolveUsername + getMessages on a message we are holding. The player does not need the resolve
+     * callback either: it reads {@link #getWatchMessage()} in {@code onWatchPageOpened}, which runs at
+     * the end of {@link #createView}, and starts playback straight from there.
+     *
+     * @param local true when the source is NOT a public channel post (a private chat, a group, a
+     *              private channel, saved messages). Then nothing identifying this video may reach our
+     *              server — see {@link #isLocal()} for everything that is switched off.
+     */
+    public static SvipeWatchActivity seeded(SvipeDiscover.Item ref, MessageObject mo, TLRPC.Chat chat,
+                                            boolean local) {
+        if (ref != null) {
+            ref.local = local;   // on the REFERENCE, so a mini-bar restore cannot lose it
+        }
+        return new SvipeWatchActivity(ref, mo, chat);
+    }
+
+    private SvipeWatchActivity(SvipeDiscover.Item ref, MessageObject mo, TLRPC.Chat chat) {
         this.watched = new Row(ref);
+        this.watched.mo = mo;
+        this.watched.chat = chat;
+        this.liked = isLiked(mo);
+        this.likeCount = totalReactions(mo);
         if (ref != null) {
             shownKeys.add(keyOf(ref));
         }
+    }
+
+    /**
+     * True when the video on screen is not a public channel post. Then this page is a PLAYER and
+     * nothing else: no watch events, no related seed, no film lookup, no follow — see the suppressed
+     * calls one by one below. It mirrors the intake contract on the backend side, which knows about
+     * public handles only and stores no submitter identity.
+     */
+    private boolean isLocal() {
+        return watched != null && watched.ref != null && watched.ref.local;
+    }
+
+    /**
+     * True when the message on screen IS the post the reference names. It is not, for a forward
+     * opened from a chat: the reference is resolved to the ORIGINAL channel post (the copy the server
+     * can index and serve), while playback and the reaction bar work on the forwarded copy the user
+     * actually tapped.
+     *
+     * <p>That split is right for the video and wrong for the actions. A ❤️ goes to the message on
+     * screen — Telegram's own semantics, and the only message this page holds — so reporting it to the
+     * server as a like on the ORIGIN post would credit a post nobody touched, and the count beside it
+     * is the copy's anyway. Watch telemetry is deliberately NOT gated on this: the video being watched
+     * is the same video either way, and the canonical post is exactly where that signal belongs.
+     */
+    private boolean displayingReferencedPost() {
+        final MessageObject mo = watched == null ? null : watched.mo;
+        if (mo == null || watched.ref == null) {
+            return false;
+        }
+        return mo.getId() == watched.ref.messageId
+                && MessageObject.getChatId(mo.messageOwner) == watched.ref.channelId;
     }
 
     private static String keyOf(SvipeDiscover.Item ref) {
@@ -317,6 +379,11 @@ public class SvipeWatchActivity extends BaseFragment {
         likeCount = totalReactions(row.mo);
         captionExpanded = false;
         rebuildRows();
+        if (playerHole != null) {
+            // The new video may not have the shape of the old one, and the hole is measured from the
+            // reference (see holeHeight). The list's spacer re-measures with the adapter; this does not.
+            playerHole.requestLayout();
+        }
         if (listView != null) {
             listView.scrollToPosition(0);
         }
@@ -399,7 +466,9 @@ public class SvipeWatchActivity extends BaseFragment {
         root.addView(playerHole, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
 
         rebuildRows();
-        resolveWatched();
+        if (watched.mo == null) {
+            resolveWatched();   // a seeded page is already holding the message — see #seeded
+        }
         loadRelated();
         loadMovie();
         if (holeListener != null) {
@@ -449,12 +518,13 @@ public class SvipeWatchActivity extends BaseFragment {
     }
 
     /**
-     * The reserved 16:9 hole, black, pinned under the status bar.
+     * The reserved hole, black, pinned under the status bar.
      *
-     * <p>Fixed at 16:9 rather than the video's own aspect on purpose: the overlay letterboxes the video
-     * inside whatever rect it is given, so a hole that resized when the real dimensions arrived would
-     * shove the whole page down mid-read. In landscape a full-width 16:9 hole would eat the screen, so
-     * it is capped and the overlay letterboxes into the wider rect instead.
+     * <p>Sized from dimensions that are known BEFORE the first frame — the reference's, or the seeded
+     * document's — never from the decoder: the overlay letterboxes the video inside whatever rect it
+     * is given, so a hole that resized when the real dimensions arrived would shove the whole page
+     * down mid-read. In landscape a full-width hole would eat the screen, so it is capped and the
+     * overlay letterboxes into the wider rect instead.
      */
     private class PlayerHoleView extends View {
         PlayerHoleView(Context context) {
@@ -479,10 +549,22 @@ public class SvipeWatchActivity extends BaseFragment {
         }
     }
 
-    /** 16:9 of the width, capped so an inline player cannot swallow a landscape window. */
-    private static int holeHeight(int width) {
+    /**
+     * 16:9 of the width, capped so an inline player cannot swallow a landscape window — and TALLER
+     * than that, up to the same cap, for a video whose own aspect is taller.
+     *
+     * <p>The one-way clamp is the point. Every reference from the Video tab is horizontal, so it is
+     * bounded by 16:9 and this is byte-identical to the fixed hole it replaces (an unknown aspect is
+     * 16:9 too). Since any video in the app can now be opened here, a 9:16 phone clip also arrives —
+     * and in a 16:9 hole it would be a stamp between two fat pillarbox bars.
+     */
+    private int holeHeight(int width) {
         final int cap = Math.round(Math.max(AndroidUtilities.displaySize.y, dp(320)) * 0.6f);
-        return Math.max(dp(1), Math.min(Math.round(width * 9f / 16f), cap));
+        final float aspect = watched != null && watched.ref != null ? watched.ref.aspect() : 16f / 9f;
+        final int height = aspect > 0 && aspect < 16f / 9f
+                ? Math.round(width / aspect)
+                : Math.round(width * 9f / 16f);
+        return Math.max(dp(1), Math.min(height, cap));
     }
 
     // ---------------- rows ----------------
@@ -496,7 +578,9 @@ public class SvipeWatchActivity extends BaseFragment {
         rows.clear();
         rows.add(TYPE_PLAYER_HOLE);
         rows.add(TYPE_TITLE);
-        rows.add(TYPE_CHANNEL);
+        if (hasChannelRow()) {
+            rows.add(TYPE_CHANNEL);
+        }
         rows.add(TYPE_ACTIONS);
         if (movieDetail != null && !movieDetail.actors.isEmpty()) {
             rows.add(TYPE_ACTORS);
@@ -520,6 +604,16 @@ public class SvipeWatchActivity extends BaseFragment {
         if (adapter != null) {
             adapter.notifyDataSetChanged();
         }
+    }
+
+    /**
+     * The channel row needs something to name: the resolved chat, or the handle the reference came
+     * with. A video opened from a private chat has neither, and the row would render "@null" under a
+     * blank avatar.
+     */
+    private boolean hasChannelRow() {
+        return watched.chat != null
+                || watched.ref != null && watched.ref.username != null && !watched.ref.username.isEmpty();
     }
 
     private Row relatedRowAt(int position) {
@@ -572,6 +666,9 @@ public class SvipeWatchActivity extends BaseFragment {
 
     /** Re-run the MTProto resolve after it failed. The player's retry button is the only caller. */
     public void retryResolve() {
+        if (watched.mo != null) {
+            return;   // seeded: there is nothing to resolve, and a local reference has no handle anyway
+        }
         resolveWatched();
     }
 
@@ -759,8 +856,8 @@ public class SvipeWatchActivity extends BaseFragment {
      * Fire-and-forget: a 404 is the common answer and leaves the page exactly as it was.
      */
     private void loadMovie() {
-        if (watched == null || watched.ref == null) {
-            return;
+        if (watched == null || watched.ref == null || isLocal()) {
+            return;   // asking "is this post a film" would put a private post's ids on the wire
         }
         SvipeMovies.movieByPost(currentAccount, watched.ref.channelId, watched.ref.messageId,
                 (detail, error) -> AndroidUtilities.runOnUIThread(() -> {
@@ -783,42 +880,51 @@ public class SvipeWatchActivity extends BaseFragment {
         }
         final Row seed = watched;
         final int offset = relatedOffset;
+        final SvipeDiscover.Callback callback = (items, next, error) -> {
+            loadingRelated = false;
+            if (seed != watched) {
+                return;   // the page swapped videos: this page of related belongs to nobody
+            }
+            if (items == null) {
+                if (++relatedFailures >= MAX_RELATED_FAILURES) {
+                    relatedOffset = null;   // stop chasing an endpoint that keeps failing
+                }
+                rebuildRows();
+                return;
+            }
+            relatedFailures = 0;
+            // An empty page means there is nothing left to list, whatever next_offset claims —
+            // trusting the cursor there is what turns a spent pipe into an endless request loop.
+            relatedOffset = items.isEmpty() ? null : next;
+            final ArrayList<Row> fresh = new ArrayList<>();
+            for (SvipeDiscover.Item it : items) {
+                if (!shownKeys.add(keyOf(it))) {
+                    continue;   // already listed (or the seed itself)
+                }
+                final Row row = new Row(it);
+                related.add(row);
+                fresh.add(row);
+            }
+            rebuildRows();
+            resolveBatch(fresh);
+            // A page that landed entirely deduped leaves nothing new to scroll, and then the
+            // scroll listener can never ask again — so keep going while the pipe has more.
+            if (fresh.isEmpty() && relatedOffset != null) {
+                loadRelated();
+            }
+        };
+        if (isLocal()) {
+            // A local video cannot seed the related list — the seed IS its ids, on the wire. The plain
+            // long-form pipe answers "what should this user watch" instead of "what goes with THIS",
+            // which is a worse related list and the only honest one available here. Identical response
+            // shape, so the cursor, the dedupe and the failure cap above are untouched.
+            SvipeDiscover.videos(currentAccount, null, offset, RELATED_PAGE_SIZE, false, callback);
+            return;
+        }
         // Retrieved from the video on screen (see SvipeDiscover#relatedVideos): the next episode of
         // its show, then the nearest videos by caption embedding, then more from its channel.
         SvipeDiscover.relatedVideos(currentAccount, seed.ref.channelId, seed.ref.messageId,
-                offset, RELATED_PAGE_SIZE, (items, next, error) -> {
-                    loadingRelated = false;
-                    if (seed != watched) {
-                        return;   // the page swapped videos: this page of related belongs to nobody
-                    }
-                    if (items == null) {
-                        if (++relatedFailures >= MAX_RELATED_FAILURES) {
-                            relatedOffset = null;   // stop chasing an endpoint that keeps failing
-                        }
-                        rebuildRows();
-                        return;
-                    }
-                    relatedFailures = 0;
-                    // An empty page means there is nothing left to list, whatever next_offset claims —
-                    // trusting the cursor there is what turns a spent pipe into an endless request loop.
-                    relatedOffset = items.isEmpty() ? null : next;
-                    final ArrayList<Row> fresh = new ArrayList<>();
-                    for (SvipeDiscover.Item it : items) {
-                        if (!shownKeys.add(keyOf(it))) {
-                            continue;   // already listed (or the seed itself)
-                        }
-                        final Row row = new Row(it);
-                        related.add(row);
-                        fresh.add(row);
-                    }
-                    rebuildRows();
-                    resolveBatch(fresh);
-                    // A page that landed entirely deduped leaves nothing new to scroll, and then the
-                    // scroll listener can never ask again — so keep going while the pipe has more.
-                    if (fresh.isEmpty() && relatedOffset != null) {
-                        loadRelated();
-                    }
-                });
+                offset, RELATED_PAGE_SIZE, callback);
     }
 
     /** Drop one related reference (the ⋮ "not interested" action). */
@@ -905,8 +1011,12 @@ public class SvipeWatchActivity extends BaseFragment {
                 .sendReaction(mo, visible, newLiked ? heart : null, false, true, this, null);
         liked = newLiked;
         likeCount = Math.max(0, likeCount + (newLiked ? 1 : -1));
-        SvipeDiscover.sendEvent(currentAccount, watched.ref.channelId, watched.ref.messageId,
-                newLiked ? "LIKE" : "UNLIKE", null);
+        // The reaction itself is Telegram's and always goes through; only OUR event is suppressed for
+        // a video that is nobody's business but the user's.
+        if (!isLocal() && displayingReferencedPost()) {
+            SvipeDiscover.sendEvent(currentAccount, watched.ref.channelId, watched.ref.messageId,
+                    newLiked ? "LIKE" : "UNLIKE", null);
+        }
         rebuildRows();
     }
 
@@ -941,17 +1051,22 @@ public class SvipeWatchActivity extends BaseFragment {
         if (getParentActivity() == null || ref == null) {
             return;
         }
-        String link = (ref.shareUrl != null && !ref.shareUrl.isEmpty())
+        final String link = (ref.shareUrl != null && !ref.shareUrl.isEmpty())
                 ? ref.shareUrl
                 : (ref.username != null && !ref.username.isEmpty()
                         ? "https://t.me/" + ref.username + "/" + ref.messageId : null);
-        if (link == null) {
+        // A video opened out of the user's own chats has no public link, and the promo caption would
+        // advertise a page nobody else can open. Forward the document by itself instead — refusing to
+        // share was this chip silently doing nothing, which reads as a broken button. Except when the
+        // source protects its content: Telegram takes forwarding away there, and this page must not
+        // be the one surface that hands it back.
+        final MessageObject mo = watched.mo;
+        if (link == null && (mo == null || forwardsRestricted(mo))) {
             return;
         }
-        final String caption = getString(R.string.SvipeSharePromo)
-                + "\n\n" + link.replaceFirst("^https?://", "");
+        final String caption = link == null ? null
+                : getString(R.string.SvipeSharePromo) + "\n\n" + link.replaceFirst("^https?://", "");
         try {
-            final MessageObject mo = watched.mo;
             TLRPC.Document d = mo != null ? mo.getDocument() : null;
             if (d instanceof TLRPC.TL_document) {
                 final TLRPC.TL_document document = (TLRPC.TL_document) d;
@@ -971,20 +1086,35 @@ public class SvipeWatchActivity extends BaseFragment {
                     }
                 };
                 showDialog(alert);
-            } else {
+            } else if (link != null) {
                 // Not resolved yet — share the promo text + link alone rather than nothing.
                 showDialog(new ShareAlert(getParentActivity(), null, caption, false, link, false));
+            } else {
+                return;   // no document to forward and no link to send in its place
             }
-            SvipeDiscover.sendEvent(currentAccount, ref.channelId, ref.messageId, "SHARE", null);
+            if (!isLocal() && displayingReferencedPost()) {
+                SvipeDiscover.sendEvent(currentAccount, ref.channelId, ref.messageId, "SHARE", null);
+            }
         } catch (Exception e) {
             FileLog.e(e);
         }
     }
 
+    /** The message's own restriction plus the peer's, which is how the rest of the app reads it. */
+    private boolean forwardsRestricted(MessageObject mo) {
+        if (mo.messageOwner == null || mo.messageOwner.noforwards) {
+            return true;
+        }
+        return MessagesController.getInstance(currentAccount).isPeerNoForwards(mo.getDialogId());
+    }
+
     /** Subscribe / unsubscribe, exactly as the reels rail does it. */
     private void toggleFollow() {
         final TLRPC.Chat chat = watched.chat;
-        if (chat == null) {
+        // isLocal() as well as the null check: a private channel or a group seed has a perfectly real
+        // Chat, and subscribing to it is neither something this page should offer nor something whose
+        // id may be posted. The button is hidden there too (ChannelView#bind).
+        if (chat == null || isLocal()) {
             return;
         }
         TLRPC.User self = MessagesController.getInstance(currentAccount)
@@ -1168,7 +1298,7 @@ public class SvipeWatchActivity extends BaseFragment {
     }
 
     /** Row 0: the hole the pinned player occupies. Same height, computed the same way. */
-    private static class HoleSpacerView extends View {
+    private class HoleSpacerView extends View {
         HoleSpacerView(Context context) {
             super(context);
         }
@@ -1279,7 +1409,11 @@ public class SvipeWatchActivity extends BaseFragment {
             TLRPC.ChatFull full = chat == null ? null : MessagesController.getInstance(currentAccount).getChatFull(chat.id);
             if (full != null && full.participants_count > 0) {
                 subtitle.setVisibility(VISIBLE);
-                subtitle.setText(LocaleController.formatPluralString("Subscribers", full.participants_count));
+                // A local source can be a group as well as a channel, and a group has members, not
+                // subscribers — the label follows the chat, the way the rest of the app writes it.
+                final boolean broadcast = ChatObject.isChannel(chat) && !chat.megagroup;
+                subtitle.setText(LocaleController.formatPluralString(
+                        broadcast ? "Subscribers" : "Members", full.participants_count));
             } else {
                 subtitle.setVisibility(GONE);
             }
@@ -1294,7 +1428,9 @@ public class SvipeWatchActivity extends BaseFragment {
             follow.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(18),
                     following ? Theme.getColor(Theme.key_listSelector) : Theme.getColor(Theme.key_featuredStickers_addButton),
                     Theme.getColor(Theme.key_listSelector)));
-            follow.setVisibility(chat == null ? GONE : VISIBLE);
+            // Hidden for a local source: subscribing is a public-channel action, and on a private
+            // channel the user is already in, this button would offer to LEAVE it from a video page.
+            follow.setVisibility(chat == null || isLocal() ? GONE : VISIBLE);
         }
     }
 

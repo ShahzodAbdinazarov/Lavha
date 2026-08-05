@@ -453,6 +453,7 @@
     <string name="SvipeVideoDownload">Скачать</string>
     <string name="SvipeVideoDownloaded">Скачано</string>
     <string name="SvipeVideoPlaybackFailed">Не удалось воспроизвести это видео</string>
+    <string name="SvipeWatchInPlayer">Смотреть в Svipe</string>
     <string name="SvipeSearchVideos">Поиск видео</string>
     <string name="SvipeListenTimeLabel">%1$s • %2$d прослуш.</string>
 

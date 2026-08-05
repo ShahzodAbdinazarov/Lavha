@@ -1201,6 +1201,7 @@ public class ChatActivity extends BaseFragment implements
     public final static int OPTION_ADD_TO_GIFS = 11;
     public final static int OPTION_EDIT = 12;
     public final static int OPTION_SVIPE_HISTORY = 991; // Svipe — open edit-history bottom sheet
+    public final static int OPTION_SVIPE_WATCH = 992; // Svipe — open this video in our long-form watch page
     public final static int OPTION_PIN = 13;
     public final static int OPTION_UNPIN = 14;
     public final static int OPTION_ADD_CONTACT = 15;
@@ -20132,6 +20133,40 @@ public class ChatActivity extends BaseFragment implements
         return null;
     }
 
+    /**
+     * Svipe — where the watch page should grow out of: the thumbnail inside the pressed bubble, in
+     * WINDOW coordinates, which is what {@code SvipeWatchActivity.setOpenFromRect} wants. Same walk as
+     * {@link #getPlaceForPhoto}, which is the only place that knows a cell's image sits at the
+     * ImageReceiver's coords and not at the cell's own bounds. Null when the bubble has been recycled
+     * away (long-press menu over a scrolled-off message) — the caller then opens without a transition.
+     */
+    private Rect svipeWatchOpenFromRect(MessageObject messageObject) {
+        if (messageObject == null || chatListView == null) {
+            return null;
+        }
+        for (int a = 0, count = chatListView.getChildCount(); a < count; a++) {
+            View view = chatListView.getChildAt(a);
+            if (!(view instanceof ChatMessageCell)) {
+                continue;
+            }
+            ChatMessageCell cell = (ChatMessageCell) view;
+            MessageObject cellMessage = cell.getMessageObject();
+            if (cellMessage == null || cellMessage.getId() != messageObject.getId()) {
+                continue;
+            }
+            ImageReceiver imageReceiver = cell.getPhotoImage();
+            if (imageReceiver == null || imageReceiver.getImageWidth() <= 0 || imageReceiver.getImageHeight() <= 0) {
+                return null;
+            }
+            int[] coords = new int[2];
+            view.getLocationInWindow(coords);
+            final int left = coords[0] + (int) imageReceiver.getImageX();
+            final int top = coords[1] + view.getPaddingTop() + (int) imageReceiver.getImageY();
+            return new Rect(left, top, left + (int) imageReceiver.getImageWidth(), top + (int) imageReceiver.getImageHeight());
+        }
+        return null;
+    }
+
     private boolean openArticlePhoto(ChatMessageCell messageCell, TL_iv.PageBlock targetBlock) {
         if (messageCell == null || targetBlock == null || getParentActivity() == null) return false;
         MessageObject messageObject = messageCell.getMessageObject();
@@ -31050,6 +31085,21 @@ public class ChatActivity extends BaseFragment implements
                 icons.add(R.drawable.msg_edit);
             }
 
+            // Svipe — watch page hand-off. It is a media action, so it belongs beside Save/Share; a plain
+            // append would land it under Delete, because fillMessageMenu() always writes Delete last.
+            // A still-blurred sensitive video is left out on purpose: the strip pass below drops Save and
+            // Share for exactly that message, and opening it full-screen would be the same reveal.
+            if (selectedObject != null && org.telegram.svipe.video.SvipeVideoOpen.canWatch(selectedObject)
+                    && !(selectedObject.isHiddenSensitive() && !selectedObject.isMediaSpoilersRevealed)) {
+                int at = options.indexOf(OPTION_DELETE);
+                if (at < 0) {
+                    at = options.size();
+                }
+                items.add(at, LocaleController.getString(R.string.SvipeWatchInPlayer));
+                options.add(at, OPTION_SVIPE_WATCH);
+                icons.add(at, R.drawable.msg_played);
+            }
+
             if (selectedObject != null && selectedObject.isHiddenSensitive() && !selectedObject.isMediaSpoilersRevealed) {
                 for (int i = 0; i < options.size(); ++i) {
                     final int option = options.get(i);
@@ -33382,6 +33432,11 @@ public class ChatActivity extends BaseFragment implements
                 if (getParentActivity() != null) {
                     new org.telegram.svipe.SvipeMessageHistorySheet(getParentActivity(), currentAccount, dialog_id, selectedObject).show();
                 }
+                break;
+            }
+            case OPTION_SVIPE_WATCH: { // Svipe — hand this video to our long-form watch page
+                final MessageObject video = selectedObject; // the field is nulled below, before any async hop
+                org.telegram.svipe.video.SvipeVideoOpen.open(this, video, svipeWatchOpenFromRect(video));
                 break;
             }
             case OPTION_RETRY: {

@@ -2200,6 +2200,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     private final static int gallery_menu_chromecast = 24;
     private final static int gallery_menu_create_sticker = 25;
     private final static int gallery_menu_delete2 = 26;
+    private final static int gallery_menu_svipe_watch = 27; // Svipe — open this video in our long-form watch page
 
     private final static int ads_sponsor_info = 101;
     private final static int ads_about = 102;
@@ -5187,6 +5188,14 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                         ads.stop();
                         ads = null;
                     }
+                } else if (id == gallery_menu_svipe_watch) { // Svipe — hand this video to our long-form watch page
+                    if (currentMessageObject == null) {
+                        return;
+                    }
+                    // Unlike ShowInChat above this does NOT close the viewer here: openFromPhotoViewer()
+                    // owns the teardown, because it has to close first and present a frame later, and a
+                    // second closePhoto() from this side would run the same teardown twice.
+                    org.telegram.svipe.video.SvipeVideoOpen.openFromPhotoViewer(currentMessageObject, svipeWatchOpenFromRect());
                 } else if (id == gallery_menu_create_sticker) {
                     if (parentFragment == null || placeProvider == null) return;
                     if (currentMessageObject == null || currentMessageObject.messageOwner == null) return;
@@ -5926,6 +5935,9 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         galleryGap = menuItem.addColoredGap();
         galleryGap.setColor(0xff181818);
         menuItem.addSubItem(gallery_menu_openin, R.drawable.msg_openin, getString(R.string.OpenInExternalApp)).setColors(0xfffafafa, 0xfffafafa);
+        // Svipe — sits under "Open in external app" because it answers the same question with the other
+        // answer: the video leaves this viewer for our own watch page instead of for another app.
+        menuItem.addSubItem(gallery_menu_svipe_watch, R.drawable.msg_played, getString(R.string.SvipeWatchInPlayer)).setColors(0xfffafafa, 0xfffafafa);
         pipItem = menuItem.addSubItem(gallery_menu_pip, R.drawable.menu_video_pip, getString(R.string.PipMinimize)).setColors(0xfffafafa, 0xfffafafa);
         allMediaItem = menuItem.addSubItem(gallery_menu_showall, R.drawable.msg_media, getString(R.string.ShowAllMedia));
         allMediaItem.setColors(0xfffafafa, 0xfffafafa);
@@ -13877,6 +13889,23 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         return false;
     }
 
+    /**
+     * Svipe — where the watch page should grow out of: the video exactly as it stands on screen, in
+     * WINDOW coordinates, which is what {@code SvipeWatchActivity.setOpenFromRect} wants.
+     * aspectRatioFrameLayout is the texture's own container and stays INVISIBLE until the first frame
+     * lands, so before that there is no on-screen video to grow from and the caller opens plain.
+     */
+    private Rect svipeWatchOpenFromRect() {
+        if (aspectRatioFrameLayout == null || aspectRatioFrameLayout.getVisibility() != View.VISIBLE
+                || aspectRatioFrameLayout.getWidth() <= 0 || aspectRatioFrameLayout.getHeight() <= 0) {
+            return null;
+        }
+        int[] coords = new int[2];
+        aspectRatioFrameLayout.getLocationInWindow(coords);
+        return new Rect(coords[0], coords[1],
+                coords[0] + aspectRatioFrameLayout.getWidth(), coords[1] + aspectRatioFrameLayout.getHeight());
+    }
+
     private void setItemVisible(View itemView, boolean visible, boolean animate) {
         setItemVisible(itemView, visible, animate, 1.0f);
     }
@@ -14027,6 +14056,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         menuItem.hideSubItem(gallery_menu_edit_avatar);
         menuItem.hideSubItem(gallery_menu_set_as_main);
         menuItem.hideSubItem(gallery_menu_delete);
+        menuItem.hideSubItem(gallery_menu_svipe_watch); // Svipe — the viewer is a singleton, so it would leak into the next open
         speedItem.setVisibility(View.GONE);
         speedGap.setVisibility(View.GONE);
         videoItem.setVisibility(View.GONE);
@@ -14632,6 +14662,10 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 }
                 menuItem.checkHideMenuItem();
                 boolean canPaint = !isLivePhoto && (newMessageObject.getDocument() == null || newMessageObject.canPreviewDocument() || newMessageObject.getMimeType().startsWith("video/")) && !(isEmbedVideo || newMessageObject.messageOwner.ttl != 0 && newMessageObject.messageOwner.ttl < 60 * 60 || noforwards) && canSendMediaToParentChatActivity() && !opennedFromMedia;
+                // Svipe — decided per message and outside the branches below, because the hand-off depends
+                // only on the document (canWatch already rejects embeds, round video, GIFs and live photos)
+                // and this runs before setImageIndex() sizes speedGap off getVisibleSubItemsCount().
+                menuItem.setSubItemShown(gallery_menu_svipe_watch, org.telegram.svipe.video.SvipeVideoOpen.canWatch(newMessageObject));
                 if (isEmbedVideo) {
                     menuItem.showSubItem(gallery_menu_openin);
                     setItemVisible(editItem, false, false);

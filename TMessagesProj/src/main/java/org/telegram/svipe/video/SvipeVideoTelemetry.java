@@ -103,6 +103,14 @@ public class SvipeVideoTelemetry {
         if (ref == null) {
             return;
         }
+        if (ref.local) {
+            // A video the user opened out of their own chats (SvipeVideoOpen). Leaving shownAtMs at 0
+            // makes every public method here return early, so NOTHING about it is ever posted — not
+            // the impression, not a heartbeat, not the terminal leave event that flush() would send
+            // when the next video takes over. One structural gate rather than seven per-event checks,
+            // because a per-event check is a thing a later event can be added without.
+            return;
+        }
         this.account = account;
         this.channelId = ref.channelId;
         this.messageId = ref.messageId;

@@ -61,6 +61,15 @@ public class SvipeDiscover {
          * has to change then.
          */
         public String recId;
+        /**
+         * CLIENT-ONLY, never parsed from a response: this reference was built from a message the user
+         * ran into somewhere in the app (SvipeVideoOpen), not served by us, and it is NOT a public
+         * channel post — so its ids may belong to a private chat and nothing carrying them may reach
+         * our server. The flag rides on the reference rather than on the watch page because the mini
+         * bar's restore and the buried-page restore both re-open from the Item alone, with no page
+         * involved; a page-level flag would be lost exactly there.
+         */
+        public boolean local;
 
         /** True for a horizontal/long-form entry. Unknown dimensions fall back to the vertical tile. */
         public boolean isLandscape() {

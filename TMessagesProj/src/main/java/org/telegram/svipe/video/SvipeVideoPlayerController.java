@@ -462,7 +462,13 @@ public class SvipeVideoPlayerController {
             return;   // nothing to restore INTO — an inline player with no page under it is worse
         }
         toInline();   // the bar grows into the hole the re-presented page is about to report
-        activity.presentFragment(new SvipeWatchActivity(item));
+        // A local video (one the user opened out of their own chats) has no public handle, so a plain
+        // page would resolve nothing, put up the error and seed the related endpoint with ids that
+        // must never leave the device. We are still holding its message, so the page is re-seeded.
+        final SvipeRefResolver.VideoRef playing = current;
+        activity.presentFragment(item.local && playing != null && playing.mo != null
+                ? SvipeWatchActivity.seeded(item, playing.mo, playing.chat, true)
+                : new SvipeWatchActivity(item));
     }
 
     /**
