@@ -1490,18 +1490,43 @@ public class SvipeExploreGrid extends RecyclerListView {
             return;
         }
 
+        // A grid page is a dozen different channels and every poster comes off the Telegram message,
+        // so this is the second-biggest source of contacts.resolveUsername after the watch page —
+        // and when it is flood-limited the grid draws a wall of blank cards. Ask what the device
+        // already knows first, and never fire into an open flood window. See SvipeChannelResolve.
+        org.telegram.svipe.SvipeChannelResolve.lookup(account, channelId, local -> {
+            if (local != null) {
+                resolvedChats.put(username, local);
+                fetchMessagesForGroup(local, group);
+                return;
+            }
+            sendResolveForGroup(account, username, channelId, group);
+        });
+    }
+
+    private void sendResolveForGroup(final int account, final String username, final long channelId,
+                                     final ArrayList<GridItem> group) {
+        final MessagesController mc = MessagesController.getInstance(account);
+        final ConnectionsManager cm = ConnectionsManager.getInstance(account);
+        if (org.telegram.svipe.SvipeChannelResolve.blocked(account)) {
+            for (GridItem gi : group) {
+                gi.resolving = false;
+            }
+            return;
+        }
         TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
         req.username = username;
         cm.sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
             if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
+                org.telegram.svipe.SvipeChannelResolve.noteError(account, error);
                 for (GridItem gi : group) {
                     gi.resolving = false;
                 }
                 return;
             }
             TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
-            mc.putUsers(rp.users, false);
-            mc.putChats(rp.chats, false);
+            // Persisted, so tomorrow's cold start draws this grid without a single resolve.
+            org.telegram.svipe.SvipeChannelResolve.remember(account, rp);
             TLRPC.Chat chat = null;
             if (rp.chats != null && !rp.chats.isEmpty()) {
                 for (int i = 0; i < rp.chats.size(); i++) {
