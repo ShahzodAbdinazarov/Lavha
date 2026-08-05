@@ -1,5 +1,7 @@
 package org.telegram.svipe;
 
+import org.telegram.messenger.AndroidUtilities;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -120,7 +122,7 @@ public class SvipeDiscover {
      * refresh=true rotates the server grid to a fresh window (pull-to-refresh); page-0 only.
      */
     public static void load(int account, String category, int offset, int limit, boolean refresh, Callback cb) {
-        SvipeAuth.ensureToken(account, token -> {
+        SvipeAuth.ensureTokenRetrying(account, token -> {
             if (token == null) {
                 cb.onResult(null, null, "auth");
                 return;
@@ -289,7 +291,8 @@ public class SvipeDiscover {
 
     /** Shared GET for the reference-list endpoints returning {items:[FeedItem], next_offset}. */
     private static void feedGet(int account, String path, Callback cb) {
-        SvipeAuth.ensureToken(account, token -> {
+
+        SvipeAuth.ensureTokenRetrying(account, token -> {
             if (token == null) {
                 cb.onResult(null, null, "auth");
                 return;

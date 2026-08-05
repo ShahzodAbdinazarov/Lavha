@@ -3441,6 +3441,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 svipeUpdateExploreGridVisibility();
                 if (isSvipeSearchSection()) {
                     svipeLogSearchQuery(text);
+                } else {
+                    svipeLogNativeQuery(text);
                 }
             }
 
@@ -7631,6 +7633,65 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     }
 
     /**
+     * The NATIVE (Chats) search — the third search in the app, and until now the only one that told us
+     * nothing. Music and the Svipe Search tab both record what was typed and what was picked, and that
+     * pair is what makes results better; this one was deliberately excluded, so the signal it carries
+     * (what people look for by name, and which public channel actually satisfied them) was thrown away.
+     *
+     * <p><b>What is NOT recorded, and why the exclusion existed.</b> Searching your own chats is
+     * private in a way searching a catalogue is not. So only the QUERY and a click on a PUBLIC entity
+     * are reported — a private chat, a secret chat, a contact without a public handle and every
+     * message match inside a conversation are skipped. Nothing here can say who someone talks to.
+     */
+    private org.telegram.svipe.SvipeSearchLog svipeNativeSearchLog;
+    private Runnable svipeNativeLogPending;
+    private String svipeLastNativeText;
+
+    private void svipeLogNativeQuery(String text) {
+        if (svipeNativeLogPending != null) {
+            AndroidUtilities.cancelRunOnUIThread(svipeNativeLogPending);
+            svipeNativeLogPending = null;
+        }
+        final String q = text == null ? "" : text.trim();
+        if (q.length() < 2) {
+            svipeNativeSearchLog = null;    // field emptied -> this search visit is over
+            svipeLastNativeText = null;
+            return;
+        }
+        svipeNativeLogPending = () -> {
+            svipeLastNativeText = q;
+            if (svipeNativeSearchLog == null) {
+                svipeNativeSearchLog = new org.telegram.svipe.SvipeSearchLog(currentAccount, "chats");
+            }
+            svipeNativeSearchLog.query(q, -1);   // the native search reports no result count
+        };
+        AndroidUtilities.runOnUIThread(svipeNativeLogPending, 500);
+    }
+
+    /** A tapped native-search result. PUBLIC entities only — see svipeLogNativeQuery. */
+    private void svipeLogNativeClick(Object obj) {
+        if (svipeNativeSearchLog == null || obj == null) {
+            return;
+        }
+        String handle = null;
+        String kind = null;
+        if (obj instanceof TLRPC.Chat) {
+            final TLRPC.Chat chat = (TLRPC.Chat) obj;
+            handle = ChatObject.getPublicUsername(chat);
+            // The admin panel's vocabulary: a broadcast channel is what the catalogue cares about, a
+            // supergroup is not the same thing and must not be counted as one.
+            kind = ChatObject.isChannel(chat) && !chat.megagroup ? "channel" : "group";
+        } else if (obj instanceof TLRPC.User) {
+            handle = UserObject.getPublicUsername((TLRPC.User) obj);
+            kind = "user";
+        }
+        if (handle == null || handle.isEmpty()) {
+            return;     // no public handle: nothing about it may leave the device
+        }
+        svipeNativeSearchLog.click(svipeLastNativeText, kind, handle, null);
+    }
+
+    /**
      * Svipe Search: the grid is ALWAYS on screen and its content follows the field. Empty + unfocused
      * → the /v1/discover BROWSE grid; empty + focused → the recent-search rows above the browse grid;
      * a typed query → OUR video results from BOTH pipes' search endpoints (/v1/discover/search for
@@ -8154,12 +8215,14 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                     searchDialogId = dialogId;
                     searchObject = (TLRPC.User) obj;
                 }
+                svipeLogNativeClick(obj);
             } else if (obj instanceof TLRPC.Chat) {
                 dialogId = -((TLRPC.Chat) obj).id;
                 if (!onlySelect) {
                     searchDialogId = dialogId;
                     searchObject = (TLRPC.Chat) obj;
                 }
+                svipeLogNativeClick(obj);
             } else if (obj instanceof TLRPC.EncryptedChat) {
                 dialogId = DialogObject.makeEncryptedDialogId(((TLRPC.EncryptedChat) obj).id);
                 if (!onlySelect) {

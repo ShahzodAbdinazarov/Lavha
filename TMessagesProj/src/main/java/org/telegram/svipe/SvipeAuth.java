@@ -107,6 +107,31 @@ public class SvipeAuth {
         authChain(account, finish);
     }
 
+    /**
+     * {@link #ensureToken} with ONE retry, for the surfaces whose only alternative is an empty screen.
+     *
+     * <p>The auth chain has three legs (refresh, bot web-app, legacy /start) and each can come up
+     * empty for reasons that are gone a second later: the process just started and MTProto has not
+     * connected, the network flipped, a leg hit its deadline. A single "no" used to leave the Video
+     * tab, the shorts grid and Music BLANK UNTIL THE APP WAS KILLED — measured on a device whose
+     * refresh token was valid the whole time, whose access token had been expired for 25 hours, and
+     * where one manual POST to /v1/auth/refresh answered 200 straight away.
+     *
+     * <p>Exactly one retry: a chain that fails twice, seconds apart, is not a flap.
+     */
+    public static void ensureTokenRetrying(int account, TokenCallback cb) {
+        ensureToken(account, token -> {
+            if (token != null) {
+                cb.run(token);
+                return;
+            }
+            AndroidUtilities.runOnUIThread(() -> ensureToken(account, cb), AUTH_RETRY_DELAY_MS);
+        });
+    }
+
+    /** Long enough for a flapping network or a cold MTProto to settle, short enough to feel instant. */
+    private static final long AUTH_RETRY_DELAY_MS = 2500;
+
     private static void authChain(int account, TokenCallback cb) {
         final long deadlineAt = System.currentTimeMillis() + CHAIN_DEADLINE_MS;
         refreshToken(account, refreshed -> {
