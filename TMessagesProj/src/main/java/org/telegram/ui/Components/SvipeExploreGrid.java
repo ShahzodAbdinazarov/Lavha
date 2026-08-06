@@ -148,7 +148,6 @@ public class SvipeExploreGrid extends RecyclerListView {
      * (that is the shape Telegram stores), and three 16:9 cards per row are too small to read a title
      * under. The span count is switched on the layout manager when a film category is entered.
      */
-    private static final int MOVIE_SPAN_COUNT = 2;
     private static final int MOVIE_PAGE_SIZE = 30;
     /** The app-start warm-up is offered to the grid once per instance, on its first browse load. */
     private boolean warmTried;
@@ -283,10 +282,12 @@ public class SvipeExploreGrid extends RecyclerListView {
         boolean resolving;
 
         GridItem(SvipeDiscover.Item ref) {
-            // A film poster IS 16:9, but it renders as one of two film cards, not as a full-span
-            // video card — so it must never inherit the landscape-means-wide rule.
-            this(ref, ref != null && !(ref instanceof SvipeMovies.PosterRef)
-                    && !(ref instanceof SvipeMovies.SeriesRef) && ref.isLandscape());
+            // Films and shows take a full row, the same as the long-video card on the unfiltered
+            // feed. They used to sit two-up, which made a shelf look like a different app from the
+            // tab it was opened from — the poster is 16:9 either way, so one per row costs nothing
+            // and the whole Video tab reads as one thing.
+            this(ref, ref != null && (ref instanceof SvipeMovies.PosterRef
+                    || ref instanceof SvipeMovies.SeriesRef || ref.isLandscape()));
         }
 
         /** The film behind a poster reference, or null for an ordinary video tile/card. */
@@ -501,9 +502,9 @@ public class SvipeExploreGrid extends RecyclerListView {
         loadingLongs = false;
         loadingSingle = false;
         nextOffset = 0;
-        final boolean cardShelf = category != null
-                && (category.film || "serial".equals(category.slug));
-        layoutManager.setSpanCount(cardShelf ? MOVIE_SPAN_COUNT : SPAN_COUNT);
+        // One span count for every shelf: film cards are full-row now, so there is nothing left for a
+        // second grid shape to do.
+        layoutManager.setSpanCount(SPAN_COUNT);
         if (category == null) {
             pageLoader = null;
         } else if ("serial".equals(category.slug)) {
