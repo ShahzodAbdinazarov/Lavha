@@ -54,4 +54,36 @@ public final class SvipeVibePlan {
     public static boolean handsOffToVibe(boolean hasSvipeQueue, boolean exhausted, boolean hasSeedTrack) {
         return hasSvipeQueue && !exhausted && hasSeedTrack;
     }
+
+    /** How close to the end of a queue playback gets before the next page is fetched. */
+    public static final int EXTEND_WHEN_LEFT = 4;
+
+    /**
+     * Whether a queue should fetch more music now.
+     *
+     * <p>The rule is the same for every Svipe queue, and that is the point. A vibe queue always paged
+     * ahead while there were still four tracks to play; a finite list (favourites, a search) instead
+     * waited for its last track to finish and only then asked — a gap of silence at exactly the moment
+     * the music was supposed to flow on. So a finite list pages ahead too, on the same distance, and
+     * the listener cannot tell where their own list ended.
+     *
+     * @param listSize      entries currently queued
+     * @param playingIndex  index of the playing entry, or negative when it isn't in this queue
+     * @param selfPaging    whether this queue already pages itself (a vibe, or a list that has begun
+     *                      its continuation) — a finite list that has not is still allowed to start
+     * @param endReached    whether the backend has said there is nothing more. Only meaningful for a
+     *                      self-paging queue: a finite list is constructed "ended" so that nothing
+     *                      pages it, and beginning a continuation is precisely what lifts that.
+     * @param loading       whether a page is already in flight
+     */
+    public static boolean shouldFetchMore(int listSize, int playingIndex, boolean selfPaging,
+                                          boolean endReached, boolean loading) {
+        if (loading || (selfPaging && endReached)) {
+            return false;
+        }
+        if (playingIndex < 0) {
+            return false;
+        }
+        return listSize - 1 - playingIndex <= EXTEND_WHEN_LEFT;
+    }
 }

@@ -1,5 +1,7 @@
 package org.telegram.svipe;
 
+import android.text.TextUtils;
+
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -198,13 +200,26 @@ public class SvipeMusic {
     }
 
     public static void vibe(int account, String cursor, Long seedChannelId, Integer seedMessageId, TracksCallback cb) {
+        vibe(account, cursor, seedChannelId, seedMessageId, null, cb);
+    }
+
+    /**
+     * @param seedKeys "channelId:messageId" of every track a finite list contributed, when the vibe
+     *                 continues a whole playlist rather than one song. The backend builds its
+     *                 retrieval vector from all of them, so the continuation sounds like the list.
+     *                 Takes precedence over the single seed; null or empty means "no list".
+     */
+    public static void vibe(int account, String cursor, Long seedChannelId, Integer seedMessageId,
+                            List<String> seedKeys, TracksCallback cb) {
         StringBuilder path = new StringBuilder("/v1/music/vibe");
         char sep = '?';
         if (cursor != null && !cursor.isEmpty()) {
             path.append(sep).append("cursor=").append(urlEncode(cursor));
             sep = '&';
         }
-        if (seedChannelId != null && seedMessageId != null) {
+        if (seedKeys != null && !seedKeys.isEmpty()) {
+            path.append(sep).append("seeds=").append(urlEncode(TextUtils.join(",", seedKeys)));
+        } else if (seedChannelId != null && seedMessageId != null) {
             path.append(sep).append("seed_channel_id=").append(seedChannelId)
                 .append("&seed_message_id=").append(seedMessageId);
         }

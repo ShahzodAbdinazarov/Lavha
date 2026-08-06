@@ -57,11 +57,14 @@ public class SvipeMusicQueue extends MessagesController.SavedMusicList {
     private static boolean onPlaylistEnded(MessageObject last) {
         SvipeMusicQueue q = getActive();
         SvipeMusic.Track t = q == null ? null : q.trackFor(last);
-        boolean exhausted = q != null && q.infinite && q.endReached;
+        boolean exhausted = q != null && (q.infinite || q.continuing) && q.endReached;
         if (!SvipeVibePlan.handsOffToVibe(q != null, exhausted, t != null)) {
             return false;
         }
-        SvipeVibe.start(q.account, t, false, null, null);
+        // Reached only when the continuation never arrived — a page load that failed, or a list too
+        // short to have crossed the prefetch mark. Seed it on the whole list all the same: what should
+        // follow a favourites list is decided by the list, not by whichever track it happened to end on.
+        SvipeVibe.startFromList(q.account, q.seedKeys(), t, null);
         return true;
     }
 
@@ -80,6 +83,12 @@ public class SvipeMusicQueue extends MessagesController.SavedMusicList {
     private Long seedChannelId;
     private Integer seedMessageId;
     private boolean loadFailed;
+    /**
+     * Set once a finite list has started pulling a vibe continuation onto its own end. From then on
+     * it pages like a vibe queue — same cursor, same "4 tracks left" trigger — so the listener never
+     * hears the seam between the list they chose and the music that follows it.
+     */
+    private boolean continuing;
 
     private final HashMap<Integer, SvipeMusic.Track> trackBySyntheticId = new HashMap<>();
     private final HashSet<String> queuedKeys = new HashSet<>();
@@ -137,7 +146,7 @@ public class SvipeMusicQueue extends MessagesController.SavedMusicList {
 
     public void setCursor(String cursor) {
         this.nextCursor = cursor;
-        if (infinite && cursor == null) {
+        if ((infinite || continuing) && cursor == null) {
             endReached = true;
         }
     }
@@ -248,29 +257,58 @@ public class SvipeMusicQueue extends MessagesController.SavedMusicList {
         return ok;
     }
 
-    /** Fetches the next vibe page when playback nears the end of the queue. */
+    /**
+     * Fetches the next page when playback nears the end of the queue.
+     *
+     * <p>A finite list (favourites, a search) does this too. It used to wait until its last track had
+     * finished and only then ask, which left a gap of silence exactly where the music should have
+     * flowed on — and it seeded that request with the last track alone, so a five-artist favourites
+     * list continued as one artist. Now the whole list seeds the continuation, and it is fetched
+     * while there is still music playing. The decision itself lives in {@link SvipeVibePlan}.
+     */
     public void maybeExtend(MessageObject playing) {
-        if (!infinite || endReached || loading) {
+        if (!SvipeVibePlan.shouldFetchMore(
+                list.size(), list.indexOf(playing), infinite || continuing, endReached, loading)) {
             return;
         }
-        int idx = list.indexOf(playing);
-        if (idx < 0) {
-            return;
+        if (!infinite && !continuing) {
+            // A finite queue is constructed already "ended" so nothing tries to page it. Opening the
+            // continuation is what lifts that; the list keeps its own identity in the player (title,
+            // source), it just stops falling silent at the bottom.
+            continuing = true;
+            endReached = false;
         }
-        if (list.size() - 1 - idx <= 4) {
-            load();
+        load();
+    }
+
+    /**
+     * The keys of every catalog track in this queue, newest first, for seeding a continuation on the
+     * whole list. Newest first because a long list is capped server-side: what the listener queued
+     * most recently is the better description of what they want next.
+     */
+    private ArrayList<String> seedKeys() {
+        ArrayList<String> keys = new ArrayList<>();
+        for (int i = list.size() - 1; i >= 0; i--) {
+            SvipeMusic.Track t = trackBySyntheticId.get(list.get(i).getId());
+            if (t != null && !keys.contains(t.key())) {
+                keys.add(t.key());
+            }
         }
+        return keys;
     }
 
     /** Called by MediaController.loadMoreMusic() (AudioPlayerAlert scroll) and maybeExtend(). */
     @Override
     public void load() {
-        if (loading || endReached || !infinite) {
+        if (loading || endReached || (!infinite && !continuing)) {
             return;
         }
         loading = true;
         loadFailed = false;
-        SvipeMusic.vibe(account, nextCursor, seedChannelId, seedMessageId, (items, recId, cursor, error) -> {
+        // A continuing finite list seeds on all of itself; a vibe queue keeps riding its own cursor,
+        // which already carries whatever seeded it.
+        final ArrayList<String> seeds = continuing && nextCursor == null ? seedKeys() : null;
+        SvipeMusic.vibe(account, nextCursor, seedChannelId, seedMessageId, seeds, (items, recId, cursor, error) -> {
             if (items == null || items.isEmpty()) {
                 loading = false;
                 loadFailed = error != null;

@@ -51,15 +51,33 @@ public class SvipeVibe {
      */
     public static void start(int account, SvipeMusic.Track seed, boolean includeSeed,
                              MessageObject resumeFrom, Callback cb) {
+        start(account, seed, includeSeed, resumeFrom, null, cb);
+    }
+
+    /**
+     * Starts a vibe seeded by a whole list — what a finite queue (favourites, a search) should flow
+     * into when it runs out. The list decides what comes next; the track that happened to be last is
+     * only carried so the queue still has a catalog identity to report events against.
+     *
+     * @param seedKeys "channelId:messageId" of every catalog track the list held
+     */
+    public static void startFromList(int account, java.util.List<String> seedKeys,
+                                     SvipeMusic.Track last, Callback cb) {
+        start(account, last, false, null, seedKeys, cb);
+    }
+
+    private static void start(int account, SvipeMusic.Track seed, boolean includeSeed,
+                              MessageObject resumeFrom, java.util.List<String> seedKeys, Callback cb) {
         if (inFlight) {
             done(cb, false);
             return;
         }
+        final boolean fromList = seedKeys != null && !seedKeys.isEmpty();
         final boolean seeded = seed != null;
         final boolean openOnSeed = seeded && includeSeed;
         inFlight = true;
         SvipeMusic.vibe(account, null, seeded ? seed.channelId : null, seeded ? seed.messageId : null,
-                (items, recId, cursor, error) -> {
+                seedKeys, (items, recId, cursor, error) -> {
             if (items == null || items.isEmpty()) {
                 inFlight = false;
                 done(cb, false);
@@ -73,9 +91,13 @@ public class SvipeVibe {
                     seeded ? SvipeMusicQueue.SOURCE_SEED : SvipeMusicQueue.SOURCE_VIBE,
                     LocaleController.getString(R.string.MusicMyVibe), true);
             queue.recommendationId = recId;
-            if (seeded) {
+            if (seeded && !fromList) {
                 // The seed rides the cursor too, so every page this queue pulls later stays on the same
                 // wave instead of silently degrading into the generic vibe at track six.
+                //
+                // Never when a list seeded this: the cursor already carries every one of those seeds,
+                // and a single seed sent beside it would OUTRANK the cursor server-side — page two
+                // would narrow back down to one track, which is the bug this whole path exists to fix.
                 queue.setVibeSeed(seed.channelId, seed.messageId);
             }
             queue.setCursor(cursor);

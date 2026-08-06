@@ -95,4 +95,47 @@ public class SvipeVibePlanTest {
     public void noQueueAndNoTrackDoesNotHandOff() {
         assertFalse(SvipeVibePlan.handsOffToVibe(false, false, false));
     }
+
+    /* ---------------- shouldFetchMore ---------------- */
+
+    @Test
+    public void vibeQueuePagesAheadWithFourLeft() {
+        // 10 entries, playing #5 -> four still to come.
+        assertTrue(SvipeVibePlan.shouldFetchMore(10, 5, true, false, false));
+        assertFalse(SvipeVibePlan.shouldFetchMore(10, 4, true, false, false));
+    }
+
+    @Test
+    public void finiteListPagesAheadOnTheSameDistance() {
+        // The bug: a favourites list used to wait for its last track to END before asking for more,
+        // so the music stopped for as long as the request took. It now fetches where a vibe does.
+        // selfPaging=false and endReached=true is exactly how a finite queue is constructed.
+        assertTrue(SvipeVibePlan.shouldFetchMore(10, 5, false, true, false));
+    }
+
+    @Test
+    public void aFinishedVibeQueueStopsAsking() {
+        // Once the backend says there is nothing more, asking again puts the same question to the
+        // same empty answer.
+        assertFalse(SvipeVibePlan.shouldFetchMore(10, 9, true, true, false));
+    }
+
+    @Test
+    public void neverTwoRequestsAtOnce() {
+        assertFalse(SvipeVibePlan.shouldFetchMore(10, 9, true, false, true));
+        assertFalse(SvipeVibePlan.shouldFetchMore(10, 9, false, true, true));
+    }
+
+    @Test
+    public void ignoresATrackThatIsNotInThisQueue() {
+        // indexOf miss: playback moved to another queue, or the entry was dropped.
+        assertFalse(SvipeVibePlan.shouldFetchMore(10, -1, true, false, false));
+    }
+
+    @Test
+    public void aShortListFetchesImmediately() {
+        // Three favourites: the listener is already inside the prefetch window on track one, so the
+        // continuation is on its way before the first song ends.
+        assertTrue(SvipeVibePlan.shouldFetchMore(3, 0, false, true, false));
+    }
 }
