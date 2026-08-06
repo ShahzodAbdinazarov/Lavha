@@ -1480,7 +1480,8 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
                     if (chat != null) {
                         dialogBotVerificationIcon = DialogObject.getBotVerificationIcon(chat);
                         drawMusicBadge = ChatObject.isChannel(chat) && !chat.megagroup
-                                && org.telegram.svipe.SvipeMusicIndex.isIndexed(chat.id);
+                                && org.telegram.svipe.SvipeMusicIndex.isIndexed(
+                        chat.id, ChatObject.getPublicUsername(chat));
                         if (chat.scam) {
                             drawScam = 1;
                             Theme.dialogs_scamDrawable.checkText();

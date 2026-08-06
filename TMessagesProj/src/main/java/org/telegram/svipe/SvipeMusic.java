@@ -642,30 +642,35 @@ public class SvipeMusic {
 
     /** All channel ids currently indexed for music — SvipeMusicIndex caches this for the ♪ badge. */
     public interface IndexedIdsCallback {
-        void onResult(java.util.List<Long> ids);
+        /**
+         * @param usernames channels the server has seen but could not resolve to an id — a
+         *                  submission that never went through. Without them those channels look
+         *                  unseen and get sent in again.
+         */
+        void onResult(java.util.List<Long> ids, java.util.List<String> usernames);
     }
 
     /**
-     * Every channel our index holds video from — what the badge in a chat list means.
+     * Every channel our system has already LOOKED AT — kept, rejected or failed alike.
      *
-     * <p>Not the music-only set it used to be: the note badge said "we carry this channel's songs",
-     * a narrower claim than a badge on a channel row should make. The music set still exists behind
-     * {@code /v1/music/channels/indexed} for anything that genuinely means music.
+     * <p>Wider than the music-only set the note badge used, and wider than "we have video from it"
+     * on purpose. The useful half is the absence: an unmarked channel is one nobody has sent us, and
+     * marking only successes would make a rejected channel look unseen and be submitted forever.
      */
     public static void indexedChannelIds(int account, IndexedIdsCallback cb) {
-        withToken(account, () -> cb.onResult(null),
+        withToken(account, () -> cb.onResult(null, null),
             token -> indexedChannelIdsRequest(account, token, false, cb));
     }
 
     private static void indexedChannelIdsRequest(int account, String token, boolean retried, IndexedIdsCallback cb) {
         SvipeApi.get("/v1/channels/indexed", token, (res, code, err) -> {
             if (code == 401 && !retried) {
-                reauth(account, () -> cb.onResult(null),
+                reauth(account, () -> cb.onResult(null, null),
                     t2 -> indexedChannelIdsRequest(account, t2, true, cb));
                 return;
             }
             if (res == null) {
-                cb.onResult(null);
+                cb.onResult(null, null);
                 return;
             }
             java.util.List<Long> out = new java.util.ArrayList<>();
@@ -675,7 +680,17 @@ public class SvipeMusic {
                     out.add(arr.optLong(i));
                 }
             }
-            cb.onResult(out);
+            java.util.List<String> names = new java.util.ArrayList<>();
+            JSONArray unames = res.optJSONArray("usernames");
+            if (unames != null) {
+                for (int i = 0; i < unames.length(); i++) {
+                    String u = unames.optString(i, null);
+                    if (u != null && !u.isEmpty()) {
+                        names.add(u.toLowerCase(java.util.Locale.ROOT));
+                    }
+                }
+            }
+            cb.onResult(out, names);
         });
     }
 

@@ -446,7 +446,8 @@ public class ProfileSearchCell extends BaseCell implements NotificationCenter.No
         } else if (chat != null) {
             dialog_id = -chat.id;
             drawMusicBadge = ChatObject.isChannel(chat) && !chat.megagroup
-                    && org.telegram.svipe.SvipeMusicIndex.isIndexed(chat.id);
+                    && org.telegram.svipe.SvipeMusicIndex.isIndexed(
+                    chat.id, ChatObject.getPublicUsername(chat));
             drawCheck = chat.verified;
             if (chat.monoforum) {
                 TLRPC.Chat mfChat = MessagesController.getInstance(currentAccount).getChat(chat.linked_monoforum_id);

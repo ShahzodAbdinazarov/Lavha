@@ -30,9 +30,12 @@ public final class SvipeMusicIndex {
 
     private static final String PREFS = "svipe_indexed_channels";
     private static final String KEY_IDS = "indexed_ids";
+    private static final String KEY_NAMES = "indexed_usernames";
     private static final long REFRESH_INTERVAL = 6 * 60 * 60 * 1000L; // 6h
 
     private static volatile Set<Long> ids;      // null until first loaded (disk or network)
+    /** Channels the server saw but never resolved to an id — matched on username instead. */
+    private static volatile Set<String> usernames = new HashSet<>();
     private static volatile boolean loading;
     private static long lastFetch;
 
@@ -40,13 +43,28 @@ public final class SvipeMusicIndex {
         return ApplicationLoader.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    /** True when Svipe has indexed this channel. Never blocks; false until the set is available. */
+    /** True when Svipe has already looked at this channel. Never blocks; false until the set loads. */
     public static boolean isIndexed(long channelId) {
         Set<Long> s = ids;
         if (s == null) {
             s = loadFromDisk();
         }
         return s.contains(channelId);
+    }
+
+    /**
+     * The same question for a channel we only know by name — a submission the server never managed to
+     * resolve. Without this those channels look unseen and get sent in again and again.
+     */
+    public static boolean isIndexed(long channelId, String username) {
+        if (isIndexed(channelId)) {
+            return true;
+        }
+        if (username == null || username.isEmpty()) {
+            return false;
+        }
+        loadFromDisk();
+        return usernames.contains(username.toLowerCase(java.util.Locale.ROOT));
     }
 
     private static synchronized Set<Long> loadFromDisk() {
@@ -61,6 +79,15 @@ public final class SvipeMusicIndex {
                 for (int i = 0; i < arr.length(); i++) {
                     s.add(arr.getLong(i));
                 }
+            }
+            String rawNames = prefs().getString(KEY_NAMES, null);
+            if (rawNames != null) {
+                Set<String> n = new HashSet<>();
+                JSONArray arr = new JSONArray(rawNames);
+                for (int i = 0; i < arr.length(); i++) {
+                    n.add(arr.getString(i));
+                }
+                usernames = n;
             }
         } catch (Exception ignore) {
         }
@@ -77,7 +104,7 @@ public final class SvipeMusicIndex {
         Set<Long> next = new HashSet<>(s);
         next.add(channelId);
         ids = next;
-        persist(next);
+        persist(next, usernames);
         notifyUpdated();
     }
 
@@ -90,28 +117,37 @@ public final class SvipeMusicIndex {
         }
         loading = true;
         lastFetch = now;
-        SvipeMusic.indexedChannelIds(account, list -> AndroidUtilities.runOnUIThread(() -> {
+        SvipeMusic.indexedChannelIds(account, (list, names) -> AndroidUtilities.runOnUIThread(() -> {
             loading = false;
             if (list == null) {
                 return;
             }
             Set<Long> next = new HashSet<>(list);
-            boolean changed = !next.equals(ids);
+            Set<String> nextNames = names == null ? new HashSet<>() : new HashSet<>(names);
+            boolean changed = !next.equals(ids) || !nextNames.equals(usernames);
             ids = next;
-            persist(next);
+            usernames = nextNames;
+            persist(next, nextNames);
             if (changed) {
                 notifyUpdated();
             }
         }));
     }
 
-    private static void persist(Set<Long> s) {
+    private static void persist(Set<Long> s, Set<String> names) {
         try {
             JSONArray arr = new JSONArray();
             for (Long id : s) {
                 arr.put((long) id);
             }
-            prefs().edit().putString(KEY_IDS, arr.toString()).apply();
+            JSONArray narr = new JSONArray();
+            for (String n : names) {
+                narr.put(n);
+            }
+            prefs().edit()
+                    .putString(KEY_IDS, arr.toString())
+                    .putString(KEY_NAMES, narr.toString())
+                    .apply();
         } catch (Exception ignore) {
         }
     }
