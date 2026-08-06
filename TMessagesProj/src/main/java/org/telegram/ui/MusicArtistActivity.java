@@ -26,11 +26,13 @@ import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.svipe.SvipeMusicResolver;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.GraySectionCell;
 import org.telegram.ui.Cells.SharedAudioCell;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.ProfileActionsView;
 import org.telegram.ui.Components.RadialProgressView;
 import org.telegram.ui.Components.RecyclerListView;
+import org.telegram.ui.Components.SvipeSongCell;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -56,6 +58,12 @@ public class MusicArtistActivity extends ProfileStyleActivity implements Notific
     /** Songs whose default track resolved to a real audio message — the only ones that can be drawn/played. */
     private final ArrayList<SvipeMusic.Song> songs = new ArrayList<>();
     private final HashMap<Long, MessageObject> moBySongId = new HashMap<>();
+    /**
+     * Deezer top tracks by this artist that we do not host, drawn under the songs we do. They round the
+     * page out into the artist rather than our slice of them, and tapping one opens the song page,
+     * which records the demand so the acquire worker fetches it.
+     */
+    private final ArrayList<SvipeMusic.Song> moreSongs = new ArrayList<>();
     private String artistPhotoUrl;   // Deezer artist photo shown as the avatar (null -> initials tile)
 
     public MusicArtistActivity(long artistId, String initialName) {
@@ -207,10 +215,17 @@ public class MusicArtistActivity extends ProfileStyleActivity implements Notific
 
     @Override
     protected void onListItemClick(View view, int position) {
-        int idx = position;
-        if (idx >= 0 && idx < songs.size()) {
-            SvipeMusic.Song s = songs.get(idx);
+        if (position >= 0 && position < songs.size()) {
+            SvipeMusic.Song s = songs.get(position);
             presentFragment(new MusicSongActivity(s.id, s.title));
+            return;
+        }
+        // Past the hosted songs and their header sits the Deezer tail. Its rows open the same song page
+        // — with a negative id, which is what tells the backend this is a track to go and fetch.
+        int idx = position - songs.size() - 1;
+        if (idx >= 0 && idx < moreSongs.size()) {
+            SvipeMusic.Song s = moreSongs.get(idx);
+            presentFragment(new MusicSongActivity(s.id, s.shownTitle()));
         }
     }
 
@@ -240,6 +255,8 @@ public class MusicArtistActivity extends ProfileStyleActivity implements Notific
                 queue.appendResolved(tracks, new HashMap<>(resolved));
                 songs.clear();
                 moBySongId.clear();
+                moreSongs.clear();
+                moreSongs.addAll(result.moreSongs);
                 for (SvipeMusic.Song s : ordered) {
                     MessageObject mo = queue.messageForKey(s.defaultTrack.key());
                     if (mo != null) {
@@ -250,7 +267,7 @@ public class MusicArtistActivity extends ProfileStyleActivity implements Notific
                 showProgress(false);
                 bindHeader();
                 refreshFavouriteAction();   // a sync may have landed while the page was in flight
-                if (songs.isEmpty()) {
+                if (songs.isEmpty() && moreSongs.isEmpty()) {
                     showMessage(getString(R.string.NoResult));
                 }
                 if (adapter != null) {
@@ -325,32 +342,62 @@ public class MusicArtistActivity extends ProfileStyleActivity implements Notific
 
     private class ListAdapter extends RecyclerListView.SelectionAdapter {
 
+        private static final int VIEW_HOSTED = 0;
+        private static final int VIEW_MORE_HEADER = 1;
+        private static final int VIEW_MORE = 2;
+
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return true;
+            return holder.getItemViewType() != VIEW_MORE_HEADER;
         }
 
         @Override
         public int getItemCount() {
-            return songs.size();
+            return songs.size() + (moreSongs.isEmpty() ? 0 : moreSongs.size() + 1);
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            if (position < songs.size()) {
+                return VIEW_HOSTED;
+            }
+            return position == songs.size() ? VIEW_MORE_HEADER : VIEW_MORE;
         }
 
         @NonNull
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull android.view.ViewGroup parent, int viewType) {
-            View view = new SharedAudioCell(parent.getContext(), getResourceProvider());
+            final View view;
+            if (viewType == VIEW_MORE_HEADER) {
+                view = new GraySectionCell(parent.getContext(), getResourceProvider());
+            } else if (viewType == VIEW_MORE) {
+                // The same row music search uses for a song we don't host: cover, name, artist, "+".
+                // Null delegate — there is nothing to play until it has been acquired.
+                view = new SvipeSongCell(parent.getContext(), getResourceProvider(), null);
+            } else {
+                view = new SharedAudioCell(parent.getContext(), getResourceProvider());
+            }
             view.setLayoutParams(new RecyclerView.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
             return new RecyclerListView.Holder(view);
         }
 
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
+            int type = holder.getItemViewType();
+            if (type == VIEW_MORE_HEADER) {
+                ((GraySectionCell) holder.itemView).setText(getString(R.string.SvipeMusicMoreSongs));
+                return;
+            }
+            if (type == VIEW_MORE) {
+                ((SvipeSongCell) holder.itemView).bind(moreSongs.get(position - songs.size() - 1));
+                return;
+            }
             SvipeMusic.Song s = songs.get(position);
-                MessageObject mo = moBySongId.get(s.id);
-                SharedAudioCell cell = (SharedAudioCell) holder.itemView;
-                if (mo != null) {
-                    cell.setMessageObject(mo, position != getItemCount() - 1);
-                }
+            MessageObject mo = moBySongId.get(s.id);
+            if (mo != null) {
+                // A divider under every hosted row but the last, where the tail's own header takes over.
+                ((SharedAudioCell) holder.itemView).setMessageObject(mo, position != songs.size() - 1);
+            }
         }
     }
 }

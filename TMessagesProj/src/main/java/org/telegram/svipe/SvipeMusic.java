@@ -132,6 +132,13 @@ public class SvipeMusic {
         public int songCount;
         public final ArrayList<Song> songs = new ArrayList<>();
         public String nextOffset;
+        /**
+         * Deezer top tracks by this artist that we do not host, listed after {@link #songs} so the page
+         * shows the artist rather than only our slice of them. Sent only with the LAST page. These are
+         * placeholders (playable=false): tapping one opens the song page, which records the demand and
+         * has the acquire worker fetch it — the same path a tapped Deezer search result already takes.
+         */
+        public final ArrayList<Song> moreSongs = new ArrayList<>();
     }
 
     /** A song on the "most listened" list: a Song carrying this user's cumulative listen-time
@@ -708,6 +715,7 @@ public class SvipeMusic {
             p.songCount = a.songCount;
             parseSongs(res.optJSONArray("songs"), p.songs);
             p.nextOffset = res.isNull("next_offset") ? null : String.valueOf(res.optInt("next_offset"));
+            parseSongs(res.optJSONArray("more_songs"), p.moreSongs);
             cb.onResult(p, null);
         });
     }

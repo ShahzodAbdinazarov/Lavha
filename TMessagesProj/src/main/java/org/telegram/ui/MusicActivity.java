@@ -69,6 +69,7 @@ import org.telegram.ui.Cells.GraySectionCell;
 import org.telegram.ui.Cells.SharedAudioCell;
 import org.telegram.ui.Cells.UserCell;
 import org.telegram.ui.Components.AudioPlayerAlert;
+import org.telegram.ui.Components.SvipeSongCell;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.FragmentContextView;
@@ -2133,11 +2134,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
 
     /** Same underlying channel post as this catalog track, whichever queue minted the playing copy. */
     private boolean isSamePlayingTrack(MessageObject playing, SvipeMusic.Track t) {
-        if (playing == null || t == null) {
-            return false;
-        }
-        long dialogId = playing.getDialogId();
-        return dialogId < 0 && t.channelId != 0 && -dialogId == t.channelId && playing.getRealId() == t.messageId;
+        return SvipeSongCell.isSamePlayingTrack(playing, t);
     }
 
     private void notifySearchRows() {
@@ -2513,7 +2510,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             } else if (viewType == ROW_TRACK) {
                 view = new TrackCell(context);
             } else if (viewType == ROW_SONG) {
-                view = new SongCell(context);
+                view = new SvipeSongCell(context, getResourceProvider(), MusicActivity.this::playSongInline);
             } else if (viewType == ROW_ARTIST) {
                 view = new ArtistCell(context);
             } else if (viewType == ROW_RECENT_HEADER) {
@@ -2555,7 +2552,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             } else if (row.type == ROW_TRACK) {
                 ((TrackCell) holder.itemView).bind(row.track);
             } else if (row.type == ROW_SONG) {
-                ((SongCell) holder.itemView).bind(row.song);
+                ((SvipeSongCell) holder.itemView).bind(row.song);
             } else if (row.type == ROW_ARTIST) {
                 ((ArtistCell) holder.itemView).bind(row.artist);
             } else if (row.type == ROW_RECENT_HEADER) {
@@ -2586,115 +2583,6 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     // (+variant) + artist line + a version-count badge. Tapping the cover plays the song inline; tapping
     // anywhere else on the row opens the version picker (MusicSongActivity). A trackless Deezer
     // placeholder has no playable track, so it shows no play button and its cover is muted.
-    private class SongCell extends FrameLayout {
-        private final FrameLayout cover;
-        private final TextView letterView;
-        private final BackupImageView coverImage;
-        private final ImageView playOverlay;
-        private final TextView titleView;
-        private final TextView subtitleView;
-        private final TextView badgeView;
-        private SvipeMusic.Song song;
-
-        SongCell(Context context) {
-            super(context);
-            setPadding(dp(16), dp(6), dp(12), dp(6));
-
-            cover = new FrameLayout(context);
-            // Circular (radius = half the 48dp cover) — deliberately unlike the rounded-SQUARE artist art.
-            cover.setBackground(Theme.createRoundRectDrawable(dp(24), getThemedColor(Theme.key_windowBackgroundGray)));
-            addView(cover, LayoutHelper.createFrame(48, 48, Gravity.LEFT | Gravity.CENTER_VERTICAL));
-
-            letterView = new TextView(context);
-            letterView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
-            letterView.setTypeface(AndroidUtilities.bold());
-            letterView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
-            letterView.setGravity(Gravity.CENTER);
-            cover.addView(letterView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
-            // The real Deezer album cover, drawn over the letter tile once a song is enriched; while it
-            // is transparent (unset / loading) the letter shows through, so an unenriched row is unchanged.
-            coverImage = new BackupImageView(context);
-            coverImage.setRoundRadius(dp(24));
-            cover.addView(coverImage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
-            // Inline play/pause control over the circular cover; its own click plays the song inline while
-            // the rest of the row still opens the song page.
-            playOverlay = new ImageView(context);
-            playOverlay.setScaleType(ImageView.ScaleType.CENTER);
-            playOverlay.setBackground(Theme.createRoundRectDrawable(dp(24), 0x66000000));
-            playOverlay.setColorFilter(new PorterDuffColorFilter(0xFFFFFFFF, PorterDuff.Mode.MULTIPLY));
-            playOverlay.setOnClickListener(v -> {
-                if (song != null) {
-                    playSongInline(song);
-                }
-            });
-            cover.addView(playOverlay, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
-            LinearLayout texts = new LinearLayout(context);
-            texts.setOrientation(LinearLayout.VERTICAL);
-            addView(texts, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 76, 0, 56, 0));
-
-            titleView = new TextView(context);
-            titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
-            titleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
-            titleView.setSingleLine(true);
-            titleView.setEllipsize(TextUtils.TruncateAt.END);
-            texts.addView(titleView);
-
-            subtitleView = new TextView(context);
-            subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-            subtitleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
-            subtitleView.setSingleLine(true);
-            subtitleView.setEllipsize(TextUtils.TruncateAt.END);
-            texts.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
-
-            badgeView = new TextView(context);
-            badgeView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-            badgeView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText2));
-            badgeView.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
-            addView(badgeView, LayoutHelper.createFrame(52, LayoutHelper.MATCH_PARENT, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
-        }
-
-        void bind(SvipeMusic.Song s) {
-            song = s;
-            String title = s.shownTitle() != null && !s.shownTitle().isEmpty() ? s.shownTitle() : getString(R.string.AudioUnknownTitle);
-            if (s.variantLabel != null && !s.variantLabel.isEmpty()) {
-                title = title + " (" + s.variantLabel + ")";
-            }
-            titleView.setText(title);
-            letterView.setText(title.isEmpty() ? "♪" : title.substring(0, 1).toUpperCase());
-            String artistLine = s.shownArtist();
-            subtitleView.setText(artistLine.isEmpty() ? getString(R.string.AudioUnknownArtist) : artistLine);
-            // A Deezer placeholder (catalog-missing) shows "+" (addable) instead of a version count.
-            badgeView.setText(!s.playable ? "+" : (s.versionCount > 1 ? (s.versionCount + "  ›") : "›"));
-
-            // Playable songs get the inline play button; trackless placeholders are muted (no button).
-            boolean canPlay = s.playable && s.defaultTrack != null;
-            cover.setAlpha(canPlay ? 1f : 0.45f);
-            if (canPlay) {
-                playOverlay.setVisibility(VISIBLE);
-                MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
-                boolean isPlaying = playing != null && isSamePlayingTrack(playing, s.defaultTrack)
-                        && !MediaController.getInstance().isMessagePaused();
-                playOverlay.setImageResource(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play);
-            } else {
-                playOverlay.setVisibility(GONE);
-            }
-
-            // Real Deezer cover (small) when enriched; else clear it so the letter tile shows. Clearing is
-            // required because cells are recycled — a stale cover must not bleed onto an unenriched song.
-            String coverUrl = s.coverSmallUrl != null && !s.coverSmallUrl.isEmpty() ? s.coverSmallUrl
-                    : (s.coverUrl != null && !s.coverUrl.isEmpty() ? s.coverUrl : null);
-            if (coverUrl != null) {
-                coverImage.setVisibility(VISIBLE);
-                coverImage.setImage(ImageLocation.getForPath(coverUrl), "48_48", (Drawable) null, null);
-            } else {
-                coverImage.setImageDrawable(null);
-                coverImage.setVisibility(GONE);
-            }
-        }
-    }
 
     // A canonical artist row (search results): a rounded-SQUARE cover (letter tile + Deezer photo), the
     // artist name, and a song-count status. The square art is deliberately unlike the circular song
