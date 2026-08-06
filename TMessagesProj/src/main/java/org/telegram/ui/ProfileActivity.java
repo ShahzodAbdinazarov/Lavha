@@ -11261,7 +11261,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             final int idx = a;
             // Track the name's live text colour (animates white<->key_profile_title, theme-dependent)
             // so the ♪ badge stays visible in light mode and while the header expands/collapses.
-            svipeMusicBadgeDrawable[a] = new org.telegram.svipe.SvipeCharDrawable().colorSupplier(
+            svipeMusicBadgeDrawable[a] = new org.telegram.svipe.SvipeIndexedBadge().colorSupplier(
                     () -> nameTextView != null && nameTextView[idx] != null
                             ? nameTextView[idx].getTextColor() : Color.WHITE);
         }

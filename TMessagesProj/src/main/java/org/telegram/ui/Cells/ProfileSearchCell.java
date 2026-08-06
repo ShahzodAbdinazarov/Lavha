@@ -990,7 +990,7 @@ public class ProfileSearchCell extends BaseCell implements NotificationCenter.No
 
             if (drawMusicBadge) { // Svipe — ♪ badge just before an indexed channel's name
                 if (svipeMusicBadgeDrawable == null) {
-                    svipeMusicBadgeDrawable = new org.telegram.svipe.SvipeCharDrawable();
+                    svipeMusicBadgeDrawable = new org.telegram.svipe.SvipeIndexedBadge();
                 }
                 svipeMusicBadgeDrawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText, resourcesProvider), PorterDuff.Mode.SRC_IN));
                 int bw = dp(14);

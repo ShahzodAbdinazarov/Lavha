@@ -13,16 +13,22 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * In-memory cache of the channel ids indexed for Svipe music, so ANY channel row — chat list, search
- * result, action bar, profile — can decide whether to draw the ♪ badge synchronously, with no
+ * In-memory cache of the channel ids Svipe has indexed, so ANY channel row — chat list, search
+ * result, action bar, profile — can decide whether to draw the badge synchronously, with no
  * per-channel network call. Backed by SharedPreferences for an instant, correct cold start; refreshed
- * from {@code GET /v1/music/channels/indexed}. The catalog is small (curated), so the whole set fits.
+ * from {@code GET /v1/channels/indexed}. Hundreds of channels, so the whole set fits.
+ *
+ * <p>It used to hold the MUSIC-indexed set and the badge was a ♪. Both widened together: the badge is
+ * now the Reels tab's own mark and means "this channel is in Svipe", which is the thing somebody
+ * scrolling their chat list actually wants to know. The disk key changed with the meaning, so a
+ * device upgrading does not spend six hours showing music channels under a badge that no longer says
+ * music.
  */
 public final class SvipeMusicIndex {
 
     private SvipeMusicIndex() {}
 
-    private static final String PREFS = "svipe_music_index";
+    private static final String PREFS = "svipe_indexed_channels";
     private static final String KEY_IDS = "indexed_ids";
     private static final long REFRESH_INTERVAL = 6 * 60 * 60 * 1000L; // 6h
 
@@ -34,7 +40,7 @@ public final class SvipeMusicIndex {
         return ApplicationLoader.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    /** True when this channel is indexed for music. Never blocks; false until the set is available. */
+    /** True when Svipe has indexed this channel. Never blocks; false until the set is available. */
     public static boolean isIndexed(long channelId) {
         Set<Long> s = ids;
         if (s == null) {

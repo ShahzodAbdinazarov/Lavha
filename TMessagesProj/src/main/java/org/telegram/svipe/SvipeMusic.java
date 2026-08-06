@@ -645,13 +645,20 @@ public class SvipeMusic {
         void onResult(java.util.List<Long> ids);
     }
 
+    /**
+     * Every channel our index holds video from — what the badge in a chat list means.
+     *
+     * <p>Not the music-only set it used to be: the note badge said "we carry this channel's songs",
+     * a narrower claim than a badge on a channel row should make. The music set still exists behind
+     * {@code /v1/music/channels/indexed} for anything that genuinely means music.
+     */
     public static void indexedChannelIds(int account, IndexedIdsCallback cb) {
         withToken(account, () -> cb.onResult(null),
             token -> indexedChannelIdsRequest(account, token, false, cb));
     }
 
     private static void indexedChannelIdsRequest(int account, String token, boolean retried, IndexedIdsCallback cb) {
-        SvipeApi.get("/v1/music/channels/indexed", token, (res, code, err) -> {
+        SvipeApi.get("/v1/channels/indexed", token, (res, code, err) -> {
             if (code == 401 && !retried) {
                 reauth(account, () -> cb.onResult(null),
                     t2 -> indexedChannelIdsRequest(account, t2, true, cb));

@@ -19644,7 +19644,7 @@ public class ChatActivity extends BaseFragment implements
 
     private Drawable svipeMusicBadge() {
         if (svipeMusicBadgeDrawable == null) {
-            Drawable d = new org.telegram.svipe.SvipeCharDrawable();
+            Drawable d = new org.telegram.svipe.SvipeIndexedBadge();
             int sz = AndroidUtilities.dp(14);
             d.setBounds(0, 0, sz, sz);
             d.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_actionBarDefaultTitle), PorterDuff.Mode.SRC_IN));
