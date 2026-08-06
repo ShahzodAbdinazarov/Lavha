@@ -11107,6 +11107,8 @@
     <string name="SvipeNoWatchHistory">No watch history yet</string>
     <string name="SvipeRecentSearches">Recent searches</string>
     <string name="SvipeMusicMoreSongs">More songs</string>
+    <string name="SvipeActorMoreFilms">Other films</string>
+    <string name="SvipeMovieRequested">We\'ll add this film</string>
     <string name="SvipeClearSearchHistory">Clear search history</string>
     <string name="SvipeNoSearchHistory">No recent searches</string>
     <string name="SvipeUnblock">Unblock</string>

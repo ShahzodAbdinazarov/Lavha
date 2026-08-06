@@ -175,6 +175,8 @@
     <string name="SvipeNoWatchHistory">Ko\'rish tarixi hali yo\'q</string>
     <string name="SvipeRecentSearches">So\'nggi qidiruvlar</string>
     <string name="SvipeMusicMoreSongs">Yana qo\'shiqlar</string>
+    <string name="SvipeActorMoreFilms">Boshqa kinolari</string>
+    <string name="SvipeMovieRequested">Bu kinoni qo\'shamiz</string>
     <string name="SvipeClearSearchHistory">Qidiruv tarixini tozalash</string>
     <string name="SvipeNoSearchHistory">So\'nggi qidiruvlar yo\'q</string>
     <string name="SvipeUnblock">Blokdan chiqarish</string>

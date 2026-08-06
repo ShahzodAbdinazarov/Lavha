@@ -274,6 +274,26 @@ public final class SvipeMovies {
         public Actor actor;
         public final List<Movie> movies = new ArrayList<>();
         public Integer nextOffset;
+        /**
+         * The rest of their filmography — films the global index credits them with that we cannot
+         * play. Listed under the ones we can, so the page shows the performer rather than our slice
+         * of them. Empty when the local performer was never linked to a global identity: a name alone
+         * cannot tell two people apart, and a wrong filmography is worse than none.
+         */
+        public final List<Suggestion> alsoIn = new ArrayList<>();
+    }
+
+    /**
+     * A film that exists but that we do not have. {@link #sourceUrl} non-null means we can actually go
+     * and get it, so the row is tappable; the rest are informational, because a tap must never promise
+     * something nothing can deliver.
+     */
+    public static class Suggestion {
+        public String title;
+        public int year;
+        public String qid;
+        public String sourceUrl;
+        public boolean requestable;
     }
 
     public interface CategoriesCallback {
@@ -440,6 +460,7 @@ public final class SvipeMovies {
                     ActorPage p = new ActorPage();
                     p.actor = parseActor(res.optJSONObject("actor"));
                     parseMovies(res.optJSONArray("items"), p.movies);
+                    parseSuggestions(res.optJSONArray("also_in"), p.alsoIn);
                     p.nextOffset = res.isNull("next_offset") ? null : Integer.valueOf(res.optInt("next_offset"));
                     cb.onResult(p, null);
                 });
@@ -582,5 +603,50 @@ public final class SvipeMovies {
         } catch (UnsupportedEncodingException e) {
             return s;
         }
+    }
+
+    private static void parseSuggestions(JSONArray arr, List<Suggestion> out) {
+        if (arr == null) {
+            return;
+        }
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.optJSONObject(i);
+            if (o == null) {
+                continue;
+            }
+            String title = o.optString("title", "");
+            if (title.isEmpty()) {
+                continue;
+            }
+            Suggestion s = new Suggestion();
+            s.title = title;
+            s.year = o.optInt("year");
+            s.qid = o.isNull("qid") ? null : o.optString("qid", null);
+            s.sourceUrl = o.isNull("source_url") ? null : o.optString("source_url", null);
+            s.requestable = o.optBoolean("requestable") && s.sourceUrl != null && !s.sourceUrl.isEmpty();
+            out.add(s);
+        }
+    }
+
+    /**
+     * "Get me this one" — the tap on a film we don't have but could fetch. Records demand only; the
+     * fetch is a worker's job, because a film is a gigabyte. Asking twice raises its queue position
+     * rather than duplicating the work.
+     */
+    public static void requestFilm(int account, Suggestion s, AckCallback cb) {
+        if (s == null || s.sourceUrl == null || s.sourceUrl.isEmpty()) {
+            cb.onResult(false, "not requestable");
+            return;
+        }
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                cb.onResult(false, "auth");
+                return;
+            }
+            String path = "/v1/movies/request?source_url=" + encode(s.sourceUrl)
+                    + (s.title != null && !s.title.isEmpty() ? "&title=" + encode(s.title) : "");
+            SvipeApi.post(path, null, token, (res, code, err) ->
+                    cb.onResult(code >= 200 && code < 300, err));
+        });
     }
 }

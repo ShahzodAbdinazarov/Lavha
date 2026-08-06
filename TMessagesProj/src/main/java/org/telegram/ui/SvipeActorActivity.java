@@ -13,9 +13,11 @@ import org.telegram.messenger.R;
 import org.telegram.svipe.SvipeDiscover;
 import org.telegram.svipe.SvipeMovies;
 import org.telegram.svipe.video.SvipeRefResolver;
+import org.telegram.ui.Cells.GraySectionCell;
 import org.telegram.ui.Cells.SvipeWideVideoCell;
 import org.telegram.ui.Cells.UserCell;
 import org.telegram.ui.Components.AvatarDrawable;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 
@@ -42,6 +44,13 @@ public class SvipeActorActivity extends ProfileStyleActivity {
     private ListAdapter adapter;
     private SvipeMovies.Actor actor;
     private final List<SvipeMovies.Movie> movies = new ArrayList<>();
+    /**
+     * The rest of the filmography, from the global index: films this performer is credited with that we
+     * cannot play. Drawn under the ones we can, so the page is the performer rather than our slice of
+     * them. Only the ones we could actually go and fetch are tappable.
+     */
+    private final List<SvipeMovies.Suggestion> alsoIn = new ArrayList<>();
+    private final java.util.HashSet<String> requested = new java.util.HashSet<>();
     private Integer nextOffset = 0;
     private boolean loading;
 
@@ -84,11 +93,38 @@ public class SvipeActorActivity extends ProfileStyleActivity {
         if (position >= 0 && position < movies.size()) {
             SvipeMovies.Movie m = movies.get(position);
             presentFragment(new SvipeMovieActivity(m));
+            // Endless paging: the filmography of a prolific actor can outrun one page. Only films we
+            // host page — the tail arrives whole, with the last page.
+            if (position >= movies.size() - 3) {
+                load();
+            }
+            return;
         }
-        // Endless paging: the filmography of a prolific actor can outrun one page.
-        if (position >= movies.size() - 3) {
-            load();
+        int idx = position - movies.size() - 1;   // past the tail's own header
+        if (idx >= 0 && idx < alsoIn.size()) {
+            requestFilm(alsoIn.get(idx));
         }
+    }
+
+    /**
+     * Ask for a film we don't have. Only films with a source we can fetch from are tappable, so a tap
+     * never promises something nothing can deliver. The row goes muted immediately and stays that way:
+     * a film is a gigabyte and arrives on the worker's schedule, not while the page is open.
+     */
+    private void requestFilm(SvipeMovies.Suggestion s) {
+        if (s == null || !s.requestable || !requested.add(s.title + "|" + s.year)) {
+            return;
+        }
+        notifyInnerListChanged();
+        SvipeMovies.requestFilm(currentAccount, s, (ok, error) -> AndroidUtilities.runOnUIThread(() -> {
+            if (ok) {
+                BulletinFactory.of(this).createSimpleBulletin(
+                        R.raw.done, LocaleController.getString(R.string.SvipeMovieRequested)).show();
+            } else {
+                requested.remove(s.title + "|" + s.year);
+                notifyInnerListChanged();
+            }
+        }));
     }
 
     private void load() {
@@ -113,6 +149,8 @@ public class SvipeActorActivity extends ProfileStyleActivity {
                         movies.clear();
                     }
                     movies.addAll(page.movies);
+                    alsoIn.clear();
+                    alsoIn.addAll(page.alsoIn);
                     nextOffset = page.nextOffset;
                     notifyListChanged();
                     notifyInnerListChanged();
@@ -155,20 +193,37 @@ public class SvipeActorActivity extends ProfileStyleActivity {
 
     private class ListAdapter extends RecyclerListView.SelectionAdapter {
 
+        private static final int VIEW_FILM = 0;
+        private static final int VIEW_MORE_HEADER = 1;
+        private static final int VIEW_MORE = 2;
+
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return true;
+            return holder.getItemViewType() != VIEW_MORE_HEADER;
         }
 
         @Override
         public int getItemCount() {
-            return movies.size();
+            return movies.size() + (alsoIn.isEmpty() ? 0 : alsoIn.size() + 1);
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            if (position < movies.size()) {
+                return VIEW_FILM;
+            }
+            return position == movies.size() ? VIEW_MORE_HEADER : VIEW_MORE;
         }
 
         @NonNull
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull android.view.ViewGroup parent, int viewType) {
-            View view = new UserCell(parent.getContext(), 6, 0, false, getResourceProvider());
+            final View view;
+            if (viewType == VIEW_MORE_HEADER) {
+                view = new GraySectionCell(parent.getContext(), getResourceProvider());
+            } else {
+                view = new UserCell(parent.getContext(), 6, 0, false, getResourceProvider());
+            }
             view.setLayoutParams(new RecyclerView.LayoutParams(
                     LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
             return new RecyclerListView.Holder(view);
@@ -176,11 +231,32 @@ public class SvipeActorActivity extends ProfileStyleActivity {
 
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
-            SvipeMovies.Movie m = movies.get(position);
+            int type = holder.getItemViewType();
+            if (type == VIEW_MORE_HEADER) {
+                ((GraySectionCell) holder.itemView).setText(
+                        LocaleController.getString(R.string.SvipeActorMoreFilms));
+                return;
+            }
             UserCell cell = (UserCell) holder.itemView;
+            if (type == VIEW_MORE) {
+                SvipeMovies.Suggestion s = alsoIn.get(position - movies.size() - 1);
+                AvatarDrawable avatar = new AvatarDrawable();
+                avatar.setInfo(s.title.hashCode(), s.title, null);
+                cell.setData(null, s.title, s.year > 0 ? String.valueOf(s.year) : "", 0,
+                        position != getItemCount() - 1);
+                cell.avatarImageView.setImageDrawable(avatar);
+                // Muted unless we could actually fetch it — and once asked for, muted again, because
+                // asking twice does nothing and a row that still looks tappable says otherwise.
+                boolean actionable = s.requestable && !requested.contains(s.title + "|" + s.year);
+                cell.setAlpha(actionable ? 1f : 0.5f);
+                return;
+            }
+            SvipeMovies.Movie m = movies.get(position);
             AvatarDrawable avatar = new AvatarDrawable();
             avatar.setInfo(m.id, m.title, null);
-            cell.setData(null, m.title, movieStatus(m), 0, position != getItemCount() - 1);
+            cell.setAlpha(1f);
+            // A divider under every film but the last, where the tail's own header takes over.
+            cell.setData(null, m.title, movieStatus(m), 0, position != movies.size() - 1);
             cell.avatarImageView.setImageDrawable(avatar);
         }
     }

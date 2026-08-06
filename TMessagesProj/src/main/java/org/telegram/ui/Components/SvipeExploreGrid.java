@@ -538,9 +538,11 @@ public class SvipeExploreGrid extends RecyclerListView {
                         cb.onResult(refs, next, null);
                     });
         } else {
-            final String slug = category.slug;
-            pageLoader = (offset, limit, refresh, cb) ->
-                    SvipeDiscover.videos(account, null, slug, offset, limit, refresh, cb);
+            // Everything else (Konsertlar, Sport, Ta'lim...) stays the tab it was opened from: the
+            // same two pipes, the same 3-up-plus-wide-card rhythm, with the chip applied to BOTH.
+            // Swapping to a single long-video list here made a shelf look like a different screen,
+            // and made every short video invisible under every chip.
+            pageLoader = null;
         }
         adapter.notifyDataSetChanged();
         scrollToPosition(0);
@@ -576,6 +578,11 @@ public class SvipeExploreGrid extends RecyclerListView {
      */
     private boolean dualStream() {
         return pageLoader == null;
+    }
+
+    /** The shelf both pipes are filtered on, or null on the unfiltered feed and on card shelves. */
+    private String catSlug() {
+        return selectedCategory == null ? null : selectedCategory.slug;
     }
 
     /** Any page in flight, on either pipe or on the single stream. */
@@ -1196,7 +1203,7 @@ public class SvipeExploreGrid extends RecyclerListView {
         // First browse load of the session: the app-start warm-up may already hold both page-0s.
         // They go through the ordinary page path, so composition, cursors and failure handling are
         // identical to a live fetch — the only difference is that nothing was waited for.
-        if (!warmTried && !searchActive && pageLoader == null
+        if (!warmTried && !searchActive && pageLoader == null && selectedCategory == null
                 && shorts.isEmpty() && longs.isEmpty() && !loadingShorts && !loadingLongs) {
             warmTried = true;
             SvipeVideoWarmer.Warm warm = SvipeVideoWarmer.take();
@@ -1216,7 +1223,7 @@ public class SvipeExploreGrid extends RecyclerListView {
                 SvipeDiscover.search(account, activeQuery, offset, PAGE_SIZE,
                         (result, next, error) -> onPipePage(seq, false, result, next));
             } else {
-                SvipeDiscover.load(account, null, offset, PAGE_SIZE, false,
+                SvipeDiscover.load(account, null, catSlug(), offset, PAGE_SIZE, false,
                         (result, next, error) -> onPipePage(seq, false, result, next));
             }
         }
@@ -1229,7 +1236,7 @@ public class SvipeExploreGrid extends RecyclerListView {
                 SvipeDiscover.videosSearch(account, activeQuery, offset, LONG_PAGE_SIZE,
                         (result, next, error) -> onPipePage(seq, true, result, next));
             } else {
-                SvipeDiscover.videos(account, null, offset, LONG_PAGE_SIZE, false,
+                SvipeDiscover.videos(account, null, catSlug(), offset, LONG_PAGE_SIZE, false,
                         (result, next, error) -> onPipePage(seq, true, result, next));
             }
         }

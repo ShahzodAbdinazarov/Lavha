@@ -122,17 +122,28 @@ public class SvipeDiscover {
      * refresh=true rotates the server grid to a fresh window (pull-to-refresh); page-0 only.
      */
     public static void load(int account, String category, int offset, int limit, boolean refresh, Callback cb) {
+        load(account, category, null, offset, limit, refresh, cb);
+    }
+
+    /**
+     * @param cat a long-video CATEGORY slug ("komediya", "sport"...) — the SAME chip
+     *            {@link #videos} takes, so one tap filters both halves of the browse grid. A
+     *            different axis from {@code category} above, which is a reels interest cluster.
+     *            Null = the unfiltered grid, byte-identical to what this call produced before.
+     */
+    public static void load(int account, String category, String cat, int offset, int limit,
+                            boolean refresh, Callback cb) {
         SvipeAuth.ensureTokenRetrying(account, token -> {
             if (token == null) {
                 cb.onResult(null, null, "auth");
                 return;
             }
-            request(account, category, offset, limit, refresh, token, false, cb);
+            request(account, category, cat, offset, limit, refresh, token, false, cb);
         });
     }
 
-    private static void request(int account, String category, int offset, int limit, boolean refresh,
-                                String token, boolean retried, Callback cb) {
+    private static void request(int account, String category, String cat, int offset, int limit,
+                                boolean refresh, String token, boolean retried, Callback cb) {
         StringBuilder path = new StringBuilder("/v1/discover?limit=").append(limit).append("&offset=").append(offset);
         if (refresh) {
             path.append("&refresh=1");
@@ -140,6 +151,12 @@ public class SvipeDiscover {
         if (category != null && !category.isEmpty()) {
             try {
                 path.append("&category=").append(URLEncoder.encode(category, "UTF-8"));
+            } catch (Exception ignore) {
+            }
+        }
+        if (cat != null && !cat.isEmpty()) {
+            try {
+                path.append("&cat=").append(URLEncoder.encode(cat, "UTF-8"));
             } catch (Exception ignore) {
             }
         }
@@ -152,7 +169,7 @@ public class SvipeDiscover {
                         cb.onResult(null, null, "auth");
                         return;
                     }
-                    request(account, category, offset, limit, refresh, t2, true, cb);
+                    request(account, category, cat, offset, limit, refresh, t2, true, cb);
                 });
                 return;
             }

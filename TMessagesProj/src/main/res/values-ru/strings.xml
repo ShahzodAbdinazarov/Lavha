@@ -440,6 +440,8 @@
     <string name="SvipeNoWatchHistory">Пока нет истории просмотров</string>
     <string name="SvipeRecentSearches">Недавние запросы</string>
     <string name="SvipeMusicMoreSongs">Другие песни</string>
+    <string name="SvipeActorMoreFilms">Другие фильмы</string>
+    <string name="SvipeMovieRequested">Добавим этот фильм</string>
     <string name="SvipeClearSearchHistory">Очистить историю поиска</string>
     <string name="SvipeNoSearchHistory">Нет недавних запросов</string>
     <string name="SvipeUnblock">Разблокировать</string>
