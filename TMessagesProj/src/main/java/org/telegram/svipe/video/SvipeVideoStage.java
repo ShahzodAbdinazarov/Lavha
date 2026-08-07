@@ -766,7 +766,17 @@ public class SvipeVideoStage extends FrameLayout {
             // A gesture we anchored but never claimed still has to be CLOSED, or its transient state
             // (the speed boost, the seek ripple) outlives the finger. Reported as "it went to 2x by
             // itself" — it had, and nothing was left to turn it off.
-            gestures.onTouch(event);
+            //
+            // As a CANCEL, though, never as the UP. Reaching this branch with an UP means a CHILD owns
+            // the stream — a chrome button, since that is the only child that takes a DOWN — and an UP
+            // fed to the pipeline is read as a tap on the picture. In mini that restores the watch
+            // page, so the two mini buttons never did their own job: tapping ✕ or play/pause opened
+            // the page instead (verified on the emulator: one tap logged "page OPENED"). The button's
+            // own click still runs; only our phantom tap is dropped.
+            final MotionEvent cancel = MotionEvent.obtain(event);
+            cancel.setAction(MotionEvent.ACTION_CANCEL);
+            gestures.onTouch(cancel);
+            cancel.recycle();
             interceptCandidate = false;
         }
         return false;
