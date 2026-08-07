@@ -390,9 +390,9 @@ public class NotificationCenter {
     // Svipe: a message was just deleted/edited and captured LOCALLY in a chat (arg0 = dialogId). Drives
     // the in-chat consent prompt so it can appear the instant it happens, on delete AND edit. Per-account.
     public static final int svipeMsgLocalArchived = totalEvents++;
-    // Svipe: the cached set of music-indexed channel ids changed (SvipeMusicIndex). Global — drives the
-    // ♪ badge redraw in the chat list / search rows.
-    public static final int svipeMusicIndexUpdated = totalEvents++;
+    // Svipe: the cached set of indexed channel ids changed (SvipeChannelIndex). Global — drives the
+    // badge redraw in the chat list / search rows.
+    public static final int svipeChannelIndexUpdated = totalEvents++;
 
     public static boolean alreadyLogged;
 

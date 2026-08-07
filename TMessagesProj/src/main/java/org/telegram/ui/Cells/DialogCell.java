@@ -638,9 +638,9 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
 
     private int drawScam;
 
-    private boolean drawMusicBadge;   // Svipe — channel is indexed for music (♪ badge before the name)
-    private int musicBadgeLeft;
-    private static Drawable svipeMusicBadgeDrawable;
+    private boolean drawIndexBadge;   // Svipe — channel Svipe has indexed (badge before the name)
+    private int indexBadgeLeft;
+    private static Drawable svipeIndexBadgeDrawable;
 
     private boolean isSelected;
 
@@ -1295,7 +1295,7 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
         drawForwardIcon = false;
         drawGiftIcon = false;
         drawScam = 0;
-        drawMusicBadge = false;
+        drawIndexBadge = false;
         drawPinBackground = false;
         thumbsCount = 0;
         hasVideoThumb = false;
@@ -1479,8 +1479,8 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
                     long dialogBotVerificationIcon = 0;
                     if (chat != null) {
                         dialogBotVerificationIcon = DialogObject.getBotVerificationIcon(chat);
-                        drawMusicBadge = ChatObject.isChannel(chat) && !chat.megagroup
-                                && org.telegram.svipe.SvipeMusicIndex.isIndexed(
+                        drawIndexBadge = ChatObject.isChannel(chat) && !chat.megagroup
+                                && org.telegram.svipe.SvipeChannelIndex.isIndexed(
                         chat.id, ChatObject.getPublicUsername(chat));
                         if (chat.scam) {
                             drawScam = 1;
@@ -2300,9 +2300,9 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
         if (drawNameLock) {
             nameWidth -= dp(LocaleController.isRTL ? 8 : 4) + Theme.dialogs_lockDrawable.getIntrinsicWidth();
         }
-        if (drawMusicBadge) { // Svipe — reserve a slot immediately before the name for the ♪ badge
+        if (drawIndexBadge) { // Svipe — reserve a slot immediately before the name for the index badge
             int w = dp(4) + dp(14);
-            musicBadgeLeft = nameLeft;
+            indexBadgeLeft = nameLeft;
             nameLeft += w;
             nameWidth -= w;
         }
@@ -4093,15 +4093,15 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
             if ((!(useForceThreeLines || SharedConfig.useThreeLinesLayout) || isForumCell()) && hasTags()) {
                 nameTop -= dp(isForumCell() ? 8 : 9);
             }
-            if (drawMusicBadge && nameLayout != null) { // Svipe — ♪ badge just before an indexed channel's name
-                if (svipeMusicBadgeDrawable == null) {
-                    svipeMusicBadgeDrawable = new org.telegram.svipe.SvipeIndexedBadge();
+            if (drawIndexBadge && nameLayout != null) { // Svipe — index badge just before an indexed channel's name
+                if (svipeIndexBadgeDrawable == null) {
+                    svipeIndexBadgeDrawable = new org.telegram.svipe.SvipeIndexedBadge();
                 }
-                svipeMusicBadgeDrawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText, resourcesProvider), PorterDuff.Mode.SRC_IN));
+                svipeIndexBadgeDrawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText, resourcesProvider), PorterDuff.Mode.SRC_IN));
                 int bw = dp(14);
                 int by = nameTop + Math.max(0, (nameLayout.getHeight() - bw) / 2);
-                svipeMusicBadgeDrawable.setBounds(musicBadgeLeft, by, musicBadgeLeft + bw, by + bw);
-                svipeMusicBadgeDrawable.draw(canvas);
+                svipeIndexBadgeDrawable.setBounds(indexBadgeLeft, by, indexBadgeLeft + bw, by + bw);
+                svipeIndexBadgeDrawable.draw(canvas);
             }
             if (nameLayout != null) {
                 if (nameLayoutEllipsizeByGradient && !nameLayoutFits) {

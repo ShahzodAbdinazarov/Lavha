@@ -581,9 +581,15 @@ public class SvipeMusic {
             });
     }
 
-    // ---------------- Music-channel index status + user request (badge + ⋮ action) ----------------
+    // ---------------- Channel index status + "send for indexing" (badge + ⋮ action) ----------------
+    // Both used to be music-only: the status call asked whether we carried the channel's MUSIC, and
+    // the request fed the audio-density gate alone — so sending in a channel full of films or clips
+    // was answered by the one gate that could only reject it. They now speak for the whole index:
+    // the status is the same "have we looked at this?" the badge everywhere else means, and one
+    // request enters every pipe that can index anything (video/films via the profiler, music via the
+    // density gate).
 
-    /** Server's verdict for a channel: "indexed" | "requested" | "rejected" | "none" (null on error). */
+    /** Server's verdict for a channel: "indexed" (we have looked at it) | "none" (null on error). */
     public interface ChannelStatusCallback {
         void onResult(String status);
     }
@@ -593,25 +599,31 @@ public class SvipeMusic {
         void onResult(String status, String error);
     }
 
-    /** Is this Telegram channel indexed for Svipe music? Drives the note badge + the ⋮ action state. */
-    public static void channelIndexStatus(int account, long channelId, ChannelStatusCallback cb) {
+    /** Has Svipe already looked at this channel? Drives the title badge + whether the ⋮ action shows. */
+    public static void channelIndexStatus(int account, long channelId, String username,
+                                          ChannelStatusCallback cb) {
         withToken(account, () -> cb.onResult(null),
-            token -> channelIndexStatusRequest(account, channelId, token, false, cb));
+            token -> channelIndexStatusRequest(account, channelId, username, token, false, cb));
     }
 
-    private static void channelIndexStatusRequest(int account, long channelId, String token,
-                                                  boolean retried, ChannelStatusCallback cb) {
-        SvipeApi.get("/v1/music/channel/" + channelId + "/status", token, (res, code, err) -> {
+    private static void channelIndexStatusRequest(int account, long channelId, String username,
+                                                  String token, boolean retried, ChannelStatusCallback cb) {
+        String q = username == null ? "" : ("?username=" + android.net.Uri.encode(username));
+        SvipeApi.get("/v1/channels/" + channelId + "/index-status" + q, token, (res, code, err) -> {
             if (code == 401 && !retried) {
                 reauth(account, () -> cb.onResult(null),
-                    t2 -> channelIndexStatusRequest(account, channelId, t2, true, cb));
+                    t2 -> channelIndexStatusRequest(account, channelId, username, t2, true, cb));
                 return;
             }
             cb.onResult(res == null ? null : res.optString("status", null));
         });
     }
 
-    /** Ask the server to index a public channel for music (the worker reviews it on its next pass). */
+    /**
+     * Send a public channel in to be indexed — for everything we can index it for. The server queues
+     * it in every pipe (video/film profiler + music density gate) and each worker reviews it on its
+     * next pass; the verdicts are independent, so being no good as music costs it nothing as video.
+     */
     public static void requestChannelIndex(int account, long channelId, String username, String title,
                                            ChannelRequestCallback cb) {
         withToken(account, () -> cb.onResult(null, "auth"),
@@ -626,7 +638,7 @@ public class SvipeMusic {
             if (title != null) body.put("title", title);
         } catch (JSONException ignore) {
         }
-        SvipeApi.post("/v1/music/channel/" + channelId + "/request", body, token, (res, code, err) -> {
+        SvipeApi.post("/v1/channels/" + channelId + "/index-request", body, token, (res, code, err) -> {
             if (code == 401 && !retried) {
                 reauth(account, () -> cb.onResult(null, "auth"),
                     t2 -> requestChannelIndexCall(account, channelId, username, title, t2, true, cb));
@@ -640,7 +652,7 @@ public class SvipeMusic {
         });
     }
 
-    /** All channel ids currently indexed for music — SvipeMusicIndex caches this for the ♪ badge. */
+    /** All channel ids currently indexed for music — SvipeChannelIndex caches this for the ♪ badge. */
     public interface IndexedIdsCallback {
         /**
          * @param usernames channels the server has seen but could not resolve to an id — a

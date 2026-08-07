@@ -1646,7 +1646,7 @@ public class ChatActivity extends BaseFragment implements
     private final static int text_date = 74;
     private final static int svipe_show_in_chat = 75; // Svipe — per-chat "Show in chat" toggle
     private final static int svipe_deleted_log = 76;  // Svipe — open the deleted & edited log
-    private final static int svipe_music_index = 77;  // Svipe — request this channel be indexed for music
+    private final static int svipe_send_for_index = 77;  // Svipe — send this channel in to be indexed
 
     private final static int view_as_topics = 59;
 
@@ -3805,8 +3805,8 @@ public class ChatActivity extends BaseFragment implements
                     showDialog(AlertsCreator.createTTLAlert(getParentActivity(), currentEncryptedChat, themeDelegate).create());
                 } else if (id == svipe_deleted_log) { // Svipe
                     presentFragment(new org.telegram.svipe.SvipeDeletedLogActivity(dialog_id));
-                } else if (id == svipe_music_index) { // Svipe
-                    svipeMusicRequestIndex();
+                } else if (id == svipe_send_for_index) { // Svipe
+                    svipeSendForIndex();
                 } else if (id == clear_history || id == delete_chat || id == auto_delete_timer) {
                     if (getParentActivity() == null) {
                         return;
@@ -4412,11 +4412,11 @@ public class ChatActivity extends BaseFragment implements
             if (currentEncryptedChat == null) { // Svipe — Recent Actions log (deleted + edited); "Show in chat" switch lives inside that screen
                 headerItem.lazilyAddSubItem(svipe_deleted_log, R.drawable.msg_log, LocaleController.getString(R.string.EventLog));
             }
-            // Svipe — request this channel be indexed for music (public broadcast channels only)
+            // Svipe — send this channel in to be indexed (public broadcast channels only)
             if (currentChat != null && ChatObject.isChannel(currentChat) && !currentChat.megagroup
                     && !TextUtils.isEmpty(ChatObject.getPublicUsername(currentChat))) {
-                headerItem.lazilyAddSubItem(svipe_music_index, R.drawable.svipe_music_note, LocaleController.getString(R.string.SvipeMusicIndexChannel));
-                headerItem.setSubItemShown(svipe_music_index, false); // shown after the async status check
+                headerItem.lazilyAddSubItem(svipe_send_for_index, R.drawable.svipe_index_send, LocaleController.getString(R.string.SvipeChannelIndexSend));
+                headerItem.setSubItemShown(svipe_send_for_index, false); // shown after the async status check
             }
             if (currentUser != null && currentUser.self && getDialogId() != UserObject.VERIFY) {
                 headerItem.lazilyAddSubItem(add_shortcut, R.drawable.msg_home, LocaleController.getString(R.string.AddShortcut));
@@ -19632,57 +19632,62 @@ public class ChatActivity extends BaseFragment implements
         }
     }
 
-    // ---------------- Svipe: music-channel index badge + request ----------------
-    private boolean svipeMusicIndexed;
-    private boolean svipeMusicStatusChecked;
-    private Drawable svipeMusicBadgeDrawable;
+    // ---------------- Svipe: channel index badge + "send for indexing" ----------------
+    // Both halves used to be music-only — the badge said "we carry this channel's music" and the ⋮
+    // action fed the audio gate alone. They mean the whole index now: the badge is the one every
+    // channel row draws (we have looked at this channel), and one tap sends the channel in to be
+    // indexed for everything it can be indexed for.
+    private boolean svipeChannelIndexed;
+    private boolean svipeIndexStatusChecked;
+    private Drawable svipeIndexBadgeDrawable;
 
-    private boolean svipeMusicEligibleChannel() {
+    private boolean svipeIndexEligibleChannel() {
         return currentChat != null && ChatObject.isChannel(currentChat) && !currentChat.megagroup
                 && !TextUtils.isEmpty(ChatObject.getPublicUsername(currentChat));
     }
 
-    private Drawable svipeMusicBadge() {
-        if (svipeMusicBadgeDrawable == null) {
+    private Drawable svipeIndexBadge() {
+        if (svipeIndexBadgeDrawable == null) {
             Drawable d = new org.telegram.svipe.SvipeIndexedBadge();
             int sz = AndroidUtilities.dp(14);
             d.setBounds(0, 0, sz, sz);
             d.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_actionBarDefaultTitle), PorterDuff.Mode.SRC_IN));
-            svipeMusicBadgeDrawable = d;
+            svipeIndexBadgeDrawable = d;
         }
-        return svipeMusicBadgeDrawable;
+        return svipeIndexBadgeDrawable;
     }
 
-    /** One-shot query: is this public channel indexed for Svipe music? Drives the title badge + ⋮ item. */
-    private void svipeMusicCheckChannel() {
-        if (svipeMusicStatusChecked || !svipeMusicEligibleChannel()) {
+    /** One-shot query: has Svipe already looked at this channel? Drives the title badge + ⋮ item. */
+    private void svipeIndexCheckChannel() {
+        if (svipeIndexStatusChecked || !svipeIndexEligibleChannel()) {
             return;
         }
-        svipeMusicStatusChecked = true;
-        org.telegram.svipe.SvipeMusic.channelIndexStatus(currentAccount, currentChat.id, status ->
+        svipeIndexStatusChecked = true;
+        org.telegram.svipe.SvipeMusic.channelIndexStatus(currentAccount, currentChat.id,
+                ChatObject.getPublicUsername(currentChat), status ->
                 AndroidUtilities.runOnUIThread(() -> {
                     boolean indexed = "indexed".equals(status);
                     if (indexed && currentChat != null) {
-                        org.telegram.svipe.SvipeMusicIndex.markIndexed(currentChat.id);
+                        org.telegram.svipe.SvipeChannelIndex.markIndexed(currentChat.id);
                     }
-                    if (indexed != svipeMusicIndexed) {
-                        svipeMusicIndexed = indexed;
+                    if (indexed != svipeChannelIndexed) {
+                        svipeChannelIndexed = indexed;
                         updateTitleIcons();
                     }
-                    svipeMusicUpdateMenu();
+                    svipeIndexUpdateMenu();
                 }));
     }
 
-    private void svipeMusicUpdateMenu() {
+    private void svipeIndexUpdateMenu() {
         if (headerItem == null) {
             return;
         }
-        headerItem.setSubItemShown(svipe_music_index,
-                svipeMusicStatusChecked && !svipeMusicIndexed && svipeMusicEligibleChannel());
+        headerItem.setSubItemShown(svipe_send_for_index,
+                svipeIndexStatusChecked && !svipeChannelIndexed && svipeIndexEligibleChannel());
     }
 
-    private void svipeMusicRequestIndex() {
-        if (!svipeMusicEligibleChannel()) {
+    private void svipeSendForIndex() {
+        if (!svipeIndexEligibleChannel()) {
             return;
         }
         final String username = ChatObject.getPublicUsername(currentChat);
@@ -19692,18 +19697,22 @@ public class ChatActivity extends BaseFragment implements
                     if (getParentActivity() == null) {
                         return;
                     }
-                    if ("already_indexed".equals(status)) {
-                        svipeMusicIndexed = true;
+                    if (status != null) {
+                        // Sent or already there, the channel is one we have SEEN either way — which is
+                        // exactly what the badge says. Marking it now hides the action and draws the
+                        // badge immediately, so nobody sends the same channel in again while it queues.
+                        svipeChannelIndexed = true;
+                        org.telegram.svipe.SvipeChannelIndex.markIndexed(currentChat.id);
                         updateTitleIcons();
-                        svipeMusicUpdateMenu();
+                        svipeIndexUpdateMenu();
                         org.telegram.ui.Components.BulletinFactory.of(ChatActivity.this)
-                                .createSimpleBulletin(R.raw.chats_infotip, LocaleController.getString(R.string.SvipeMusicAlreadyIndexed)).show();
-                    } else if (status != null) {
-                        org.telegram.ui.Components.BulletinFactory.of(ChatActivity.this)
-                                .createSimpleBulletin(R.raw.chats_infotip, LocaleController.getString(R.string.SvipeMusicIndexRequested)).show();
+                                .createSimpleBulletin(R.raw.chats_infotip, LocaleController.getString(
+                                        "already_indexed".equals(status)
+                                                ? R.string.SvipeChannelAlreadyIndexed
+                                                : R.string.SvipeChannelIndexSent)).show();
                     } else {
                         org.telegram.ui.Components.BulletinFactory.of(ChatActivity.this)
-                                .createSimpleBulletin(R.raw.error, LocaleController.getString(R.string.SvipeMusicIndexFailed)).show();
+                                .createSimpleBulletin(R.raw.error, LocaleController.getString(R.string.SvipeChannelIndexFailed)).show();
                     }
                 }));
     }
@@ -19738,11 +19747,11 @@ public class ChatActivity extends BaseFragment implements
         }
         // Svipe: music-note badge before the name for channels indexed in our catalog (only when the
         // left slot is otherwise free, so lock / bot-verification still take priority).
-        if (leftIcon == null && svipeMusicIndexed && currentChat != null) {
-            leftIcon = svipeMusicBadge();
+        if (leftIcon == null && svipeChannelIndexed && currentChat != null) {
+            leftIcon = svipeIndexBadge();
         }
         avatarContainer.setTitleIcons(leftIcon, rightIcon);
-        svipeMusicCheckChannel();
+        svipeIndexCheckChannel();
         if (!forceToggleMuted && muteItem != null) {
             if (isMuted) {
                 muteItem.setRightIconVisibility(View.GONE);

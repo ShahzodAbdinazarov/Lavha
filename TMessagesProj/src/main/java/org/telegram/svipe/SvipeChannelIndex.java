@@ -24,9 +24,9 @@ import java.util.Set;
  * device upgrading does not spend six hours showing music channels under a badge that no longer says
  * music.
  */
-public final class SvipeMusicIndex {
+public final class SvipeChannelIndex {
 
-    private SvipeMusicIndex() {}
+    private SvipeChannelIndex() {}
 
     private static final String PREFS = "svipe_indexed_channels";
     private static final String KEY_IDS = "indexed_ids";
@@ -154,6 +154,6 @@ public final class SvipeMusicIndex {
 
     private static void notifyUpdated() {
         AndroidUtilities.runOnUIThread(() ->
-                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.svipeMusicIndexUpdated));
+                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.svipeChannelIndexUpdated));
     }
 }

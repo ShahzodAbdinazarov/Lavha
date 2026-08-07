@@ -305,11 +305,11 @@
     <string name="SvipeTermsTitle">Условия Svipe обновлены</string>
     <string name="SvipeTermsMessage">Svipe обновил Условия использования и Политику конфиденциальности. **Подробнее**</string>
     <string name="SvipeTermsAccept">Продолжить</string>
-    <!-- Svipe music-channel indexing (badge + channel ⋮ action) -->
-    <string name="SvipeMusicIndexChannel">Индексировать для музыки</string>
-    <string name="SvipeMusicIndexRequested">Запрос отправлен на проверку</string>
-    <string name="SvipeMusicAlreadyIndexed">Уже в музыкальном каталоге</string>
-    <string name="SvipeMusicIndexFailed">Не удалось отправить запрос</string>
+    <!-- Svipe channel indexing (badge + channel ⋮ action) -->
+    <string name="SvipeChannelIndexSend">Отправить на индексацию</string>
+    <string name="SvipeChannelIndexSent">Отправлено на индексацию</string>
+    <string name="SvipeChannelAlreadyIndexed">Уже проиндексирован</string>
+    <string name="SvipeChannelIndexFailed">Не удалось отправить канал</string>
 
     <!-- Svipe message sync (P2P deleted/edited archive) -->
     <string name="SvipeMsgSyncTitle">Синхронизация удалённых сообщений</string>

@@ -42,11 +42,11 @@
     <string name="SvipeTermsTitle">Svipe shartlari yangilandi</string>
     <string name="SvipeTermsMessage">Svipe Xizmat ko\'rsatish shartlari va Maxfiylik siyosatini yangiladi. **Batafsil**</string>
     <string name="SvipeTermsAccept">Davom etish</string>
-    <!-- Svipe music-channel indexing (badge + channel ⋮ action) -->
-    <string name="SvipeMusicIndexChannel">Musiqa uchun indekslash</string>
-    <string name="SvipeMusicIndexRequested">So\'rov ko\'rib chiqishga yuborildi</string>
-    <string name="SvipeMusicAlreadyIndexed">Allaqachon musiqa katalogida</string>
-    <string name="SvipeMusicIndexFailed">So\'rov yuborilmadi</string>
+    <!-- Svipe channel indexing (badge + channel ⋮ action) -->
+    <string name="SvipeChannelIndexSend">Indekslashga yuborish</string>
+    <string name="SvipeChannelIndexSent">Indekslashga yuborildi</string>
+    <string name="SvipeChannelAlreadyIndexed">Allaqachon indekslangan</string>
+    <string name="SvipeChannelIndexFailed">Kanal yuborilmadi</string>
 
     <!-- Svipe message sync (P2P deleted/edited archive) -->
     <string name="SvipeMsgSyncTitle">O\'chirilgan xabar sinxroni</string>
