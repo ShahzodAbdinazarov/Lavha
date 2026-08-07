@@ -845,7 +845,14 @@ public class SvipeVideoPlayerController {
             } else {
                 int reference = FileLoader.getInstance(account).getFileReference(mo);
                 VideoPlayer.VideoUri vu = VideoPlayer.VideoUri.of(account, doc, null, reference, false);
-                FileLog.d("svipe: long-form play source=" + (vu.isCached() ? "LOCAL-cache" : "network"));
+                // A file that merely EXISTS is not a file we can play: an interrupted download leaves a
+                // short one at the finished name, and reading it ends in "Source error / EOF" while the
+                // network copy was fine all along. Half a file -> stream it (SvipeVideoLadder#isWholeOnDisk).
+                final boolean whole = SvipeVideoLadder.isWholeOnDisk(vu);
+                if (vu.isCached() && !whole) {
+                    vu.uri = VideoPlayer.VideoUri.getUri(account, doc, reference);
+                }
+                FileLog.d("svipe: long-form play source=" + (whole ? "LOCAL-cache" : "network"));
                 p.preparePlayer(vu.uri, "other");
             }
             if (startPaused) {

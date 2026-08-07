@@ -117,7 +117,8 @@ public class SvipeVideoLadder {
         for (VideoPlayer.Quality q : qualities) {
             for (VideoPlayer.VideoUri u : q.uris) {
                 if (u.document == null) continue;
-                if (u.isCached()) return u;
+                if (isWholeOnDisk(u)) return u;   // a half-written file is not "already downloaded"
+
                 if (smallest == null || u.size < smallest.size) smallest = u;
                 int p = Math.min(u.width, u.height);
                 if (p <= maxP + 55) { // the same rung tolerance Quality.p() uses
@@ -136,10 +137,41 @@ public class SvipeVideoLadder {
         if (qualities == null) return null;
         for (VideoPlayer.Quality q : qualities) {
             for (VideoPlayer.VideoUri u : q.uris) {
-                if (u.isCached()) return q;
+                if (isWholeOnDisk(u)) return q;
             }
         }
         return null;
+    }
+
+    /**
+     * Is this rendition on disk IN FULL — not merely present?
+     *
+     * {@code VideoUri.isCached()} answers "the uri points at a file", and a file EXISTS from the first
+     * byte written: a streaming pull writes into the final path as it goes, so a download interrupted
+     * by a kill, a crash or a full disk leaves a short file at the name a complete one would have. Pin
+     * that as the source and ExoPlayer reads to its end and stops with {@code Source error / EOF} — the
+     * video is "broken" until something clears the cache, while the same video streams perfectly from
+     * the network it just refused to use. Seen for real on a film after the app was killed mid-download.
+     *
+     * <p>So the length is compared against the document's own size, and a short file is treated as no
+     * cache at all: AUTO takes over, Telegram's own streaming loader keeps serving the bytes it has and
+     * fetches the rest. The truncated file is deliberately NOT deleted — a download still in flight is
+     * writing into it, and finishing that is better than restarting it.
+     */
+    public static boolean isWholeOnDisk(VideoPlayer.VideoUri u) {
+        if (u == null || !u.isCached() || u.uri == null || u.document == null) {
+            return false;
+        }
+        final long expected = u.document.size;
+        if (expected <= 0) {
+            return false;   // unknown size: nothing to prove it whole with
+        }
+        try {
+            final java.io.File f = new java.io.File(u.uri.getPath());
+            return f.exists() && f.length() >= expected;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** Width/height are known from the document long before the first frame — no layout jump. */
