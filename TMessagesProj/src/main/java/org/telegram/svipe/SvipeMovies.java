@@ -427,26 +427,35 @@ public final class SvipeMovies {
                 cb.onResult(null, err != null ? err : "empty");
                 return;
             }
-            MovieDetail d = new MovieDetail();
-            d.movie = parseMovie(res.optJSONObject("movie"));
-            d.director = res.isNull("director") ? null : res.optString("director", null);
-            JSONArray vs = res.optJSONArray("versions");
-            for (int i = 0; vs != null && i < vs.length(); i++) {
-                Version v = parseVersion(vs.optJSONObject(i));
-                if (v != null) d.versions.add(v);
-            }
-            JSONArray as = res.optJSONArray("actors");
-            for (int i = 0; as != null && i < as.length(); i++) {
-                Actor a = parseActor(as.optJSONObject(i));
-                if (a != null) d.actors.add(a);
-            }
-            d.myDefault = parseVersion(res.optJSONObject("my_default"));
-            cb.onResult(d, null);
+            cb.onResult(parseDetail(res), null);
         });
     }
 
     /**
-     * The film a Telegram post is a copy of — the watch page's reverse lookup for its actor row.
+     * Both film endpoints answer with the SAME shape, so they are read by the same parser. They were
+     * not: by-post skipped the versions, because the watch page only wanted the cast back then — and
+     * the moment that page grew a "Variants" tab it silently had nothing to put in it.
+     */
+    private static MovieDetail parseDetail(JSONObject res) {
+        MovieDetail d = new MovieDetail();
+        d.movie = parseMovie(res.optJSONObject("movie"));
+        d.director = res.isNull("director") ? null : res.optString("director", null);
+        JSONArray vs = res.optJSONArray("versions");
+        for (int i = 0; vs != null && i < vs.length(); i++) {
+            Version v = parseVersion(vs.optJSONObject(i));
+            if (v != null) d.versions.add(v);
+        }
+        JSONArray as = res.optJSONArray("actors");
+        for (int i = 0; as != null && i < as.length(); i++) {
+            Actor a = parseActor(as.optJSONObject(i));
+            if (a != null) d.actors.add(a);
+        }
+        d.myDefault = parseVersion(res.optJSONObject("my_default"));
+        return d;
+    }
+
+    /**
+     * The film a Telegram post is a copy of — the watch page's reverse lookup for its own tabs.
      * A 404 (most long videos are not films) arrives as {@code detail == null}, which is a normal
      * outcome and not an error worth surfacing.
      */
@@ -457,16 +466,7 @@ public final class SvipeMovies {
                         cb.onResult(null, err);
                         return;
                     }
-                    MovieDetail d = new MovieDetail();
-                    d.movie = parseMovie(res.optJSONObject("movie"));
-                    d.director = res.isNull("director") ? null : res.optString("director", null);
-                    JSONArray as = res.optJSONArray("actors");
-                    for (int i = 0; as != null && i < as.length(); i++) {
-                        Actor a = parseActor(as.optJSONObject(i));
-                        if (a != null) d.actors.add(a);
-                    }
-                    d.myDefault = parseVersion(res.optJSONObject("my_default"));
-                    cb.onResult(d, null);
+                    cb.onResult(parseDetail(res), null);
                 });
     }
 

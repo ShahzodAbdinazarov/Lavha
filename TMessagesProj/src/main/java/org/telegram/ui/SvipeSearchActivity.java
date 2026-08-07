@@ -42,14 +42,10 @@ public class SvipeSearchActivity extends DialogsActivity {
         // Needed by the horizontal cards' ⋮ menu (ItemOptions routes the popup above the bottom tabs
         // via the fragment), plus the share sheet and the report flow.
         exploreGrid.setFragment(this);
-        // A film card in a category shelf opens the MovieProfile — the grid raises the tap, the
-        // fragment presents, because only a fragment can present another one.
+        // A show card opens its playlist channel — the grid raises the tap, the fragment presents,
+        // because only a fragment can present another one. A FILM card is not here: it plays, on the
+        // ordinary tap path, like every other card in the tab.
         exploreGrid.setMovieDelegate(new org.telegram.ui.Components.SvipeExploreGrid.MovieDelegate() {
-            @Override
-            public void onMovieTapped(org.telegram.svipe.SvipeMovies.Movie movie) {
-                presentFragment(new SvipeMovieActivity(movie));
-            }
-
             @Override
             public void onSeriesTapped(org.telegram.svipe.SvipeMovies.Series series) {
                 // A show's playlist IS a Telegram channel, so "open the show" is literally opening

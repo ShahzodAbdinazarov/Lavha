@@ -89,8 +89,7 @@ public class SvipeExploreGrid extends RecyclerListView {
 
     /** Host hook for taps on a film / show card — the grid cannot present a fragment itself. */
     public interface MovieDelegate {
-        void onMovieTapped(SvipeMovies.Movie movie);
-
+        /** A show card: the grid raises it, the host presents, because only a fragment can present. */
         void onSeriesTapped(SvipeMovies.Series series);
     }
 
@@ -389,9 +388,8 @@ public class SvipeExploreGrid extends RecyclerListView {
             if (idx < 0 || idx >= items.size()) {
                 return;
             }
-            // A film card opens the MovieProfile, never the player: which COPY to play is the film
-            // page's decision (the user's pinned version, else the crowd default), and short-circuiting
-            // to the poster's own copy here would silently ignore that choice.
+            // A SHOW is the one card that is not a video: its "poster" stands for a whole playlist,
+            // so it opens the playlist channel rather than playing one episode out of order.
             final SvipeMovies.Series tappedSeries = items.get(idx).series();
             if (tappedSeries != null) {
                 if (movieDelegate != null) {
@@ -399,13 +397,10 @@ public class SvipeExploreGrid extends RecyclerListView {
                 }
                 return;
             }
-            final SvipeMovies.Movie tappedMovie = items.get(idx).movie();
-            if (tappedMovie != null) {
-                if (movieDelegate != null) {
-                    movieDelegate.onMovieTapped(tappedMovie);
-                }
-                return;
-            }
+            // A FILM plays, exactly like a card on the unfiltered feed. It used to open a separate
+            // profile screen that played nothing, so a tap under Comedy did something different from
+            // the same tap under All. The watch page is the film page now: it starts the default copy
+            // (the poster IS that copy) and offers the cast and the other copies in its own tabs.
             // Record a tapped SEARCH RESULT as a recent (browse taps aren't results, so store nothing).
             if (searchActive) {
                 history.add(items.get(idx).ref);

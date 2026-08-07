@@ -41,6 +41,7 @@ import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.SvipeWideVideoCell;
+import org.telegram.ui.Cells.UserCell;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.BackupImageView;
@@ -121,8 +122,25 @@ public class SvipeWatchActivity extends BaseFragment {
     private static final int TYPE_RELATED_HEADER = 5;
     private static final int TYPE_RELATED = 6;
     private static final int TYPE_RELATED_SKELETON = 7;
-    /** Cast strip under the player — only present when this post resolved to a film. */
-    private static final int TYPE_ACTORS = 8;
+    /**
+     * The section tabs — Related | Actors | Variants — and their rows. Only films have the last two,
+     * because only a film is a WORK with a cast and many copies; an ordinary video keeps the plain
+     * "Related videos" header it always had.
+     *
+     * <p>This is where the film page went. A film used to open a separate profile screen that did not
+     * play anything, so the shelves felt like a different app from the tab they were opened from:
+     * tapping a card in All played, tapping one under Comedy did not. The watch page IS the film page
+     * now — it plays first and answers "who is in it" and "which copy" in tabs underneath.
+     */
+    private static final int TYPE_TABS = 8;
+    private static final int TYPE_ACTOR = 9;
+    private static final int TYPE_VERSION = 10;
+    /** A selected tab with nothing in it — a film whose cast never matched, most often. */
+    private static final int TYPE_TAB_EMPTY = 11;
+
+    private static final int TAB_RELATED = 0;
+    private static final int TAB_ACTORS = 1;
+    private static final int TAB_VERSIONS = 2;
 
     private static final int RELATED_PAGE_SIZE = 20;
     /** Placeholder rows shown while the first related page loads — about one screenful. */
@@ -165,6 +183,11 @@ public class SvipeWatchActivity extends BaseFragment {
      * lectures) are not films, and then the page renders exactly as it did before the movie layer.
      */
     private SvipeMovies.MovieDetail movieDetail;
+    /** Which of the three sections is showing. Always Related on open — that is the page's own job. */
+    private int currentTab = TAB_RELATED;
+    /** First row index of the tab's own list, so a tap maps back to an actor/version/related item. */
+    private int firstTabRow = -1;
+    private boolean pinInFlight;
     private final ArrayList<Row> related = new ArrayList<>();
     /** channelId:messageId of everything already on this page, so a related page cannot repeat it. */
     private final HashSet<String> shownKeys = new HashSet<>();
@@ -367,6 +390,10 @@ public class SvipeWatchActivity extends BaseFragment {
             return;
         }
         watched = row;
+        // A different video is a different film (or none): its cast, its copies and the open tab all
+        // belong to the post we just left.
+        movieDetail = null;
+        currentTab = TAB_RELATED;
         related.clear();
         shownKeys.clear();
         shownKeys.add(keyOf(row.ref));
@@ -397,6 +424,7 @@ public class SvipeWatchActivity extends BaseFragment {
             resolveWatched();
         }
         loadRelated();
+        loadMovie();
     }
 
     // ---------------- fragment ----------------
@@ -440,6 +468,27 @@ public class SvipeWatchActivity extends BaseFragment {
         listView.setPadding(0, 0, 0, AndroidUtilities.navigationBarHeight + dp(12));
         listView.setClipToPadding(false);
         listView.setOnItemClickListener((view, position) -> {
+            final int type = position >= 0 && position < rows.size() ? rows.get(position) : -1;
+            if (type == TYPE_ACTOR) {
+                final int idx = position - firstTabRow;
+                if (movieDetail != null && idx >= 0 && idx < movieDetail.actors.size()) {
+                    final SvipeMovies.Actor a = movieDetail.actors.get(idx);
+                    presentFragment(new SvipeActorActivity(a.id, a.name));
+                }
+                return;
+            }
+            if (type == TYPE_VERSION) {
+                final int idx = position - firstTabRow;
+                if (movieDetail != null && idx >= 0 && idx < movieDetail.versions.size()) {
+                    final SvipeMovies.Version v = movieDetail.versions.get(idx);
+                    // Another copy of the SAME film is not another video: swap the page onto it
+                    // instead of stacking a second watch page for the film you are already on.
+                    if (!isPlaying(v)) {
+                        openItem(v.toItem());
+                    }
+                }
+                return;
+            }
             final Row row = relatedRowAt(position);
             if (row != null) {
                 // A related video opens ON TOP of this one. Stacking rather than swapping is what
@@ -448,6 +497,10 @@ public class SvipeWatchActivity extends BaseFragment {
                 org.telegram.svipe.video.SvipeVideoPlayerController.getInstance().expectHandover();
                 presentFragment(new SvipeWatchActivity(row.ref));
             }
+        });
+        listView.setOnItemLongClickListener((view, position) -> {
+            final int type = position >= 0 && position < rows.size() ? rows.get(position) : -1;
+            return type == TYPE_VERSION && pinVersion(position - firstTabRow);
         });
         listView.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
@@ -582,28 +635,82 @@ public class SvipeWatchActivity extends BaseFragment {
             rows.add(TYPE_CHANNEL);
         }
         rows.add(TYPE_ACTIONS);
-        if (movieDetail != null && !movieDetail.actors.isEmpty()) {
-            rows.add(TYPE_ACTORS);
-        }
         if (hasCaptionBody()) {
             rows.add(TYPE_CAPTION);
         }
         firstRelatedRow = -1;
-        if (!related.isEmpty()) {
+        firstTabRow = -1;
+        if (hasFilmTabs()) {
+            // A film: the three sections share one strip, and Related is the one that is open.
+            rows.add(TYPE_TABS);
+            firstTabRow = rows.size();
+            if (currentTab == TAB_ACTORS) {
+                for (int i = 0; i < movieDetail.actors.size(); i++) {
+                    rows.add(TYPE_ACTOR);
+                }
+                if (movieDetail.actors.isEmpty()) {
+                    rows.add(TYPE_TAB_EMPTY);
+                }
+            } else if (currentTab == TAB_VERSIONS) {
+                for (int i = 0; i < movieDetail.versions.size(); i++) {
+                    rows.add(TYPE_VERSION);
+                }
+                if (movieDetail.versions.isEmpty()) {
+                    rows.add(TYPE_TAB_EMPTY);
+                }
+            } else {
+                firstRelatedRow = rows.size();
+                addRelatedRows();
+            }
+        } else if (!related.isEmpty() || loadingRelated) {
             rows.add(TYPE_RELATED_HEADER);
             firstRelatedRow = rows.size();
-            for (int i = 0; i < related.size(); i++) {
-                rows.add(TYPE_RELATED);
-            }
-        } else if (loadingRelated) {
-            rows.add(TYPE_RELATED_HEADER);
-            for (int i = 0; i < RELATED_SKELETONS; i++) {
-                rows.add(TYPE_RELATED_SKELETON);
-            }
+            addRelatedRows();
         }
         if (adapter != null) {
             adapter.notifyDataSetChanged();
         }
+    }
+
+    /** The related cards, or their shimmer stand-ins while the first page is still in flight. */
+    private void addRelatedRows() {
+        if (!related.isEmpty()) {
+            for (int i = 0; i < related.size(); i++) {
+                rows.add(TYPE_RELATED);
+            }
+            return;
+        }
+        firstRelatedRow = -1;
+        for (int i = 0; i < RELATED_SKELETONS; i++) {
+            rows.add(TYPE_RELATED_SKELETON);
+        }
+    }
+
+    /**
+     * True when this post is a copy of a film we know — the only case with anything to put in a
+     * second and third tab. A concert, a serial episode or an ordinary long video has no film row
+     * behind it and keeps the plain related header.
+     */
+    private boolean hasFilmTabs() {
+        return movieDetail != null
+                && (!movieDetail.actors.isEmpty() || !movieDetail.versions.isEmpty());
+    }
+
+    private void selectTab(int tab) {
+        if (currentTab == tab) {
+            return;
+        }
+        currentTab = tab;
+        rebuildRows();
+        if (tab == TAB_RELATED && related.isEmpty() && !loadingRelated) {
+            loadRelated();
+        }
+    }
+
+    /** The film copy playing right now, matched on the ids the page was opened with. */
+    private boolean isPlaying(SvipeMovies.Version v) {
+        return watched != null && watched.ref != null && v != null
+                && watched.ref.channelId == v.channelId && watched.ref.messageId == v.messageId;
     }
 
     /**
@@ -626,6 +733,13 @@ public class SvipeWatchActivity extends BaseFragment {
 
     /** The video's own title line: the caption's first line, which is how these posts are written. */
     private CharSequence titleText() {
+        // Once we know this post is a copy of a film, the page is that FILM's page: it is named after
+        // the film, not after whatever the uploading channel wrote above it ("PREMYERA🔥"). The caption
+        // itself is not lost — it is the description row further down.
+        if (movieDetail != null && movieDetail.movie != null
+                && movieDetail.movie.title != null && !movieDetail.movie.title.isEmpty()) {
+            return movieDetail.movie.title;
+        }
         final CharSequence caption = fullCaption();
         if (caption == null) {
             return null;
@@ -885,7 +999,9 @@ public class SvipeWatchActivity extends BaseFragment {
         }
         SvipeMovies.movieByPost(currentAccount, watched.ref.channelId, watched.ref.messageId,
                 (detail, error) -> AndroidUtilities.runOnUIThread(() -> {
-                    if (detail == null || detail.actors.isEmpty()) {
+                    // Kept even with an empty cast: the copies alone are worth a Variants tab, and a
+                    // film whose cast never matched Wikidata still has them.
+                    if (detail == null) {
                         return;
                     }
                     movieDetail = detail;
@@ -1177,7 +1293,8 @@ public class SvipeWatchActivity extends BaseFragment {
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return holder.getItemViewType() == TYPE_RELATED;
+            final int type = holder.getItemViewType();
+            return type == TYPE_RELATED || type == TYPE_ACTOR || type == TYPE_VERSION;
         }
 
         @Override
@@ -1210,12 +1327,26 @@ public class SvipeWatchActivity extends BaseFragment {
                 case TYPE_CAPTION:
                     view = new CaptionView(ctx);
                     break;
-                case TYPE_ACTORS:
-                    view = new ActorsRowView(ctx);
+                case TYPE_TABS:
+                    view = new SectionTabsView(ctx);
+                    break;
+                case TYPE_ACTOR:
+                case TYPE_VERSION:
+                    view = new UserCell(ctx, 6, 0, false, getResourceProvider());
                     break;
                 case TYPE_RELATED_HEADER:
                     view = sectionHeader(ctx);
                     break;
+                case TYPE_TAB_EMPTY: {
+                    TextView empty = new TextView(ctx);
+                    empty.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+                    empty.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+                    empty.setGravity(Gravity.CENTER);
+                    empty.setPadding(dp(16), dp(28), dp(16), dp(28));
+                    empty.setText(getString(R.string.NoResult));
+                    view = empty;
+                    break;
+                }
                 case TYPE_RELATED_SKELETON:
                     view = new RelatedSkeletonView(ctx);
                     break;
@@ -1245,8 +1376,14 @@ public class SvipeWatchActivity extends BaseFragment {
                 case TYPE_CAPTION:
                     ((CaptionView) holder.itemView).bind();
                     break;
-                case TYPE_ACTORS:
-                    ((ActorsRowView) holder.itemView).bind();
+                case TYPE_TABS:
+                    ((SectionTabsView) holder.itemView).bind();
+                    break;
+                case TYPE_ACTOR:
+                    bindActor((UserCell) holder.itemView, position - firstTabRow);
+                    break;
+                case TYPE_VERSION:
+                    bindVersion((UserCell) holder.itemView, position - firstTabRow);
                     break;
                 case TYPE_RELATED: {
                     final Row row = related.get(position - firstRelatedRow);
@@ -1264,61 +1401,140 @@ public class SvipeWatchActivity extends BaseFragment {
      * performer's ActorProfile. Names are the uploading channel's own Uzbek spelling — see
      * {@link SvipeActorActivity} for why that is the right label rather than a romanisation.
      */
-    private class ActorsRowView extends FrameLayout {
+    /**
+     * The section strip — Related | Actors | Variants — in the app's own pinned-tab shape (the same
+     * one the profile screens use), so a film's page reads as one screen and not as a video page with
+     * a film page bolted under it. Related is selected on open: whatever else a film is, the page is
+     * still a player.
+     */
+    private class SectionTabsView extends FrameLayout {
         private final LinearLayout row;
 
-        ActorsRowView(Context context) {
+        SectionTabsView(Context context) {
             super(context);
-            HorizontalScrollView scroll = new HorizontalScrollView(context);
-            scroll.setHorizontalScrollBarEnabled(false);
-            scroll.setClipToPadding(false);
-            scroll.setPadding(dp(12), 0, dp(12), 0);
             row = new LinearLayout(context);
             row.setOrientation(LinearLayout.HORIZONTAL);
-            scroll.addView(row, new ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            addView(scroll, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 104, Gravity.TOP, 0, 4, 0, 8));
+            addView(row, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 44, Gravity.TOP, 8, 4, 8, 4));
         }
 
         void bind() {
             row.removeAllViews();
-            if (movieDetail == null) {
-                return;
-            }
-            for (SvipeMovies.Actor a : movieDetail.actors) {
-                row.addView(actorChip(getContext(), a));
-            }
+            addTab(TAB_RELATED, getString(R.string.SvipeRelatedVideos));
+            addTab(TAB_ACTORS, getString(R.string.SvipeMovieActors));
+            addTab(TAB_VERSIONS, getString(R.string.SvipeMovieVersions));
         }
 
-        private View actorChip(Context context, SvipeMovies.Actor a) {
-            LinearLayout column = new LinearLayout(context);
-            column.setOrientation(LinearLayout.VERTICAL);
-            column.setGravity(Gravity.CENTER_HORIZONTAL);
-
-            BackupImageView avatar = new BackupImageView(context);
-            avatar.setRoundRadius(dp(28));
-            AvatarDrawable drawable = new AvatarDrawable();
-            drawable.setInfo(a.id, a.name, null);
-            avatar.setImageDrawable(drawable);
-            column.addView(avatar, LayoutHelper.createLinear(56, 56));
-
-            TextView name = new TextView(context);
-            name.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
-            name.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-            name.setGravity(Gravity.CENTER);
-            name.setMaxLines(2);
-            name.setEllipsize(TextUtils.TruncateAt.END);
-            name.setText(a.name);
-            LinearLayout.LayoutParams nlp = LayoutHelper.createLinear(72, LayoutHelper.WRAP_CONTENT);
-            nlp.topMargin = dp(4);
-            column.addView(name, nlp);
-
-            column.setOnClickListener(v -> presentFragment(new SvipeActorActivity(a.id, a.name)));
-            LinearLayout.LayoutParams lp = LayoutHelper.createLinear(72, LayoutHelper.WRAP_CONTENT);
+        private void addTab(int tab, CharSequence label) {
+            final boolean selected = currentTab == tab;
+            TextView tv = new TextView(getContext());
+            tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+            tv.setTypeface(AndroidUtilities.bold());
+            tv.setGravity(Gravity.CENTER);
+            tv.setMaxLines(1);
+            tv.setEllipsize(TextUtils.TruncateAt.END);
+            tv.setText(label);
+            tv.setTextColor(Theme.getColor(selected
+                    ? Theme.key_windowBackgroundWhiteBlackText
+                    : Theme.key_windowBackgroundWhiteGrayText));
+            final int bg = Theme.getColor(selected
+                    ? Theme.key_listSelector : Theme.key_windowBackgroundGray);
+            android.graphics.drawable.GradientDrawable shape = new android.graphics.drawable.GradientDrawable();
+            shape.setColor(bg);
+            shape.setCornerRadius(dp(16));
+            tv.setBackground(shape);
+            tv.setOnClickListener(v -> selectTab(tab));
+            LinearLayout.LayoutParams lp = LayoutHelper.createLinear(0, 36, 1f, Gravity.CENTER_VERTICAL);
+            lp.leftMargin = dp(4);
             lp.rightMargin = dp(4);
-            column.setLayoutParams(lp);
-            return column;
+            row.addView(tv, lp);
         }
+    }
+
+    /** One cast member: the same row the film page used, so the move cost the list nothing. */
+    private void bindActor(UserCell cell, int index) {
+        if (movieDetail == null || index < 0 || index >= movieDetail.actors.size()) {
+            return;
+        }
+        final SvipeMovies.Actor a = movieDetail.actors.get(index);
+        AvatarDrawable avatar = new AvatarDrawable();
+        avatar.setInfo(a.id, a.name, null);
+        cell.setData(null, a.name,
+                a.movieCount > 0
+                        ? a.movieCount + " " + getString(R.string.SvipeActorFilmography)
+                        : getString(R.string.SvipeMovieCast),
+                0, index != movieDetail.actors.size() - 1);
+        cell.avatarImageView.setImageDrawable(avatar);
+    }
+
+    /** One copy of the film: which channel posted it, at what quality, in what language. */
+    private void bindVersion(UserCell cell, int index) {
+        if (movieDetail == null || index < 0 || index >= movieDetail.versions.size()) {
+            return;
+        }
+        final SvipeMovies.Version v = movieDetail.versions.get(index);
+        final String name = v.channelTitle != null && !v.channelTitle.isEmpty()
+                ? v.channelTitle : ("@" + (v.username == null ? "" : v.username));
+        AvatarDrawable avatar = new AvatarDrawable();
+        avatar.setInfo(v.channelId, name, null);
+        cell.setData(null, name, versionStatus(v), 0, index != movieDetail.versions.size() - 1);
+        cell.avatarImageView.setImageDrawable(avatar);
+    }
+
+    /** "1080p • uz • 👤 12 • ✓", each part dropped when unknown; ▶ marks the copy on screen. */
+    private String versionStatus(SvipeMovies.Version v) {
+        StringBuilder sb = new StringBuilder();
+        if (isPlaying(v)) {
+            sb.append("▶ ");
+        }
+        if (v.quality != null && !v.quality.isEmpty()) {
+            sb.append(v.quality);
+        } else if (v.height > 0) {
+            sb.append(v.height).append("p");
+        }
+        if (v.language != null && !v.language.isEmpty()) {
+            if (sb.length() > 0) sb.append(" • ");
+            sb.append(v.language);
+        }
+        if (v.votes > 0) {
+            if (sb.length() > 0) sb.append(" • ");
+            sb.append("👤 ").append(v.votes);
+        }
+        if (v.isDefault) {
+            if (sb.length() > 0) sb.append(" • ");
+            sb.append("✓");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Long-press a copy to pin it: "this dub, this encode is the one I want". It is also the crowd
+     * vote that elects everyone else's default, which is why it is a deliberate gesture and not a side
+     * effect of watching one.
+     */
+    private boolean pinVersion(int index) {
+        if (movieDetail == null || pinInFlight || index < 0 || index >= movieDetail.versions.size()) {
+            return false;
+        }
+        final SvipeMovies.Version v = movieDetail.versions.get(index);
+        pinInFlight = true;
+        SvipeMovies.setDefault(currentAccount, movieDetail.movie.id, v.channelId, v.messageId,
+                (ok, error) -> AndroidUtilities.runOnUIThread(() -> {
+                    pinInFlight = false;
+                    if (!ok || movieDetail == null) {
+                        return;
+                    }
+                    for (SvipeMovies.Version other : movieDetail.versions) {
+                        other.isDefault = other == v;
+                    }
+                    movieDetail.myDefault = v;
+                    if (adapter != null) {
+                        adapter.notifyDataSetChanged();
+                    }
+                    BulletinFactory.of(SvipeWatchActivity.this)
+                            .createSimpleBulletin(R.raw.chats_infotip,
+                                    getString(R.string.SvipeMovieDefaultSet)).show();
+                }));
+        return true;
     }
 
     /** Row 0: the hole the pinned player occupies. Same height, computed the same way. */
@@ -1365,7 +1581,16 @@ public class SvipeWatchActivity extends BaseFragment {
             final CharSequence t = titleText();
             title.setText(t);
             title.setVisibility(t == null || t.length() == 0 ? GONE : VISIBLE);
-            meta.setText(SvipeWideVideoCell.metaLine(currentAccount, watched.ref, watched.mo, watched.chat));
+            final CharSequence videoMeta =
+                    SvipeWideVideoCell.metaLine(currentAccount, watched.ref, watched.mo, watched.chat);
+            if (movieDetail != null && movieDetail.movie != null) {
+                // "2016 · ★ 7.7 · Komediya" first, then the copy's own line — the film is the subject
+                // here, and which channel posted this copy is what the channel row underneath says.
+                final String film = SvipeMovies.cardMeta(movieDetail.movie);
+                meta.setText(film.isEmpty() ? videoMeta : film);
+            } else {
+                meta.setText(videoMeta);
+            }
         }
     }
 

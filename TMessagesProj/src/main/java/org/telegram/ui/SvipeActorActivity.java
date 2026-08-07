@@ -92,7 +92,11 @@ public class SvipeActorActivity extends ProfileStyleActivity {
     protected void onListItemClick(View view, int position) {
         if (position >= 0 && position < movies.size()) {
             SvipeMovies.Movie m = movies.get(position);
-            presentFragment(new SvipeMovieActivity(m));
+            // A film from a filmography opens the same way one from a shelf does: it plays, on the
+            // watch page, which is where the cast and the other copies live too.
+            if (m.hasPoster()) {
+                presentFragment(new SvipeWatchActivity(SvipeMovies.PosterRef.of(m)));
+            }
             // Endless paging: the filmography of a prolific actor can outrun one page. Only films we
             // host page — the tail arrives whole, with the last page.
             if (position >= movies.size() - 3) {
