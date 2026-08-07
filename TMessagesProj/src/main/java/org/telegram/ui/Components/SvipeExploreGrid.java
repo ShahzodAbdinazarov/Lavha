@@ -37,7 +37,6 @@ import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Cells.SvipeMovieCell;
 import org.telegram.ui.Cells.SvipeWideVideoCell;
 
 import java.util.ArrayList;
@@ -142,12 +141,10 @@ public class SvipeExploreGrid extends RecyclerListView {
     private static final int TYPE_PHOTO_WIDE = 4;  // a HORIZONTAL/long-form video: full-width 16:9 card
     private static final int TYPE_SKELETON_WIDE = 5;
     private static final int TYPE_CATEGORY_CHIPS = 6;  // the YouTube-style chip strip, always row 0
-    private static final int TYPE_MOVIE = 7;           // a film card in a Zona-style category
-    /**
-     * Film cards use TWO columns, not {@link #SPAN_COUNT}. A "poster" here is a 16:9 video thumbnail
-     * (that is the shape Telegram stores), and three 16:9 cards per row are too small to read a title
-     * under. The span count is switched on the layout manager when a film category is entered.
-     */
+    // 7 was TYPE_MOVIE, a film card of its own. A film is now the SAME full-width row as any other
+    // long video — TYPE_PHOTO_WIDE, SvipeWideVideoCell — with the film's title and "year · ★ rating"
+    // passed in as the two text lines. One row renderer for the whole Video tab is the point: every
+    // chip has to look like the tab it was opened from, and a second cell class is how they drifted.
     private static final int MOVIE_PAGE_SIZE = 30;
     /** The app-start warm-up is offered to the grid once per instance, on its first browse load. */
     private boolean warmTried;
@@ -1613,7 +1610,7 @@ public class SvipeExploreGrid extends RecyclerListView {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             final int type = holder.getItemViewType();
-            return type == TYPE_PHOTO || type == TYPE_PHOTO_WIDE || type == TYPE_MOVIE;
+            return type == TYPE_PHOTO || type == TYPE_PHOTO_WIDE;
         }
 
         @Override
@@ -1626,11 +1623,6 @@ public class SvipeExploreGrid extends RecyclerListView {
             }
             if (searchEmpty()) {
                 return TYPE_EMPTY;
-            }
-            final int idx = position - headerRows();
-            final List<GridItem> grid = currentGrid();
-            if (idx >= 0 && idx < grid.size() && grid.get(idx).movie() != null) {
-                return TYPE_MOVIE;
             }
             return isWideAt(position) ? TYPE_PHOTO_WIDE : TYPE_PHOTO;
         }
@@ -1657,9 +1649,6 @@ public class SvipeExploreGrid extends RecyclerListView {
                     view = chips;
                     break;
                 }
-                case TYPE_MOVIE:
-                    view = new SvipeMovieCell(ctx);
-                    break;
                 case TYPE_EMPTY:
                     view = createEmptyView(ctx);
                     break;
@@ -1686,16 +1675,17 @@ public class SvipeExploreGrid extends RecyclerListView {
                         searchActive ? R.string.NoResult : R.string.SvipeVideoCategoryEmpty));
                 return;
             }
-            if (type != TYPE_PHOTO && type != TYPE_PHOTO_WIDE && type != TYPE_MOVIE) {
+            if (type != TYPE_PHOTO && type != TYPE_PHOTO_WIDE) {
                 return;   // skeleton / chips / recent header self-render, nothing to bind
             }
             final GridItem gi = currentGrid().get(position - headerRows());
-            if (type == TYPE_MOVIE) {
-                ((SvipeMovieCell) holder.itemView).bind(gi.movie(), gi.mo);
-                return;
-            }
             if (type == TYPE_PHOTO_WIDE) {
-                ((SvipeWideVideoCell) holder.itemView).bind(gi.ref, gi.mo, chatHintFor(gi));
+                // A film row is the same card, told what to write on its two lines: the film's title
+                // and "year · ★ rating" instead of the caption and "channel · views · age".
+                final SvipeMovies.Movie movie = gi.movie();
+                ((SvipeWideVideoCell) holder.itemView).bind(gi.ref, gi.mo, chatHintFor(gi),
+                        movie != null ? movie.title : null,
+                        movie != null ? SvipeMovies.cardMeta(movie) : null);
                 return;
             }
             PortraitImageView iv = (PortraitImageView) holder.itemView;

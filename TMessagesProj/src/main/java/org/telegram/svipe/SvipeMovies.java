@@ -116,6 +116,26 @@ public final class SvipeMovies {
         return m.genres.isEmpty() ? "" : m.genres.get(0);
     }
 
+    /**
+     * The second line of a film's row — "2016 · ★ 7.7", falling back to its shelf name when the film
+     * carries neither. It sits where an ordinary video row shows "channel · views · age", so the two
+     * are the same card with a different sentence in the same slot (SvipeWideVideoCell#bind).
+     */
+    public static String cardMeta(Movie m) {
+        if (m == null) {
+            return "";
+        }
+        final StringBuilder sb = new StringBuilder();
+        if (m.year > 0) {
+            sb.append(m.year);
+        }
+        if (m.rating() > 0) {
+            if (sb.length() > 0) sb.append("  •  ");
+            sb.append(String.format(java.util.Locale.US, "★ %.1f", m.rating()));
+        }
+        return sb.length() == 0 ? genreLabel(m) : sb.toString();
+    }
+
     /** A film card in a grid. */
     public static class Movie {
         public long id;

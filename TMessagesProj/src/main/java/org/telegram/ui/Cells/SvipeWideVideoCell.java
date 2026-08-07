@@ -158,6 +158,24 @@ public class SvipeWideVideoCell extends LinearLayout {
      * @param chatHint the channel if the host already resolved it; MessagesController is tried first.
      */
     public void bind(SvipeDiscover.Item ref, MessageObject mo, TLRPC.Chat chatHint) {
+        bind(ref, mo, chatHint, null, null);
+    }
+
+    /**
+     * The same card with the two text lines supplied by the host — what a FILM row needs: its title is
+     * the film's, not the post's caption, and its second line is "year · ★ rating", not
+     * "channel · views · age".
+     *
+     * <p>That is the whole difference between a film shelf and the unfiltered feed. It used to be a
+     * separate cell class, and the shelves consequently read as a different screen from the tab they
+     * were opened from — no avatar, no ⋮, different type sizes and paddings. Two renderers for one
+     * row is also how the ⋮ menu ends up existing on one surface and not the other.
+     *
+     * @param titleOverride first line, or null to use the post's caption.
+     * @param metaOverride  second line, or null to use "channel · views · age".
+     */
+    public void bind(SvipeDiscover.Item ref, MessageObject mo, TLRPC.Chat chatHint,
+                     CharSequence titleOverride, CharSequence metaOverride) {
         this.ref = ref;
         this.mo = mo;
         thumb.bindRef(ref);
@@ -172,8 +190,8 @@ public class SvipeWideVideoCell extends LinearLayout {
             ad.setInfo(0, ref != null ? ref.username : null, null);
             avatar.setImageDrawable(ad);
         }
-        title.setText(captionOf(mo));
-        meta.setText(metaLine(account, ref, mo, chat));
+        title.setText(titleOverride != null ? titleOverride : captionOf(mo));
+        meta.setText(metaOverride != null ? metaOverride : metaLine(account, ref, mo, chat));
     }
 
     public SvipeDiscover.Item getRef() {
