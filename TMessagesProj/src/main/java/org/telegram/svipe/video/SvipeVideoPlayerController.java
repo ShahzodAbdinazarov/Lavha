@@ -1340,9 +1340,15 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
         final Activity activity = activityOf();
         if (activity == null) return;
         try {
-            if (org.telegram.messenger.pip.utils.PipUtils.checkPermissions(activity)
-                    != org.telegram.messenger.pip.utils.PipPermissions.PIP_GRANTED_PIP) {
-                return;   // this device (or this user's settings) has no system PiP to offer
+            // Asked of the system directly, NOT through PipUtils.checkPermissions: that helper
+            // answers OVERLAY first whenever "display over other apps" happens to be granted — which
+            // it very often is, because Telegram asks for it — and gating on its PIP answer would
+            // therefore have silently disabled picture-in-picture for exactly the users most likely
+            // to want it. What matters here is one question: will Android let this app enter its own
+            // picture-in-picture mode?
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O
+                    || !AndroidUtilities.checkPipPermissions(activity)) {
+                return;   // no system PiP on this device, or the user switched it off for us
             }
             pipSource = new org.telegram.messenger.pip.PipSource.Builder(activity, this)
                     .setTagPrefix("svipe-video")
