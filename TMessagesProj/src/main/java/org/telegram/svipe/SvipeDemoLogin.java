@@ -6,9 +6,12 @@ import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.SRPHelper;
+import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.RequestDelegate;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_account;
 
 /**
  * The demo sign-in a store reviewer (and our own testers) use: the whole login happens inside the
@@ -104,7 +107,12 @@ public class SvipeDemoLogin {
                     callback.onError(err != null ? err : ("HTTP_" + httpCode), false);
                     return;
                 }
-                pollForAuthorization(account, POLL_ATTEMPTS, callback);
+                // The demo account keeps two-step verification on, so Telegram will ask this client
+                // for the password before it hands over the authorization. The backend sends it
+                // along — to us, who just proved we know the demo code — so the tester types one
+                // secret rather than two.
+                final String password = result != null ? result.optString("password", "") : "";
+                pollForAuthorization(account, POLL_ATTEMPTS, password, callback);
             });
         });
     }
@@ -113,7 +121,7 @@ public class SvipeDemoLogin {
      * After the backend accepts, the same export call starts answering with the authorization (or
      * with the datacenter it lives on). Acceptance and this poll race, hence the retries.
      */
-    private static void pollForAuthorization(int account, int attemptsLeft, Callback callback) {
+    private static void pollForAuthorization(int account, int attemptsLeft, String password, Callback callback) {
         exportLoginToken(account, 0, (response, error) -> {
             if (response instanceof TLRPC.TL_auth_loginTokenSuccess) {
                 finish(((TLRPC.TL_auth_loginTokenSuccess) response).authorization, callback);
@@ -121,24 +129,76 @@ public class SvipeDemoLogin {
             }
             if (response instanceof TLRPC.TL_auth_loginTokenMigrateTo) {
                 TLRPC.TL_auth_loginTokenMigrateTo migrate = (TLRPC.TL_auth_loginTokenMigrateTo) response;
-                importLoginToken(account, migrate.dc_id, migrate.token, callback);
+                importLoginToken(account, migrate.dc_id, migrate.token, password, callback);
+                return;
+            }
+            // Token accepted, two-step password outstanding. Telegram reports it as an error on the
+            // export itself, not as a login-token state.
+            if (error != null && error.text != null && error.text.contains("SESSION_PASSWORD_NEEDED")) {
+                checkTwoStepPassword(account, password, true, callback);
                 return;
             }
             if (response instanceof TLRPC.TL_auth_loginToken && attemptsLeft > 1) {
-                AndroidUtilities.runOnUIThread(() -> pollForAuthorization(account, attemptsLeft - 1, callback), POLL_DELAY_MS);
+                AndroidUtilities.runOnUIThread(() -> pollForAuthorization(account, attemptsLeft - 1, password, callback), POLL_DELAY_MS);
                 return;
             }
             callback.onError(describe(error, "ACCEPT_TIMEOUT"), false);
         });
     }
 
+    /**
+     * Finish a sign-in that Telegram is holding back for the account's two-step password, the way
+     * the password screen does it: fetch the current SRP parameters, derive the proof, send it.
+     */
+    private static void checkTwoStepPassword(int account, String password, boolean mayRetry, Callback callback) {
+        if (password == null || password.length() == 0) {
+            callback.onError("SESSION_PASSWORD_NEEDED", false);
+            return;
+        }
+        ConnectionsManager.getInstance(account).sendRequest(new TL_account.getPassword(), (response, error) -> {
+            if (!(response instanceof TL_account.Password)) {
+                AndroidUtilities.runOnUIThread(() -> callback.onError(describe(error, "GET_PASSWORD_FAILED"), false));
+                return;
+            }
+            final TL_account.Password current = (TL_account.Password) response;
+            if (!(current.current_algo instanceof TLRPC.TL_passwordKdfAlgoSHA256SHA256PBKDF2HMACSHA512iter100000SHA256ModPow)) {
+                AndroidUtilities.runOnUIThread(() -> callback.onError("PASSWORD_ALGO_UNSUPPORTED", false));
+                return;
+            }
+            // Key derivation is deliberately slow (100k PBKDF2 rounds) — never on the main thread.
+            Utilities.globalQueue.postRunnable(() -> {
+                TLRPC.TL_passwordKdfAlgoSHA256SHA256PBKDF2HMACSHA512iter100000SHA256ModPow algo =
+                        (TLRPC.TL_passwordKdfAlgoSHA256SHA256PBKDF2HMACSHA512iter100000SHA256ModPow) current.current_algo;
+                byte[] x = SRPHelper.getX(AndroidUtilities.getStringBytes(password), algo);
+                TLRPC.TL_inputCheckPasswordSRP proof = SRPHelper.startCheck(x, current.srp_id, current.srp_B, algo);
+                if (proof == null) {
+                    AndroidUtilities.runOnUIThread(() -> callback.onError("PASSWORD_HASH_INVALID", false));
+                    return;
+                }
+                TLRPC.TL_auth_checkPassword req = new TLRPC.TL_auth_checkPassword();
+                req.password = proof;
+                ConnectionsManager.getInstance(account).sendRequest(req, (checked, checkError) -> AndroidUtilities.runOnUIThread(() -> {
+                    if (checked instanceof TLRPC.TL_auth_authorization) {
+                        callback.onSuccess((TLRPC.TL_auth_authorization) checked);
+                    } else if (mayRetry && checkError != null && "SRP_ID_INVALID".equals(checkError.text)) {
+                        checkTwoStepPassword(account, password, false, callback);   // parameters moved on; refetch once
+                    } else {
+                        callback.onError(describe(checkError, "CHECK_PASSWORD_FAILED"), false);
+                    }
+                }), ConnectionsManager.RequestFlagFailOnServerErrors | ConnectionsManager.RequestFlagWithoutLogin);
+            });
+        }, ConnectionsManager.RequestFlagFailOnServerErrors | ConnectionsManager.RequestFlagWithoutLogin);
+    }
+
     /** The account lives on another datacenter: finish the login there. */
-    private static void importLoginToken(int account, int dcId, byte[] token, Callback callback) {
+    private static void importLoginToken(int account, int dcId, byte[] token, String password, Callback callback) {
         TLRPC.TL_auth_importLoginToken req = new TLRPC.TL_auth_importLoginToken();
         req.token = token;
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
             if (response instanceof TLRPC.TL_auth_loginTokenSuccess) {
                 finish(((TLRPC.TL_auth_loginTokenSuccess) response).authorization, callback);
+            } else if (error != null && error.text != null && error.text.contains("SESSION_PASSWORD_NEEDED")) {
+                checkTwoStepPassword(account, password, true, callback);
             } else {
                 callback.onError(describe(error, "IMPORT_FAILED"), false);
             }
