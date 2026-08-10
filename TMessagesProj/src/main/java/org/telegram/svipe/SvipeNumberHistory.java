@@ -37,11 +37,12 @@ import java.util.List;
  * settings allow) — for everyone else {@code user.phone} is empty and nothing is recorded. There is
  * no way to recover the past: a number recycled before install looks like a number with one owner.
  *
- * Capture is local and unconditional; SHARING is not. {@link SvipeNumberSync} can pool this with
- * other Svipe apps — which is what lets a phone learn about a change that happened before it was
- * installed — but only when the owner turns it on, because what would be uploaded is other people's
- * phone numbers, belonging to people who never installed this app and cannot be asked. Everything
- * that arrives from the pool comes back in through {@link #merge}, so there is still one ledger.
+ * Capture is local; SHARING is a separate switch. {@link SvipeNumberSync} pools this with other
+ * Svipe apps — which is what lets a phone learn about a change that happened before it was installed
+ * — and starts on, the way Telegram's own privacy settings start open, with the switch and the
+ * "who may read mine" choice in Settings. Everything that arrives from the pool comes back in
+ * through {@link #merge}, so there is still exactly one ledger. What is READ back is bounded on the
+ * server: only the past, never the number anybody is on today.
  */
 public class SvipeNumberHistory {
 
@@ -316,42 +317,6 @@ public class SvipeNumberHistory {
             FileLog.e(e);
         }
         Collections.sort(out, Comparator.comparingLong(n -> n.firstSeen));
-        return out;
-    }
-
-    /** Numbers that have carried more than one account — the ones worth showing. */
-    public static List<String> recycledNumbers() {
-        ArrayList<String> out = new ArrayList<>();
-        try {
-            for (String key : prefs().getAll().keySet()) {
-                if (!key.startsWith(BY_PHONE)) {
-                    continue;
-                }
-                if (read(key).length() > 1) {
-                    out.add(key.substring(BY_PHONE.length()));
-                }
-            }
-        } catch (Exception e) {
-            FileLog.e(e);
-        }
-        return out;
-    }
-
-    /** Accounts that have been on more than one number — the change-number chains. */
-    public static List<Long> movedAccounts() {
-        ArrayList<Long> out = new ArrayList<>();
-        try {
-            for (String key : prefs().getAll().keySet()) {
-                if (!key.startsWith(BY_USER)) {
-                    continue;
-                }
-                if (read(key).length() > 1) {
-                    out.add(Long.parseLong(key.substring(BY_USER.length())));
-                }
-            }
-        } catch (Exception e) {
-            FileLog.e(e);
-        }
         return out;
     }
 

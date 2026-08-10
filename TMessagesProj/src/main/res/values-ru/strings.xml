@@ -275,9 +275,6 @@
     <string name="SvipeNumberVisibility">Кому видна моя история</string>
     <string name="SvipeNumberVisibilityOff">Не вести мою историю</string>
     <string name="SvipeNumberHistory">История номеров</string>
-    <string name="SvipeNumberHistoryReused">Номера, которыми пользовалось несколько аккаунтов</string>
-    <string name="SvipeNumberHistoryMoved">Аккаунты, сменившие номер</string>
-    <string name="SvipeNumberHistoryEmpty">Пока ничего не записано. Как только контакт сменит номер или знакомый номер окажется у другого аккаунта, это появится здесь.</string>
     <string name="SvipeNumberHistoryInfo">Записывается только на этом устройстве, с момента установки этой версии, и только для номеров, которые показывает Telegram. Никуда не отправляется.</string>
     <string name="SvipeDeletedLog">Удалённые и изменённые</string>
     <string name="SvipeShowInChat">Показывать в чате</string>
