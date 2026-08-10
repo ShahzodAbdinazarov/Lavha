@@ -152,7 +152,6 @@ import org.telegram.tgnet.tl.TL_account;
 import org.telegram.tgnet.tl.TL_update;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
-import org.telegram.svipe.SvipeDemoLogin;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.INavigationLayout;
 import org.telegram.ui.ActionBar.Theme;
@@ -3091,23 +3090,6 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                 }
             }
 
-            // The demo account never receives an SMS: its sign-in is finished inside the app (see
-            // SvipeDemoLogin). Asking Telegram to send a code here would only spend the number's
-            // daily quota and flood-block the very testers this account exists for.
-            if (activityMode == MODE_LOGIN && SvipeDemoLogin.isDemoPhone(phone)) {
-                final Bundle demoParams = new Bundle();
-                demoParams.putString("phone", "+" + codeField.getText() + " " + phoneField.getText());
-                demoParams.putString("ephone", "+" + phone);
-                demoParams.putString("phoneFormated", phone);
-                if (currentCountry != null) {
-                    demoParams.putString("country", currentCountry.code);
-                }
-                ConnectionsManager.getInstance(currentAccount).cleanup(false);  // as the SMS path does
-                needHideProgress(false);
-                fillNextCodeParams(demoParams, SvipeDemoLogin.sentCodeStub());
-                return;
-            }
-
             TLObject req;
             if (activityMode == MODE_CHANGE_PHONE_NUMBER) {
                 TL_account.sendChangePhoneCode changePhoneCode = new TL_account.sendChangePhoneCode();
@@ -4832,41 +4814,6 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                     break;
                 }
                 default: {
-                    // The demo account signs in without a code ever having been sent — the typed
-                    // code is the demo secret, and the backend turns it into a real authorization.
-                    if (SvipeDemoLogin.isDemoPhone(requestPhone)) {
-                        destroyTimer();
-                        destroyCodeTimer();
-                        codeFieldContainer.isFocusSuppressed = true;
-                        for (CodeNumberField f : codeFieldContainer.codeField) {
-                            f.animateFocusedProgress(0);
-                        }
-                        tryShowProgress(0);
-                        SvipeDemoLogin.signIn(currentAccount, code, new SvipeDemoLogin.Callback() {
-                            @Override
-                            public void onSuccess(TLRPC.TL_auth_authorization authorization) {
-                                tryHideProgress(false, true);
-                                nextPressed = false;
-                                showDoneButton(false, true);
-                                animateSuccess(() -> onAuthSuccess(authorization));
-                            }
-
-                            @Override
-                            public void onError(String message, boolean wrongCode) {
-                                tryHideProgress(false, true);
-                                nextPressed = false;
-                                showDoneButton(false, true);
-                                codeFieldContainer.isFocusSuppressed = false;
-                                if (wrongCode) {
-                                    shakeWrongCode();
-                                } else {
-                                    needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), message);
-                                }
-                            }
-                        });
-                        break;
-                    }
-
                     TLRPC.TL_auth_signIn req = new TLRPC.TL_auth_signIn();
                     req.phone_number = requestPhone;
                     req.phone_code = code;
