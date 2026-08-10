@@ -70,8 +70,18 @@ public class SvipeOldIdentity {
         return out;
     }
 
-    /** Numbers this account used before its current one, oldest first. */
     public static List<Item> oldNumbers(int account, long userId) {
+        return oldNumbers(account, userId, null);
+    }
+
+    /**
+     * Numbers this account used before its current one, oldest first.
+     *
+     * ``onResolved`` is called when a number we had to ask Telegram about comes back with an owner —
+     * that answer arrives after this list is built, and without it the row would sit as an unnamed
+     * blank until the screen was opened a second time.
+     */
+    public static List<Item> oldNumbers(int account, long userId, Runnable onResolved) {
         ArrayList<Item> out = new ArrayList<>();
         List<SvipeNumberHistory.Number> numbers = SvipeNumberHistory.numbersOfAccount(userId);
         if (numbers.size() < 2) {
@@ -89,6 +99,21 @@ public class SvipeOldIdentity {
                 }
             }
             TLRPC.User user = holder != null ? resolve(account, holder.userId) : null;
+            if (user == null) {
+                // Nobody we have seen holds it. Telegram will say who does — anybody with a number
+                // can resolve it to a profile — so ask, once ever per number, and use the answer as
+                // soon as it lands. Until then the row is honestly a blank.
+                long resolved = SvipePhoneResolve.cached(phone);
+                if (resolved > 0) {
+                    user = resolve(account, resolved);
+                } else if (resolved == -1) {
+                    SvipePhoneResolve.resolve(account, phone, resolvedId -> {
+                        if (onResolved != null) {
+                            onResolved.run();
+                        }
+                    });
+                }
+            }
             if (user != null && !UserObject.isDeleted(user)) {
                 out.add(new Item(user, phone, true));
             } else {

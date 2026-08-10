@@ -6928,7 +6928,11 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         if (profileActivity != null && dialog_id > 0) {
             final int account = profileActivity.getCurrentAccount();
             profiles = org.telegram.svipe.SvipeOldIdentity.oldProfiles(account, dialog_id);
-            numbers = org.telegram.svipe.SvipeOldIdentity.oldNumbers(account, dialog_id);
+            numbers = org.telegram.svipe.SvipeOldIdentity.oldNumbers(account, dialog_id, () -> {
+                // A number we had to ask Telegram about just came back with an owner.
+                rebuildOldIdentity(true);
+                updateTabs(true);
+            });
         }
         // Ask the pool as well: the change we care about often happened before this phone existed.
         // The answer merges into the same local ledger and rebuilds these lists when it lands.
