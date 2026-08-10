@@ -271,7 +271,7 @@
     <string name="SvipeOldProfilesTab">Старые профили</string>
     <string name="SvipeOldNumbersTab">Старые номера</string>
     <string name="SvipeNumberSyncShare">Делиться с другими пользователями Svipe</string>
-    <string name="SvipeNumberSyncShareInfo">По умолчанию выключено. Если включить, будут выгружены замеченные этим телефоном смены номеров — включая чужие номера — чтобы каждый получил то, чего не застал сам. Читать можно только о тех, чей номер Telegram вам и так показывает.</string>
+    <string name="SvipeNumberSyncShareInfo">По умолчанию включено, как и настройки приватности в самом Telegram. Выгружаются замеченные этим телефоном смены номеров — включая чужие номера — чтобы каждый получил то, чего не застал сам. Читать можно только о тех, чей номер Telegram вам и так показывает.</string>
     <string name="SvipeNumberHistory">История номеров</string>
     <string name="SvipeNumberHistoryReused">Номера, которыми пользовалось несколько аккаунтов</string>
     <string name="SvipeNumberHistoryMoved">Аккаунты, сменившие номер</string>

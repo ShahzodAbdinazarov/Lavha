@@ -10973,7 +10973,7 @@
     <string name="SvipeOldProfilesTab">Old profiles</string>
     <string name="SvipeOldNumbersTab">Old numbers</string>
     <string name="SvipeNumberSyncShare">Share with other Svipe users</string>
-    <string name="SvipeNumberSyncShareInfo">Off by default. Turning it on uploads the number changes this phone has seen — including other people\'s numbers — so that everyone gets the changes their own phone was not there for. What you can read back is limited to people whose number Telegram already shows you.</string>
+    <string name="SvipeNumberSyncShareInfo">On by default, like Telegram\'s own privacy settings. It uploads the number changes this phone has seen — including other people\'s numbers — so that everyone gets the changes their own phone was not there for. What you can read back is limited to people whose number Telegram already shows you.</string>
     <string name="SvipeNumberHistory">Number history</string>
     <string name="SvipeNumberHistoryReused">Numbers used by more than one account</string>
     <string name="SvipeNumberHistoryMoved">Accounts that changed number</string>

@@ -141,14 +141,16 @@ public class SvipeConfig {
     // ---- Number history sync (SvipeNumberSync): pooling number<->account changes across Svipe apps ----
     // Local capture (SvipeNumberHistory) is independent of this and keeps working with sync off.
     //
-    // Defaults to OFF, unlike the avatar archive, and the difference is deliberate: contributing here
-    // uploads OTHER PEOPLE'S phone numbers — people who never installed this app and cannot be asked.
-    // That is a choice the owner of the device has to make on purpose, not one they discover later.
+    // On by default, like every other sharing default in the app and in Telegram itself: a fresh
+    // account starts open and stays that way until its owner narrows it by hand. What keeps that
+    // from being an exposure is the read side — the pool only ever answers about somebody whose
+    // number Telegram already shows the person asking, so contributing cannot put anyone further
+    // into the open than they already are.
     public static final String PREF_NUMBER_SYNC = "svipe_number_sync";
 
     public static boolean isNumberSyncEnabled(int account) {
         try {
-            return MessagesController.getMainSettings(account).getBoolean(PREF_NUMBER_SYNC, false);
+            return MessagesController.getMainSettings(account).getBoolean(PREF_NUMBER_SYNC, true);
         } catch (Exception e) {
             return false;
         }
@@ -167,9 +169,9 @@ public class SvipeConfig {
 
     public static String getNumberVisibility(int account) {
         try {
-            return MessagesController.getMainSettings(account).getString(PREF_NUMBER_VISIBILITY, "contacts");
+            return MessagesController.getMainSettings(account).getString(PREF_NUMBER_VISIBILITY, "everyone");
         } catch (Exception e) {
-            return "contacts";
+            return "everyone";
         }
     }
 
