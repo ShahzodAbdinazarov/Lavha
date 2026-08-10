@@ -40,6 +40,7 @@ public class SvipeSettingsActivity extends BaseFragment {
     // Group B: reels/music media & history.
     private int musicHistoryRow;
     private int reelsHistoryRow;
+    private int backgroundPlayRow;
     private int numberHistoryRow;
     private int blockedChannelsRow;
     private int bottomShadowRow;
@@ -52,6 +53,7 @@ public class SvipeSettingsActivity extends BaseFragment {
         groupShadowRow = rowCount++;
         musicHistoryRow = rowCount++;
         reelsHistoryRow = rowCount++;
+        backgroundPlayRow = rowCount++;
         numberHistoryRow = rowCount++;
         blockedChannelsRow = rowCount++;
         bottomShadowRow = rowCount++;
@@ -103,6 +105,12 @@ public class SvipeSettingsActivity extends BaseFragment {
             presentFragment(new SvipeMusicHistoryActivity());
         } else if (position == reelsHistoryRow) {
             presentFragment(new SvipeReelsHistoryActivity());
+        } else if (position == backgroundPlayRow) {
+            final boolean on = !SvipeConfig.isVideoBackgroundPlay(currentAccount);
+            SvipeConfig.setVideoBackgroundPlay(currentAccount, on);
+            if (adapter != null) {
+                adapter.notifyItemChanged(backgroundPlayRow);
+            }
         } else if (position == numberHistoryRow) {
             presentFragment(new SvipeNumberHistoryActivity());
         } else if (position == blockedChannelsRow) {
@@ -131,8 +139,8 @@ public class SvipeSettingsActivity extends BaseFragment {
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
             return position == avatarRow || position == msgSyncRow || position == musicHistoryRow
-                    || position == reelsHistoryRow || position == numberHistoryRow
-                    || position == blockedChannelsRow;
+                    || position == reelsHistoryRow || position == backgroundPlayRow
+                    || position == numberHistoryRow || position == blockedChannelsRow;
         }
 
         @Override
@@ -145,7 +153,7 @@ public class SvipeSettingsActivity extends BaseFragment {
             if (position == groupShadowRow || position == bottomShadowRow) {
                 return 1;
             }
-            return 0;
+            return position == backgroundPlayRow ? 2 : 0;
         }
 
         @Override
@@ -153,6 +161,9 @@ public class SvipeSettingsActivity extends BaseFragment {
             View view;
             if (viewType == 1) {
                 view = new ShadowSectionCell(context);
+            } else if (viewType == 2) {
+                view = new org.telegram.ui.Cells.TextCheckCell(context);
+                view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
             } else {
                 view = new TextSettingsCell(context);
                 view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
@@ -164,6 +175,13 @@ public class SvipeSettingsActivity extends BaseFragment {
 
         @Override
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
+            if (holder.getItemViewType() == 2) {
+                ((org.telegram.ui.Cells.TextCheckCell) holder.itemView).setTextAndValueAndCheck(
+                        LocaleController.getString(R.string.SvipeVideoBackgroundPlay),
+                        LocaleController.getString(R.string.SvipeVideoBackgroundPlayInfo),
+                        SvipeConfig.isVideoBackgroundPlay(currentAccount), true, true);
+                return;
+            }
             if (holder.getItemViewType() != 0) {
                 return;
             }

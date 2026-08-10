@@ -138,6 +138,28 @@ public class SvipeConfig {
         }
     }
 
+    // ---- Long-form player: keep the audio going when the app is not on screen ----
+    // Default OFF. Telegram's native player does this and ours did not, so it is an advantage worth
+    // having — but it is also the one setting that can leave a video playing after the user thought
+    // they had put the phone down, which is a thing to opt into rather than discover.
+    public static final String PREF_VIDEO_BACKGROUND_PLAY = "svipe_video_background_play";
+
+    public static boolean isVideoBackgroundPlay(int account) {
+        try {
+            return MessagesController.getMainSettings(account).getBoolean(PREF_VIDEO_BACKGROUND_PLAY, false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static void setVideoBackgroundPlay(int account, boolean on) {
+        try {
+            MessagesController.getMainSettings(account).edit().putBoolean(PREF_VIDEO_BACKGROUND_PLAY, on).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
     // ---- Number history sync (SvipeNumberSync): pooling number<->account changes across Svipe apps ----
     // Local capture (SvipeNumberHistory) is independent of this and keeps working with sync off.
     //

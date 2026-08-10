@@ -11,6 +11,8 @@
     <string name="SvipeNumberSyncShareInfo">Standart holatda yoqiq, Telegram\'ning o\'z sozlamalari kabi. Shu telefon ko\'rgan raqam o\'zgarishlari — jumladan boshqalarning raqamlari — yuklanadi va har kim o\'z telefoni ko\'rmagan o\'zgarishlarni ola oladi. O\'qish esa faqat Telegram sizga raqamini ko\'rsatadigan odamlar bilan cheklangan.</string>
     <string name="SvipeNumberVisibility">Tarixim kimga ko\'rinadi</string>
     <string name="SvipeNumberVisibilityOff">Tariximni yozmang</string>
+    <string name="SvipeVideoBackgroundPlay">Videoni fonda ijro etish</string>
+    <string name="SvipeVideoBackgroundPlayInfo">Ilovadan chiqqaningizda ovoz davom etsin</string>
     <string name="SvipeNumberHistory">Raqamlar tarixi</string>
     <string name="SvipeNumberHistoryInfo">Faqat shu qurilmada, shu versiya o\'rnatilgan kundan boshlab va faqat Telegram ko\'rsatgan raqamlar uchun yoziladi. Hech qayerga yuborilmaydi.</string>
     <string name="SvipeDeletedLog">O\'chgan va tahrirlangan</string>

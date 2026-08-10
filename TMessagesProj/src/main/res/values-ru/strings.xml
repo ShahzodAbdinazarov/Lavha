@@ -274,6 +274,8 @@
     <string name="SvipeNumberSyncShareInfo">По умолчанию включено, как и настройки приватности в самом Telegram. Выгружаются замеченные этим телефоном смены номеров — включая чужие номера — чтобы каждый получил то, чего не застал сам. Читать можно только о тех, чей номер Telegram вам и так показывает.</string>
     <string name="SvipeNumberVisibility">Кому видна моя история</string>
     <string name="SvipeNumberVisibilityOff">Не вести мою историю</string>
+    <string name="SvipeVideoBackgroundPlay">Воспроизводить видео в фоне</string>
+    <string name="SvipeVideoBackgroundPlayInfo">Звук продолжается, когда вы выходите из приложения</string>
     <string name="SvipeNumberHistory">История номеров</string>
     <string name="SvipeNumberHistoryInfo">Записывается только на этом устройстве, с момента установки этой версии, и только для номеров, которые показывает Telegram. Никуда не отправляется.</string>
     <string name="SvipeDeletedLog">Удалённые и изменённые</string>

@@ -10976,6 +10976,8 @@
     <string name="SvipeNumberSyncShareInfo">On by default, like Telegram\'s own privacy settings. It uploads the number changes this phone has seen — including other people\'s numbers — so that everyone gets the changes their own phone was not there for. What you can read back is limited to people whose number Telegram already shows you.</string>
     <string name="SvipeNumberVisibility">Who can see my history</string>
     <string name="SvipeNumberVisibilityOff">Don\'t record my history</string>
+    <string name="SvipeVideoBackgroundPlay">Play video in background</string>
+    <string name="SvipeVideoBackgroundPlayInfo">Keep the sound going when you leave the app</string>
     <string name="SvipeNumberHistory">Number history</string>
     <string name="SvipeNumberHistoryInfo">Recorded on this device only, from the day this version was installed, and only for numbers Telegram shows you. Nothing is sent anywhere.</string>
     <string name="SvipeDeletedLog">Deleted &amp; edited</string>

@@ -18,6 +18,8 @@ import org.telegram.messenger.FileStreamLoadOperation;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.Utilities;
+import org.telegram.svipe.SvipeConfig;
 import org.telegram.svipe.SvipeDiscover;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.Components.VideoPlayer;
@@ -307,8 +309,9 @@ public class SvipeVideoPlayerController {
         releaseCurrentVideo();
         account = UserConfig.selectedAccount;
         current = ref;
-        // A paused return carries the position it is returning TO; every other open starts fresh.
-        if (!startPaused) resumeMs = 0;
+        // A paused return carries the position it is returning TO; every other open starts from
+        // wherever this video was last left — in this player OR in Telegram's own.
+        if (!startPaused) resumeMs = savedStartMs(ref.mo);
         final boolean autoplayed = pendingAutoplay;
         pendingAutoplay = false;
         telemetry.onOpen(account, ref, autoplayed);
@@ -648,6 +651,90 @@ public class SvipeVideoPlayerController {
         }
     }
 
+    // ---- resume where you left off, in the store Telegram's own player already uses ----
+
+    /**
+     * How often the current position is written down while playing. Telegram's audio path uses the
+     * same second, and the cost is one small commit off the main thread.
+     */
+    private static final long SAVE_POSITION_EVERY_MS = 1000;
+
+    /**
+     * Telegram only persists (and only reads back) positions for videos at least this long — see
+     * PhotoViewer.getSavedProgress. Writing shorter ones would fill the store with entries nothing
+     * ever reads.
+     */
+    private static final int SAVE_POSITION_MIN_SECONDS = 2 * 60;
+
+    private final Runnable positionSaver = new Runnable() {
+        @Override
+        public void run() {
+            saveProgressNow();
+            if (isPlaying()) {
+                AndroidUtilities.runOnUIThread(this, SAVE_POSITION_EVERY_MS);
+            }
+        }
+    };
+
+    /**
+     * Write the current position into {@code media_saved_pos} — the SAME store, under the SAME key,
+     * that Telegram's own player reads.
+     *
+     * That shared key is the entire point. A video half-watched in Telegram's player resumes here,
+     * one half-watched here resumes in Telegram's, and neither had to know about the other. A private
+     * store would have given us one of those three directions and quietly broken the other two.
+     */
+    private void saveProgressNow() {
+        final MessageObject mo = current != null ? current.mo : null;
+        if (mo == null || player == null) return;
+        try {
+            final int seconds = (int) mo.getDuration();
+            if (seconds < SAVE_POSITION_MIN_SECONDS) return;
+            final String name = mo.getFileNameFast();
+            if (name == null || name.length() == 0) return;
+            final long durationMs = player.getDuration();
+            final long positionMs = player.getCurrentPosition();
+            if (durationMs <= 0 || positionMs < 0) return;
+            final float value = positionMs / (float) durationMs;
+            // Past the end is "finished", and finished has to be forgotten — otherwise reopening the
+            // video drops the viewer at the credits every time.
+            final float toStore = value >= 0.999f ? 0f : value;
+            Utilities.globalQueue.postRunnable(() -> {
+                try {
+                    SharedPreferences.Editor editor = ApplicationLoader.applicationContext
+                            .getSharedPreferences("media_saved_pos", Activity.MODE_PRIVATE).edit();
+                    if (toStore <= 0f) {
+                        editor.remove(name).apply();
+                    } else {
+                        editor.putFloat(name, toStore).apply();
+                    }
+                } catch (Exception ignore) {
+                }
+            });
+        } catch (Exception ignore) {
+        }
+    }
+
+    /**
+     * Where this video should start, in milliseconds: what the app as a whole remembers about it.
+     *
+     * PhotoViewer.getSavedProgress is asked rather than the preferences directly, because it also
+     * knows the short-term positions of videos watched moments ago in that player and applies
+     * Telegram's own rules about which videos are worth remembering at all.
+     */
+    private static long savedStartMs(MessageObject mo) {
+        if (mo == null) return 0;
+        try {
+            final float progress = org.telegram.ui.PhotoViewer.getSavedProgress(mo);
+            final long durationMs = (long) (mo.getDuration() * 1000);
+            if (progress > 0 && progress < 0.999f && durationMs > 0) {
+                return (long) (progress * durationMs);
+            }
+        } catch (Exception ignore) {
+        }
+        return 0;
+    }
+
     private static float savedSpeed(MessageObject mo) {
         if (mo == null) return 1f;
         try {
@@ -861,6 +948,9 @@ public class SvipeVideoPlayerController {
                 startPaused = false;
                 p.setPlayWhenReady(false);
             }
+            if (resumeMs <= 0) {
+                resumeMs = savedStartMs(mo);   // resolved after open(): the message arrived only now
+            }
             if (resumeMs > 0) {
                 try { p.seekTo(resumeMs); } catch (Exception ignore) {}
             }
@@ -881,6 +971,12 @@ public class SvipeVideoPlayerController {
         // detaches, so no code path can leave the display pinned on after the player is gone.
         if (stage != null) stage.setKeepScreenOn(playing);
         if (stage != null) stage.getControls().setPlaying(playing);
+        AndroidUtilities.cancelRunOnUIThread(positionSaver);
+        if (playing) {
+            AndroidUtilities.runOnUIThread(positionSaver, SAVE_POSITION_EVERY_MS);
+        } else {
+            saveProgressNow();   // a pause is the position most worth keeping
+        }
         telemetry.onPlayingChanged(playing);
         for (int i = 0; i < observers.size(); i++) observers.get(i).onPlayingChanged(playing);
     }
@@ -896,6 +992,8 @@ public class SvipeVideoPlayerController {
 
     private void releasePlayer() {
         if (player == null) return;
+        AndroidUtilities.cancelRunOnUIThread(positionSaver);
+        saveProgressNow();      // before the position is gone with the player
         try { resumeMs = Math.max(0, player.getCurrentPosition()); } catch (Exception ignore) {}
         try { player.releasePlayer(true); } catch (Exception ignore) {}
         player = null;
@@ -1171,10 +1269,15 @@ public class SvipeVideoPlayerController {
     // ---------------- activity lifecycle (LaunchActivity forwards) ----------------
 
     /**
-     * Backgrounding pauses playback: background audio is explicitly out of scope, and a paused player
-     * keeps its position so returning resumes exactly where the user left off. The brightness override
-     * goes back to the system here too — it is a window attribute, so leaving it set would dim (or
-     * blaze) whatever the user opens next.
+     * Backgrounding pauses playback unless the user asked for the opposite.
+     *
+     * A paused player keeps its position, so returning resumes exactly where they left off either
+     * way; what the setting changes is whether the sound goes with them. It defaults to off because
+     * audio continuing after the phone is put down is a thing to choose, not to discover — but
+     * Telegram's own player does it, so refusing outright would be giving something up for nothing.
+     *
+     * The brightness override goes back to the system here regardless: it is a window attribute, so
+     * leaving it set would dim (or blaze) whatever the user opens next.
      */
     public void onActivityPause() {
         if (stage != null) {
@@ -1186,6 +1289,12 @@ public class SvipeVideoPlayerController {
         telemetry.onBackground();
         if (player == null) return;
         try { resumeMs = Math.max(0, player.getCurrentPosition()); } catch (Exception ignore) {}
+        if (SvipeConfig.isVideoBackgroundPlay(account) && isPlaying()) {
+            // Keep the audio running. The surface is gone, so this is sound only — which is the
+            // whole point for a lecture or a podcast.
+            saveProgressNow();
+            return;
+        }
         try { player.pause(); } catch (Exception ignore) {}
     }
 
