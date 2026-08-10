@@ -45,7 +45,7 @@ import java.util.List;
  * The surface lives in {@link SvipeVideoStage}, an overlay above the whole fragment stack, so a mode
  * change is pure geometry: the player is never rebuilt and playback never restarts.
  */
-public class SvipeVideoPlayerController {
+public class SvipeVideoPlayerController implements org.telegram.messenger.pip.source.IPipSourceDelegate {
 
     /** Nothing is open; the stage is GONE and swallows no touches. */
     public static final int MODE_CLOSED = 0;
@@ -879,6 +879,7 @@ public class SvipeVideoPlayerController {
                 FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_HIGH);
             }
             p.setTextureView(stage.getTextureView()); // exactly once per opened video
+            attachPipSource();
             // setDelegate MUST precede preparePlayer: VideoPlayer reports the first state change
             // during prepare and dereferences the delegate with no null check.
             p.setDelegate(new VideoPlayer.VideoPlayerDelegate() {
@@ -1006,6 +1007,7 @@ public class SvipeVideoPlayerController {
 
     private void releasePlayer() {
         if (player == null) return;
+        detachPipSource();
         AndroidUtilities.cancelRunOnUIThread(positionSaver);
         saveProgressNow();      // before the position is gone with the player
         try { resumeMs = Math.max(0, player.getCurrentPosition()); } catch (Exception ignore) {}
@@ -1280,6 +1282,114 @@ public class SvipeVideoPlayerController {
         }
     };
 
+    // ---------------- system picture-in-picture ----------------
+
+    /**
+     * The registered PiP source. Its presence is what lets Android shrink the app into a floating
+     * window when the user leaves — the framework asks for it on {@code onUserLeaveHint}, so there is
+     * no button to press and nothing to remember.
+     */
+    private org.telegram.messenger.pip.PipSource pipSource;
+
+    /**
+     * The second surface, living inside the PiP window.
+     *
+     * A separate one is unavoidable: the PiP window is a different view hierarchy, and the picture
+     * has to be rendered into it. What is avoidable — and avoided — is rebuilding the player around
+     * it: ExoPlayer re-points its video output at a new TextureView in place, so the handover keeps
+     * the position, the buffer and the audio, and costs at most a frame.
+     */
+    private android.view.TextureView pipTextureView;
+
+    /** Whether the app is currently the floating window rather than the screen. */
+    private boolean isInPictureInPicture() {
+        try {
+            final Activity activity = activityOf();
+            return activity != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N
+                    && activity.isInPictureInPictureMode();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void attachPipSource() {
+        if (pipSource != null || player == null || stage == null) return;
+        final Activity activity = activityOf();
+        if (activity == null) return;
+        try {
+            if (org.telegram.messenger.pip.utils.PipUtils.checkPermissions(activity)
+                    != org.telegram.messenger.pip.utils.PipPermissions.PIP_GRANTED_PIP) {
+                return;   // this device (or this user's settings) has no system PiP to offer
+            }
+            pipSource = new org.telegram.messenger.pip.PipSource.Builder(activity, this)
+                    .setTagPrefix("svipe-video")
+                    .setContentView(stage.getPipContentView())
+                    .setPlayer(player.player)
+                    .setNeedMediaSession(true)
+                    .build();
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+    }
+
+    private void detachPipSource() {
+        if (pipSource != null) {
+            try { pipSource.destroy(); } catch (Exception ignore) {}
+            pipSource = null;
+        }
+        pipTextureView = null;
+    }
+
+    @Override
+    public View pipCreatePictureInPictureView() {
+        pipTextureView = new android.view.TextureView(ApplicationLoader.applicationContext);
+        return pipTextureView;
+    }
+
+    @Override
+    public void pipHidePrimaryWindowView(Runnable firstFrameCallback) {
+        // Point the running player at the PiP surface and take the on-screen picture away. The
+        // player is untouched otherwise — no prepare, no seek, no gap in the sound.
+        if (player != null && pipTextureView != null) {
+            try { player.setTextureView(pipTextureView); } catch (Exception ignore) {}
+        }
+        if (stage != null) stage.setPictureHidden(true);
+        if (firstFrameCallback != null) firstFrameCallback.run();
+    }
+
+    @Override
+    public void pipShowPrimaryWindowView(Runnable firstFrameCallback) {
+        if (player != null && stage != null) {
+            try { player.setTextureView(stage.getTextureView()); } catch (Exception ignore) {}
+        }
+        if (stage != null) stage.setPictureHidden(false);
+        if (firstFrameCallback != null) firstFrameCallback.run();
+    }
+
+    @Override
+    public android.graphics.Bitmap pipCreatePrimaryWindowViewBitmap() {
+        return stage != null ? stage.snapshotPicture() : null;
+    }
+
+    @Override
+    public android.graphics.Bitmap pipCreatePictureInPictureViewBitmap() {
+        try {
+            if (pipTextureView != null && pipTextureView.isAvailable()
+                    && pipTextureView.getWidth() > 0 && pipTextureView.getHeight() > 0) {
+                return pipTextureView.getBitmap();
+            }
+        } catch (Exception ignore) {
+        }
+        return null;
+    }
+
+    @Override
+    public boolean pipIsAvailable() {
+        // Only while something is actually playing: a paused player in a floating window is a
+        // screenshot the user has to dismiss.
+        return isOpen() && isPlaying();
+    }
+
     // ---------------- activity lifecycle (LaunchActivity forwards) ----------------
 
     /**
@@ -1303,7 +1413,7 @@ public class SvipeVideoPlayerController {
         telemetry.onBackground();
         if (player == null) return;
         try { resumeMs = Math.max(0, player.getCurrentPosition()); } catch (Exception ignore) {}
-        if (SvipeConfig.isVideoBackgroundPlay(account) && isPlaying()) {
+        if ((isInPictureInPicture() || SvipeConfig.isVideoBackgroundPlay(account)) && isPlaying()) {
             // Keep the audio running. The surface is gone, so this is sound only — which is the
             // whole point for a lecture or a podcast.
             saveProgressNow();

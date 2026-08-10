@@ -229,6 +229,36 @@ public class SvipeVideoStage extends FrameLayout {
         return textureView;
     }
 
+    /**
+     * The view the system's picture-in-picture transition measures and animates against — the
+     * letterboxed picture, not the whole stage, so the shrinking window lands on the video rather
+     * than on the black bars beside it.
+     */
+    public View getPipContentView() {
+        return aspect;
+    }
+
+    /**
+     * Hide the on-screen picture while the video is being rendered into the PiP window instead.
+     *
+     * Only the picture: the stage itself stays in the tree, holding the player, the controls and
+     * every piece of state, so coming back out of PiP is a visibility change rather than a rebuild.
+     */
+    public void setPictureHidden(boolean hidden) {
+        aspect.setVisibility(hidden ? INVISIBLE : VISIBLE);
+    }
+
+    /** The last frame on screen, for the crossfade the PiP framework runs over the handover. */
+    public android.graphics.Bitmap snapshotPicture() {
+        try {
+            if (textureView.isAvailable() && textureView.getWidth() > 0 && textureView.getHeight() > 0) {
+                return textureView.getBitmap();
+            }
+        } catch (Exception ignore) {
+        }
+        return null;
+    }
+
     public SvipeVideoControls getControls() {
         return controls;
     }
