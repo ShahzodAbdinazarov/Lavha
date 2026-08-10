@@ -70,18 +70,21 @@ fi
 # it in the policy (and here), or in NO_DATA if it reaches no user data at all.
 PRIVACY_URL="${PRIVACY_URL:-https://svipe.uz/privacy}"
 
-# permission-regex -> a phrase that must appear on the policy page for it
+# permission-regex -> a phrase that must appear on the policy page for it.
+# Section headings are matched WITHOUT their number: the number is presentation and shifts the
+# moment a section is inserted above, which failed this gate for every location, contacts, calls
+# and payments permission the day a new section was added — a policy that had not changed at all.
 COVER=(
-  'ACCESS_(FINE|COARSE|BACKGROUND)_LOCATION|FOREGROUND_SERVICE_LOCATION§<h2>7. Location</h2>'
+  'ACCESS_(FINE|COARSE|BACKGROUND)_LOCATION|FOREGROUND_SERVICE_LOCATION§<h2>[0-9]+\. Location</h2>'
   'ACCESS_MEDIA_LOCATION§coordinates of where it was taken'
   'CAMERA§<strong>Camera</strong>'
   'RECORD_AUDIO|FOREGROUND_SERVICE_MICROPHONE§<strong>Microphone</strong>'
   'READ_MEDIA_(IMAGES|VIDEO|AUDIO)|(READ|WRITE)_EXTERNAL_STORAGE§Photos, videos, music and files'
   'FOREGROUND_SERVICE_MEDIA_PROJECTION§<strong>Screen sharing</strong>'
-  '(READ|WRITE)_CONTACTS|GET_ACCOUNTS|(AUTHENTICATE|MANAGE)_ACCOUNTS|READ_PROFILE|(READ|WRITE)_SYNC_SETTINGS§<h2>9. Contacts</h2>'
-  'MANAGE_OWN_CALLS|READ_PHONE_(STATE|NUMBERS)§<h2>10. Calls</h2>'
-  'vending\.BILLING§<h2>11. Payments</h2>'
-  'USE_BIOMETRIC|USE_FINGERPRINT|READ_CLIPBOARD§<h2>12. What stays on your device</h2>'
+  '(READ|WRITE)_CONTACTS|GET_ACCOUNTS|(AUTHENTICATE|MANAGE)_ACCOUNTS|READ_PROFILE|(READ|WRITE)_SYNC_SETTINGS§<h2>[0-9]+\. Contacts</h2>'
+  'MANAGE_OWN_CALLS|READ_PHONE_(STATE|NUMBERS)§<h2>[0-9]+\. Calls</h2>'
+  'vending\.BILLING§<h2>[0-9]+\. Payments</h2>'
+  'USE_BIOMETRIC|USE_FINGERPRINT|READ_CLIPBOARD§<h2>[0-9]+\. What stays on your device</h2>'
   'POST_NOTIFICATIONS|c2dm\.permission\.RECEIVE§push notification token'
 )
 # reaches no user data: plumbing, launcher badges, wake/vibrate, install/update, window flags
@@ -96,7 +99,9 @@ if POLICY="$(curl -fsS --max-time 20 "$PRIVACY_URL")"; then
       pat="${row%%§*}"; phrase="${row#*§}"
       grep -qE "$pat" <<<"$perm" || continue
       matched=1
-      if ! grep -qF "$phrase" <<<"$POLICY"; then
+      # -E, not -F: the section phrases carry a "[0-9]+\." for the heading number they must not
+      # depend on. Everything else in them is literal enough that regex matching costs nothing.
+      if ! grep -qE "$phrase" <<<"$POLICY"; then
         echo "  ✗ $perm — policy does not disclose it (missing: \"$phrase\")"; fail=1
       fi
       break
