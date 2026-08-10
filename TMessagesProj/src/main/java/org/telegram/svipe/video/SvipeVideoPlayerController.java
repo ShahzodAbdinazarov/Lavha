@@ -984,6 +984,7 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
         // screen timeout has to be held off while — and only while — something is actually playing.
         // Hung on the stage view rather than the window: a view's keep-screen-on is released when it
         // detaches, so no code path can leave the display pinned on after the player is gone.
+        if (playing) pausedByActivity = false;
         if (stage != null) stage.setKeepScreenOn(playing);
         if (stage != null) stage.getControls().setPlaying(playing);
         AndroidUtilities.cancelRunOnUIThread(positionSaver);
@@ -1236,6 +1237,19 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
             syncRelatedSnapshot();   // last chance: autoplay in the mini bar has no page to ask
             watchPage = null;
             toMini();
+            // Tapping a notification while watching opens a chat over the page, and the app was
+            // backgrounded on the way — so playback is sitting paused for a reason that has just
+            // stopped applying. The video belongs in the mini card, still running, while the message
+            // gets answered; that is the whole point of having a mini card. A pause the USER asked
+            // for is untouched, because pausedByActivity says which of the two this was.
+            if (pausedByActivity && player != null && !player.isPlaying()) {
+                pausedByActivity = false;
+                try {
+                    player.setPlayWhenReady(true);
+                    player.play();
+                } catch (Exception ignore) {
+                }
+            }
             // The buried page can never host the player again — the mini bar's restore presents a
             // fresh one — so it is dropped instead of being revealed later with a black hole in it.
             // Deferred one frame to stay out of the navigation layout's own transition bookkeeping.
@@ -1300,6 +1314,15 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
      * the position, the buffer and the audio, and costs at most a frame.
      */
     private android.view.TextureView pipTextureView;
+
+    /**
+     * Whether the pause that stopped playback was the app going away, rather than the user asking.
+     *
+     * The two are different intentions and have to be told apart: someone who pressed pause wants it
+     * to stay paused, but someone who tapped a notification while watching did not ask for anything
+     * to stop — they asked to read a message. Cleared the moment playback starts again by any route.
+     */
+    private boolean pausedByActivity;
 
     /** Whether the app is currently the floating window rather than the screen. */
     private boolean isInPictureInPicture() {
@@ -1413,7 +1436,9 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
         telemetry.onBackground();
         if (player == null) return;
         try { resumeMs = Math.max(0, player.getCurrentPosition()); } catch (Exception ignore) {}
+        if (isPlaying()) pausedByActivity = true;
         if ((isInPictureInPicture() || SvipeConfig.isVideoBackgroundPlay(account)) && isPlaying()) {
+            pausedByActivity = false;   // nothing was paused, so there is nothing to undo later
             // Keep the audio running. The surface is gone, so this is sound only — which is the
             // whole point for a lecture or a podcast.
             saveProgressNow();
