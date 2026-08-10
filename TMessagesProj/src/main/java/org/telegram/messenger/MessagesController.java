@@ -6869,6 +6869,10 @@ public class MessagesController extends BaseController implements NotificationCe
             return false;
         }
         fromCache = fromCache && user.id / 1000 != 333 && user.id != 777000;
+        // Every user object the app touches passes here, which makes it the one place that sees a
+        // contact's number change to a different one — Telegram keeps no history of that, so we do.
+        // Costs a map lookup when nothing changed, which is almost always. See SvipeNumberHistory.
+        org.telegram.svipe.SvipeNumberHistory.observe(user);
         TLRPC.User oldUser = users.get(user.id);
         if (oldUser == user && !force) {
             return false;
@@ -20016,6 +20020,12 @@ public class MessagesController extends BaseController implements NotificationCe
                     } else if (baseUpdate instanceof TL_update.TL_updateUserPhone) {
                         TL_update.TL_updateUserPhone update = (TL_update.TL_updateUserPhone) baseUpdate;
                         TLRPC.User currentUser = getUser(update.user_id);
+                        // The explicit signal that a contact moved to a new number. Recorded before
+                        // the old number is overwritten, because after this line it is gone.
+                        org.telegram.svipe.SvipeNumberHistory.observePhoneChange(
+                                update.user_id, update.phone,
+                                currentUser != null ? UserObject.getUserName(currentUser) : null,
+                                currentUser != null ? UserObject.getPublicUsername(currentUser) : null);
                         if (currentUser != null) {
                             currentUser.phone = update.phone;
                             Utilities.phoneBookQueue.postRunnable(() -> getContactsController().addContactToPhoneBook(currentUser, true));

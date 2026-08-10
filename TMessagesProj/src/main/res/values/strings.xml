@@ -10970,6 +10970,11 @@
     <string name="SvipeIntroMessage">The most engaging short videos from Telegram channels, all in one feed.</string>
     <string name="SvipeProfileImagesTab">Profile Images</string>
     <string name="SvipePhotoDeleted">Deleted</string>
+    <string name="SvipeNumberHistory">Number history</string>
+    <string name="SvipeNumberHistoryReused">Numbers used by more than one account</string>
+    <string name="SvipeNumberHistoryMoved">Accounts that changed number</string>
+    <string name="SvipeNumberHistoryEmpty">Nothing recorded yet. Once a contact changes their number, or a number you have seen turns up under a different account, it appears here.</string>
+    <string name="SvipeNumberHistoryInfo">Recorded on this device only, from the day this version was installed, and only for numbers Telegram shows you. Nothing is sent anywhere.</string>
     <string name="SvipeDeletedLog">Deleted &amp; edited</string>
     <string name="SvipeShowInChat">Show in chat</string>
     <string name="SvipeDeletedLabel">Deleted</string>

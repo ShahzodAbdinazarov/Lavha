@@ -5,6 +5,11 @@
     <string name="SvipeIntroMessage">Telegram kanallaridagi eng qiziqarli qisqa videolar — bitta tasmada.</string>
     <string name="SvipeProfileImagesTab">Profil rasmlari</string>
     <string name="SvipePhotoDeleted">O\'chirilgan</string>
+    <string name="SvipeNumberHistory">Raqamlar tarixi</string>
+    <string name="SvipeNumberHistoryReused">Bir nechta akkaunt ishlatgan raqamlar</string>
+    <string name="SvipeNumberHistoryMoved">Raqamini o\'zgartirgan akkauntlar</string>
+    <string name="SvipeNumberHistoryEmpty">Hozircha yozuv yo\'q. Kontakt raqamini o\'zgartirsa yoki ko\'rgan raqamingiz boshqa akkauntda paydo bo\'lsa, shu yerda chiqadi.</string>
+    <string name="SvipeNumberHistoryInfo">Faqat shu qurilmada, shu versiya o\'rnatilgan kundan boshlab va faqat Telegram ko\'rsatgan raqamlar uchun yoziladi. Hech qayerga yuborilmaydi.</string>
     <string name="SvipeDeletedLog">O\'chgan va tahrirlangan</string>
     <string name="SvipeShowInChat">Chatda ko\'rsatish</string>
     <string name="SvipeDeletedLabel">O\'chirilgan</string>

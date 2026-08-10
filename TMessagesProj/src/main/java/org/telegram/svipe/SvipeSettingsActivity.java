@@ -40,6 +40,7 @@ public class SvipeSettingsActivity extends BaseFragment {
     // Group B: reels/music media & history.
     private int musicHistoryRow;
     private int reelsHistoryRow;
+    private int numberHistoryRow;
     private int blockedChannelsRow;
     private int bottomShadowRow;
     private int rowCount;
@@ -51,6 +52,7 @@ public class SvipeSettingsActivity extends BaseFragment {
         groupShadowRow = rowCount++;
         musicHistoryRow = rowCount++;
         reelsHistoryRow = rowCount++;
+        numberHistoryRow = rowCount++;
         blockedChannelsRow = rowCount++;
         bottomShadowRow = rowCount++;
     }
@@ -101,6 +103,8 @@ public class SvipeSettingsActivity extends BaseFragment {
             presentFragment(new SvipeMusicHistoryActivity());
         } else if (position == reelsHistoryRow) {
             presentFragment(new SvipeReelsHistoryActivity());
+        } else if (position == numberHistoryRow) {
+            presentFragment(new SvipeNumberHistoryActivity());
         } else if (position == blockedChannelsRow) {
             presentFragment(new SvipeBlockedChannelsActivity());
         }
@@ -127,7 +131,8 @@ public class SvipeSettingsActivity extends BaseFragment {
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
             return position == avatarRow || position == msgSyncRow || position == musicHistoryRow
-                    || position == reelsHistoryRow || position == blockedChannelsRow;
+                    || position == reelsHistoryRow || position == numberHistoryRow
+                    || position == blockedChannelsRow;
         }
 
         @Override
@@ -173,6 +178,8 @@ public class SvipeSettingsActivity extends BaseFragment {
                 cell.setText(LocaleController.getString(R.string.SvipeMusicListeningHistory), true);
             } else if (position == reelsHistoryRow) {
                 cell.setText(LocaleController.getString(R.string.SvipeReelsWatchHistory), true);
+            } else if (position == numberHistoryRow) {
+                cell.setText(LocaleController.getString(R.string.SvipeNumberHistory), true);
             } else if (position == blockedChannelsRow) {
                 cell.setText(LocaleController.getString(R.string.SvipeBlockedChannels), false);
             }
