@@ -395,7 +395,14 @@ public class SvipeVideoPlayerController {
 
     public void toInline() {
         if (!isOpen() || mode == MODE_INLINE) return;
+        final boolean fromMini = mode == MODE_MINI;
         setMode(MODE_INLINE, true);
+        if (fromMini && stage != null) {
+            // AFTER the mode change, so the growth animation started from where the card actually
+            // sat. Clearing it now means the next minimise goes home to the corner, which is where
+            // a mini player belongs until the user moves it again.
+            stage.resetMiniPosition();
+        }
     }
 
     /** Dismiss the player for good: the mini bar's ✕, a side-swipe, or the activity going away. */
@@ -456,7 +463,14 @@ public class SvipeVideoPlayerController {
         if (page != null) page.finishFragment();
     }
 
-    /** Grow the mini bar back into a full watch page at the same playback position. */
+    /**
+     * Grow the mini card back into a full watch page at the same playback position.
+     *
+     * The card's parked position is cleared only AFTER the mode change, so the growth animation
+     * starts from where the card actually sits rather than snapping to the corner first; the next
+     * minimise then starts from the corner again, which is where a mini player belongs when it has
+     * not been moved yet.
+     */
     public void restoreFromMini() {
         if (mode != MODE_MINI) return;
         final SvipeDiscover.Item item = restoreItem;

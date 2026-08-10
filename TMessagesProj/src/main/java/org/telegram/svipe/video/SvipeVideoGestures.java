@@ -57,6 +57,8 @@ public class SvipeVideoGestures {
     private static final int DRAG_RECT = 1;
     /** Side-swipe on the mini bar. */
     private static final int DRAG_DISMISS = 4;
+    /** Moving the parked mini card around the screen. */
+    private static final int DRAG_MOVE = 5;
 
     private final SvipeVideoStage stage;
     private final SvipeVideoControls controls;
@@ -217,6 +219,11 @@ public class SvipeVideoGestures {
             case DRAG_DISMISS:
                 stage.setDrag(SvipeVideoPlayerController.MODE_MINI, 0, dx, 0);
                 break;
+            case DRAG_MOVE:
+                // The card follows the finger in both axes, exactly, with no damping — it is an
+                // object being moved, not a transition being hinted at.
+                stage.setMiniDrag(dx, dy, false);
+                break;
         }
     }
 
@@ -249,14 +256,11 @@ public class SvipeVideoGestures {
                 }
                 break;
             case SvipeVideoPlayerController.MODE_MINI:
-                if (vertical) {
-                    if (up) {
-                        dragKind = DRAG_RECT;
-                        dragTargetMode = SvipeVideoPlayerController.MODE_INLINE;
-                    }
-                } else {
-                    dragKind = DRAG_DISMISS;
-                }
+                // The card is a thing you pick up and put down, YouTube-style: any drag moves it,
+                // a tap opens it, and a hard sideways fling throws it away. There is no drag that
+                // restores it any more — that was the only way to open it before the tap existed,
+                // and keeping it would have made the whole upper half of the screen unreachable.
+                dragKind = DRAG_MOVE;
                 break;
         }
         if (dragKind != DRAG_NONE) {
@@ -297,6 +301,18 @@ public class SvipeVideoGestures {
                 stage.endDrag(commit);
                 if (commit) {
                     commitTransition(dragTargetMode);
+                }
+                break;
+            }
+            case DRAG_MOVE: {
+                // A hard sideways throw still means "get rid of it"; anything else leaves the card
+                // where the finger put it.
+                if (up && Math.abs(velocityX) >= AndroidUtilities.dp(1200)
+                        && Math.abs(velocityX) > Math.abs(velocityY) * 2) {
+                    stage.setMiniDrag(0, 0, true);
+                    stage.animateDismiss(velocityX >= 0 ? 1 : -1);
+                } else {
+                    stage.setMiniDrag(moveDx, moveDy, true);
                 }
                 break;
             }

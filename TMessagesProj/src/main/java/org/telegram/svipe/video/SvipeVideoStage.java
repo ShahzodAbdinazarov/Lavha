@@ -452,11 +452,17 @@ public class SvipeVideoStage extends FrameLayout {
             // spent its width on a title nobody reads and left the video a postage stamp; this is
             // the shape YouTube uses now, and it is also the honest one — the thing being minimised
             // is a video, so what stays on screen should be the video.
-            final int cardWidth = Math.min(AndroidUtilities.dp(MINI_WIDTH_DP), Math.round(w * .5f));
+            final int cardWidth = miniCardWidth();
             final int cardHeight = Math.round(cardWidth * 9f / 16f);
             final int margin = AndroidUtilities.dp(MINI_MARGIN_DP);
             final int bottom = h - miniBottomClearance() - margin;
             out.set(w - margin - cardWidth, bottom - cardHeight, w - margin, bottom);
+            // Wherever the user put it. Applied to the RECT rather than as a view translation, so
+            // that growing the card back into a page starts from where it actually sits — the
+            // transition lerps rects, and a translated view would have jumped home first.
+            final int dx = Math.round(clampMiniX(miniOffsetX + miniDragX));
+            final int dy = Math.round(clampMiniY(miniOffsetY + miniDragY));
+            out.offset(dx, dy);
             return;
         }
         // Inline: exactly the watch page's placeholder. Until it reports one, a 16:9 strip under the
@@ -652,6 +658,53 @@ public class SvipeVideoStage extends FrameLayout {
     }
 
     private float followDrag;
+
+    /**
+     * Where the user has parked the mini card, relative to its bottom-right home.
+     *
+     * Kept as an offset rather than an absolute rect so the card stays anchored through a rotation,
+     * a keyboard, or the tab bar appearing under it — the corner moves, and the card moves with it.
+     * Reset whenever the card grows back into a page, because a mini player that reappears somewhere
+     * the user last left it minutes ago, over different content, reads as a bug rather than as memory.
+     */
+    private float miniOffsetX, miniOffsetY;
+    private float miniDragX, miniDragY;      // live, while a finger is on it
+
+    /** Park the card where the finger left it, clamped so it can never leave the screen. */
+    public void setMiniDrag(float dx, float dy, boolean commit) {
+        miniDragX = dx;
+        miniDragY = dy;
+        if (commit) {
+            miniOffsetX = clampMiniX(miniOffsetX + dx);
+            miniOffsetY = clampMiniY(miniOffsetY + dy);
+            miniDragX = miniDragY = 0;
+        }
+        requestLayout();
+    }
+
+    /** Back to the bottom-right corner: the home every minimise starts from. */
+    public void resetMiniPosition() {
+        miniOffsetX = miniOffsetY = miniDragX = miniDragY = 0;
+    }
+
+    private float clampMiniX(float value) {
+        final int cardWidth = miniCardWidth();
+        final int margin = AndroidUtilities.dp(MINI_MARGIN_DP);
+        // Home is the right edge, so travel is leftwards: negative, bounded by the screen width.
+        return Math.max(-(getMeasuredWidth() - cardWidth - margin * 2), Math.min(0, value));
+    }
+
+    private float clampMiniY(float value) {
+        final int cardHeight = Math.round(miniCardWidth() * 9f / 16f);
+        final int margin = AndroidUtilities.dp(MINI_MARGIN_DP);
+        final int home = getMeasuredHeight() - miniBottomClearance() - margin;
+        final int topLimit = AndroidUtilities.statusBarHeight + margin;
+        return Math.max(-(home - cardHeight - topLimit), Math.min(0, value));
+    }
+
+    private int miniCardWidth() {
+        return Math.min(AndroidUtilities.dp(MINI_WIDTH_DP), Math.round(getMeasuredWidth() * .5f));
+    }
 
     /**
      * The finger let go. On a commit the caller immediately asks the controller for the new mode, whose
