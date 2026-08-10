@@ -37,8 +37,11 @@ import java.util.List;
  * settings allow) — for everyone else {@code user.phone} is empty and nothing is recorded. There is
  * no way to recover the past: a number recycled before install looks like a number with one owner.
  *
- * Local only. Nothing here is ever sent anywhere: it is a record of other people's numbers, which
- * is exactly the kind of thing that must not leave the phone it was observed on.
+ * Capture is local and unconditional; SHARING is not. {@link SvipeNumberSync} can pool this with
+ * other Svipe apps — which is what lets a phone learn about a change that happened before it was
+ * installed — but only when the owner turns it on, because what would be uploaded is other people's
+ * phone numbers, belonging to people who never installed this app and cannot be asked. Everything
+ * that arrives from the pool comes back in through {@link #merge}, so there is still one ledger.
  */
 public class SvipeNumberHistory {
 
@@ -129,7 +132,7 @@ public class SvipeNumberHistory {
         final long userId = user.id;
         final String name = UserObject.getUserName(user);
         final String username = UserObject.getPublicUsername(user);
-        Utilities.globalQueue.postRunnable(() -> record(userId, phone, name, username));
+        Utilities.globalQueue.postRunnable(() -> record(userId, phone, name, username, 0, 0));
     }
 
     /** The explicit signal: Telegram told us this account moved to a different number. */
@@ -142,7 +145,25 @@ public class SvipeNumberHistory {
         synchronized (lastKnown) {
             lastKnown.put(userId, digits);
         }
-        Utilities.globalQueue.postRunnable(() -> record(userId, digits, name, username));
+        Utilities.globalQueue.postRunnable(() -> record(userId, digits, name, username, 0, 0));
+    }
+
+    /**
+     * Fold in a pairing somebody else observed (see {@link SvipeNumberSync}).
+     *
+     * Unlike {@link #observe}, this carries the timestamps the pool agreed on rather than "now", and
+     * it never touches {@link #lastKnown}: a number another device saw years ago must not be taken
+     * for this device's current view of that account. Windows only widen — the earliest first-seen
+     * and the latest last-seen win, because between two honest observers the union is the truth.
+     *
+     * @return whether anything was actually new, so a screen can decide to redraw.
+     */
+    public static boolean merge(long userId, String phone, long firstSeen, long lastSeen) {
+        final String digits = normalize(phone);
+        if (userId == 0 || digits.length() == 0) {
+            return false;
+        }
+        return record(userId, digits, null, null, firstSeen, lastSeen);
     }
 
     /**
@@ -183,9 +204,20 @@ public class SvipeNumberHistory {
         });
     }
 
-    private static synchronized void record(long userId, String phone, String name, String username) {
+    /**
+     * Write one pairing into both indexes.
+     *
+     * ``firstSeen``/``lastSeen`` of 0 mean "now" — the local observation case. A merge from the pool
+     * passes real timestamps, and then the stored window only ever widens: whichever observer saw it
+     * earliest owns first-seen, whichever saw it latest owns last-seen.
+     */
+    private static synchronized boolean record(long userId, String phone, String name, String username,
+                                               long firstSeen, long lastSeen) {
+        boolean changed = false;
         try {
-            final long now = System.currentTimeMillis();
+            final long stamp = System.currentTimeMillis();
+            final long first = firstSeen > 0 ? firstSeen : stamp;
+            final long now = lastSeen > 0 ? lastSeen : stamp;
             SharedPreferences.Editor editor = prefs().edit();
 
             // number -> accounts. A second entry here is the interesting case: the number was reused.
@@ -194,7 +226,14 @@ public class SvipeNumberHistory {
             for (int i = 0; i < accounts.length(); i++) {
                 JSONObject o = accounts.getJSONObject(i);
                 if (o.optLong("uid") == userId) {
-                    o.put("last", now);
+                    if (now > o.optLong("last")) {
+                        o.put("last", now);
+                        changed = true;
+                    }
+                    if (first < o.optLong("first")) {
+                        o.put("first", first);
+                        changed = true;
+                    }
                     if (!TextUtils.isEmpty(name)) o.put("name", name);
                     if (!TextUtils.isEmpty(username)) o.put("uname", username);
                     found = true;
@@ -204,11 +243,12 @@ public class SvipeNumberHistory {
             if (!found) {
                 JSONObject o = new JSONObject();
                 o.put("uid", userId);
-                o.put("first", now);
+                o.put("first", first);
                 o.put("last", now);
                 if (!TextUtils.isEmpty(name)) o.put("name", name);
                 if (!TextUtils.isEmpty(username)) o.put("uname", username);
                 accounts.put(o);
+                changed = true;
             }
             editor.putString(BY_PHONE + phone, trim(accounts).toString());
 
@@ -218,7 +258,14 @@ public class SvipeNumberHistory {
             for (int i = 0; i < numbers.length(); i++) {
                 JSONObject o = numbers.getJSONObject(i);
                 if (phone.equals(o.optString("phone"))) {
-                    o.put("last", now);
+                    if (now > o.optLong("last")) {
+                        o.put("last", now);
+                        changed = true;
+                    }
+                    if (first < o.optLong("first")) {
+                        o.put("first", first);
+                        changed = true;
+                    }
                     found = true;
                     break;
                 }
@@ -226,15 +273,17 @@ public class SvipeNumberHistory {
             if (!found) {
                 JSONObject o = new JSONObject();
                 o.put("phone", phone);
-                o.put("first", now);
+                o.put("first", first);
                 o.put("last", now);
                 numbers.put(o);
+                changed = true;
             }
             editor.putString(BY_USER + userId, trim(numbers).toString());
             editor.apply();
         } catch (Exception e) {
             FileLog.e(e);
         }
+        return changed;
     }
 
     /** Every account we have seen on a number, oldest pairing first. */

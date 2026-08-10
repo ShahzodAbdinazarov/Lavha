@@ -138,6 +138,49 @@ public class SvipeConfig {
         }
     }
 
+    // ---- Number history sync (SvipeNumberSync): pooling number<->account changes across Svipe apps ----
+    // Local capture (SvipeNumberHistory) is independent of this and keeps working with sync off.
+    //
+    // Defaults to OFF, unlike the avatar archive, and the difference is deliberate: contributing here
+    // uploads OTHER PEOPLE'S phone numbers — people who never installed this app and cannot be asked.
+    // That is a choice the owner of the device has to make on purpose, not one they discover later.
+    public static final String PREF_NUMBER_SYNC = "svipe_number_sync";
+
+    public static boolean isNumberSyncEnabled(int account) {
+        try {
+            return MessagesController.getMainSettings(account).getBoolean(PREF_NUMBER_SYNC, false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static void setNumberSyncEnabled(int account, boolean on) {
+        try {
+            MessagesController.getMainSettings(account).edit().putBoolean(PREF_NUMBER_SYNC, on).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
+    /** Cached copy of the server-side setting for MY OWN history, so the row shows a value at once. */
+    public static final String PREF_NUMBER_VISIBILITY = "svipe_number_visibility";
+
+    public static String getNumberVisibility(int account) {
+        try {
+            return MessagesController.getMainSettings(account).getString(PREF_NUMBER_VISIBILITY, "contacts");
+        } catch (Exception e) {
+            return "contacts";
+        }
+    }
+
+    public static void setNumberVisibility(int account, String value) {
+        try {
+            MessagesController.getMainSettings(account).edit().putString(PREF_NUMBER_VISIBILITY, value).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
     /** Last visibility the server told us, cached so the Privacy row can show a value immediately
      *  instead of blanking until a request comes back. The server stays the source of truth. */
     public static final String PREF_AVATAR_VISIBILITY = "svipe_avatar_visibility";

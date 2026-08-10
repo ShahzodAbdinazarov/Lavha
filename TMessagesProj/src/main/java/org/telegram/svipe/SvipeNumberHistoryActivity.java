@@ -40,6 +40,7 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
     private static final int ROW_NUMBER = 1;    // a phone number heading its accounts
     private static final int ROW_ACCOUNT = 2;   // one account, with the window we saw it in
     private static final int ROW_INFO = 3;      // the footer explaining what this can and cannot know
+    private static final int ROW_SHARE = 4;     // the sharing switch, off by default
 
     private static class Row {
         final int type;
@@ -67,6 +68,11 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
 
     private void buildRows() {
         rows.clear();
+
+        // The switch comes first because it is a decision about other people, not a preference about
+        // this screen: with it off, everything below is only what this phone saw for itself.
+        rows.add(new Row(ROW_SHARE, LocaleController.getString(R.string.SvipeNumberSyncShare), null, 0));
+        rows.add(new Row(ROW_INFO, LocaleController.getString(R.string.SvipeNumberSyncShareInfo), null, 0));
 
         List<String> recycled = SvipeNumberHistory.recycledNumbers();
         if (!recycled.isEmpty()) {
@@ -96,9 +102,7 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
             }
         }
 
-        if (!rows.isEmpty()) {
-            rows.add(new Row(ROW_INFO, LocaleController.getString(R.string.SvipeNumberHistoryInfo), null, 0));
-        }
+        rows.add(new Row(ROW_INFO, LocaleController.getString(R.string.SvipeNumberHistoryInfo), null, 0));
     }
 
     /** "seen from X to Y" — a pairing is a window, not an instant. */
@@ -130,6 +134,14 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
         listView.setAdapter(new Adapter(context));
         listView.setOnItemClickListener((view, position) -> {
             Row row = rows.get(position);
+            if (row.type == ROW_SHARE) {
+                boolean on = !SvipeConfig.isNumberSyncEnabled(currentAccount);
+                SvipeConfig.setNumberSyncEnabled(currentAccount, on);
+                if (view instanceof org.telegram.ui.Cells.TextCheckCell) {
+                    ((org.telegram.ui.Cells.TextCheckCell) view).setChecked(on);
+                }
+                return;
+            }
             if (row.type == ROW_ACCOUNT && row.userId != 0 && getMessagesController().getUser(row.userId) != null) {
                 android.os.Bundle args = new android.os.Bundle();
                 args.putLong("user_id", row.userId);
@@ -144,7 +156,7 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
         emptyView.setGravity(android.view.Gravity.CENTER);
         emptyView.setPadding(AndroidUtilities.dp(32), 0, AndroidUtilities.dp(32), 0);
         emptyView.setText(LocaleController.getString(R.string.SvipeNumberHistoryEmpty));
-        emptyView.setVisibility(rows.isEmpty() ? View.VISIBLE : View.GONE);
+        emptyView.setVisibility(View.GONE);   // the switch and its footer are always present
         root.addView(emptyView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         fragmentView = root;
@@ -160,7 +172,8 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return holder.getItemViewType() == ROW_ACCOUNT;
+            int type = holder.getItemViewType();
+            return type == ROW_ACCOUNT || type == ROW_SHARE;
         }
 
         @Override
@@ -175,6 +188,11 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
                 }
                 case ROW_INFO: {
                     view = new TextInfoPrivacyCell(context);
+                    break;
+                }
+                case ROW_SHARE: {
+                    view = new org.telegram.ui.Cells.TextCheckCell(context);
+                    view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                     break;
                 }
                 default: {
@@ -199,6 +217,11 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
                 }
                 case ROW_INFO: {
                     ((TextInfoPrivacyCell) holder.itemView).setText(row.text);
+                    break;
+                }
+                case ROW_SHARE: {
+                    org.telegram.ui.Cells.TextCheckCell cell = (org.telegram.ui.Cells.TextCheckCell) holder.itemView;
+                    cell.setTextAndCheck(row.text, SvipeConfig.isNumberSyncEnabled(currentAccount), false);
                     break;
                 }
                 default: {

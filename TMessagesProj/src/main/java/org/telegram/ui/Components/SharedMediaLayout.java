@@ -6930,6 +6930,16 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             profiles = org.telegram.svipe.SvipeOldIdentity.oldProfiles(account, dialog_id);
             numbers = org.telegram.svipe.SvipeOldIdentity.oldNumbers(account, dialog_id);
         }
+        // Ask the pool as well: the change we care about often happened before this phone existed.
+        // The answer merges into the same local ledger and rebuilds these lists when it lands.
+        if (profileActivity != null && dialog_id > 0) {
+            org.telegram.svipe.SvipeNumberSync.syncProfile(profileActivity.getCurrentAccount(), dialog_id, changed -> {
+                if (changed) {
+                    rebuildOldIdentity(true);
+                    updateTabs(true);
+                }
+            });
+        }
         oldProfilesCount = profiles == null ? 0 : profiles.size();
         oldNumbersCount = numbers == null ? 0 : numbers.size();
         if (oldProfilesAdapter != null) {
