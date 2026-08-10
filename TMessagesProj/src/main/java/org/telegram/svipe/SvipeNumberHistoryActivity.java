@@ -40,7 +40,8 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
     private static final int ROW_NUMBER = 1;    // a phone number heading its accounts
     private static final int ROW_ACCOUNT = 2;   // one account, with the window we saw it in
     private static final int ROW_INFO = 3;      // the footer explaining what this can and cannot know
-    private static final int ROW_SHARE = 4;     // the sharing switch, off by default
+    private static final int ROW_SHARE = 4;     // the sharing switch
+    private static final int ROW_VISIBILITY = 5; // who may read MY history
 
     private static class Row {
         final int type;
@@ -63,6 +64,15 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
     @Override
     public boolean onFragmentCreate() {
         buildRows();
+        // The server owns this setting; the cached value only keeps the row from blanking.
+        SvipeNumberSync.loadMySettings(currentAccount, (visibility, count, ok) -> {
+            if (ok) {
+                buildRows();
+                if (listView != null && listView.getAdapter() != null) {
+                    listView.getAdapter().notifyDataSetChanged();
+                }
+            }
+        });
         return super.onFragmentCreate();
     }
 
@@ -72,6 +82,8 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
         // The switch comes first because it is a decision about other people, not a preference about
         // this screen: with it off, everything below is only what this phone saw for itself.
         rows.add(new Row(ROW_SHARE, LocaleController.getString(R.string.SvipeNumberSyncShare), null, 0));
+        rows.add(new Row(ROW_VISIBILITY, LocaleController.getString(R.string.SvipeNumberVisibility),
+                visibilityLabel(SvipeConfig.getNumberVisibility(currentAccount)), 0));
         rows.add(new Row(ROW_INFO, LocaleController.getString(R.string.SvipeNumberSyncShareInfo), null, 0));
 
         List<String> recycled = SvipeNumberHistory.recycledNumbers();
@@ -103,6 +115,47 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
         }
 
         rows.add(new Row(ROW_INFO, LocaleController.getString(R.string.SvipeNumberHistoryInfo), null, 0));
+    }
+
+    /** The four options, in Telegram's own words — this is Telegram's own kind of choice. */
+    public static String visibilityLabel(String value) {
+        if ("contacts".equals(value)) {
+            return LocaleController.getString(R.string.LastSeenContacts);
+        }
+        if ("nobody".equals(value)) {
+            return LocaleController.getString(R.string.LastSeenNobody);
+        }
+        if ("off".equals(value)) {
+            return LocaleController.getString(R.string.SvipeNumberVisibilityOff);
+        }
+        return LocaleController.getString(R.string.LastSeenEverybody);
+    }
+
+    private void pickVisibility() {
+        final String[] values = {"everyone", "contacts", "nobody", "off"};
+        final String[] labels = new String[values.length];
+        for (int i = 0; i < values.length; i++) {
+            labels[i] = visibilityLabel(values[i]);
+        }
+        new org.telegram.ui.ActionBar.AlertDialog.Builder(getParentActivity())
+                .setTitle(LocaleController.getString(R.string.SvipeNumberVisibility))
+                .setItems(labels, (dialog, which) -> {
+                    // Choosing "my contacts" is what makes the contact list needed, so picking it
+                    // uploads it and picking anything else makes the server drop it. Handled by
+                    // setMyVisibility so the two can never drift apart.
+                    SvipeConfig.setNumberVisibility(currentAccount, values[which]);
+                    buildRows();
+                    if (listView != null && listView.getAdapter() != null) {
+                        listView.getAdapter().notifyDataSetChanged();
+                    }
+                    SvipeNumberSync.setMyVisibility(currentAccount, values[which], (visibility, count, ok) -> {
+                        if (!ok) {
+                            return;   // the server stays the source of truth; the next open re-reads it
+                        }
+                    });
+                })
+                .setNegativeButton(LocaleController.getString(R.string.Cancel), null)
+                .show();
     }
 
     /** "seen from X to Y" — a pairing is a window, not an instant. */
@@ -142,6 +195,10 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
                 }
                 return;
             }
+            if (row.type == ROW_VISIBILITY) {
+                pickVisibility();
+                return;
+            }
             if (row.type == ROW_ACCOUNT && row.userId != 0 && getMessagesController().getUser(row.userId) != null) {
                 android.os.Bundle args = new android.os.Bundle();
                 args.putLong("user_id", row.userId);
@@ -173,7 +230,7 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int type = holder.getItemViewType();
-            return type == ROW_ACCOUNT || type == ROW_SHARE;
+            return type == ROW_ACCOUNT || type == ROW_SHARE || type == ROW_VISIBILITY;
         }
 
         @Override
@@ -192,6 +249,11 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
                 }
                 case ROW_SHARE: {
                     view = new org.telegram.ui.Cells.TextCheckCell(context);
+                    view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                    break;
+                }
+                case ROW_VISIBILITY: {
+                    view = new org.telegram.ui.Cells.TextSettingsCell(context);
                     view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                     break;
                 }
@@ -221,7 +283,12 @@ public class SvipeNumberHistoryActivity extends BaseFragment {
                 }
                 case ROW_SHARE: {
                     org.telegram.ui.Cells.TextCheckCell cell = (org.telegram.ui.Cells.TextCheckCell) holder.itemView;
-                    cell.setTextAndCheck(row.text, SvipeConfig.isNumberSyncEnabled(currentAccount), false);
+                    cell.setTextAndCheck(row.text, SvipeConfig.isNumberSyncEnabled(currentAccount), true);
+                    break;
+                }
+                case ROW_VISIBILITY: {
+                    ((org.telegram.ui.Cells.TextSettingsCell) holder.itemView)
+                            .setTextAndValue(row.text, row.detail, false);
                     break;
                 }
                 default: {

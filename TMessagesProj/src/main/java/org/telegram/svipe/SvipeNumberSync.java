@@ -172,6 +172,108 @@ public class SvipeNumberSync {
         }
     }
 
+    // ---- my own history: the setting, and the contact list that one of its options needs ----
+
+    public interface SettingsCallback {
+        void run(String visibility, int count, boolean ok);
+    }
+
+    /** Read my own setting from the server, which stays the source of truth. */
+    public static void loadMySettings(int account, SettingsCallback cb) {
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                cb.run(null, 0, false);
+                return;
+            }
+            SvipeApi.get("/v1/numbers/me/settings", token, (res, code, err) -> {
+                boolean ok = res != null && code >= 200 && code < 300;
+                if (ok) {
+                    SvipeConfig.setNumberVisibility(account, res.optString("visibility", "everyone"));
+                }
+                cb.run(ok ? res.optString("visibility") : null, 0, ok);
+            });
+        });
+    }
+
+    /**
+     * Choose who may read my own history.
+     *
+     * Picking "my contacts" is what makes the contact list needed, so it is uploaded here and only
+     * here; picking anything else makes the server drop it. The list never outlives the setting.
+     */
+    public static void setMyVisibility(int account, String visibility, SettingsCallback cb) {
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                cb.run(null, 0, false);
+                return;
+            }
+            JSONObject body = new JSONObject();
+            try {
+                body.put("visibility", visibility);
+            } catch (Exception e) {
+                FileLog.e(e);
+                cb.run(null, 0, false);
+                return;
+            }
+            SvipeApi.put("/v1/numbers/me/settings", body, token, (res, code, err) -> {
+                boolean ok = res != null && code >= 200 && code < 300;
+                if (ok) {
+                    SvipeConfig.setNumberVisibility(account, visibility);
+                    if ("contacts".equals(visibility)) {
+                        uploadMyContacts(account, cb);
+                        return;
+                    }
+                }
+                cb.run(ok ? visibility : null, 0, ok);
+            });
+        });
+    }
+
+    /**
+     * Upload my contact ids — the only way "my contacts" can be checked at all, since Telegram never
+     * tells the server who is in my contacts and a requester's own claim proves nothing.
+     *
+     * Ids only: no names, no phone numbers, nothing else off the contact card. Sent only while that
+     * setting is selected — the server rejects it otherwise — and dropped server-side the moment I
+     * choose anything else.
+     */
+    public static void uploadMyContacts(int account, SettingsCallback cb) {
+        final java.util.ArrayList<Long> ids = new java.util.ArrayList<>();
+        try {
+            java.util.ArrayList<TLRPC.TL_contact> contacts =
+                    new java.util.ArrayList<>(org.telegram.messenger.ContactsController.getInstance(account).contacts);
+            long self = org.telegram.messenger.UserConfig.getInstance(account).getClientUserId();
+            for (TLRPC.TL_contact c : contacts) {
+                if (c != null && c.user_id != 0 && c.user_id != self) {
+                    ids.add(c.user_id);
+                    if (ids.size() >= 5000) {
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                cb.run(null, 0, false);
+                return;
+            }
+            JSONObject body = new JSONObject();
+            try {
+                body.put("contact_tg_ids", new JSONArray(ids));
+            } catch (Exception e) {
+                FileLog.e(e);
+                cb.run(null, 0, false);
+                return;
+            }
+            SvipeApi.put("/v1/numbers/me/contacts", body, token, (res, code, err) -> {
+                boolean ok = res != null && code >= 200 && code < 300;
+                cb.run("contacts", ok ? res.optInt("stored") : 0, ok);
+            });
+        });
+    }
+
     private SvipeNumberSync() {
     }
 }

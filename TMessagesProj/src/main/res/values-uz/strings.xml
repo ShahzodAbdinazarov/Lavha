@@ -9,6 +9,8 @@
     <string name="SvipeOldNumbersTab">Eski raqamlar</string>
     <string name="SvipeNumberSyncShare">Boshqa Svipe foydalanuvchilari bilan bo\'lishish</string>
     <string name="SvipeNumberSyncShareInfo">Standart holatda yoqiq, Telegram\'ning o\'z sozlamalari kabi. Shu telefon ko\'rgan raqam o\'zgarishlari — jumladan boshqalarning raqamlari — yuklanadi va har kim o\'z telefoni ko\'rmagan o\'zgarishlarni ola oladi. O\'qish esa faqat Telegram sizga raqamini ko\'rsatadigan odamlar bilan cheklangan.</string>
+    <string name="SvipeNumberVisibility">Tarixim kimga ko\'rinadi</string>
+    <string name="SvipeNumberVisibilityOff">Tariximni yozmang</string>
     <string name="SvipeNumberHistory">Raqamlar tarixi</string>
     <string name="SvipeNumberHistoryReused">Bir nechta akkaunt ishlatgan raqamlar</string>
     <string name="SvipeNumberHistoryMoved">Raqamini o\'zgartirgan akkauntlar</string>
