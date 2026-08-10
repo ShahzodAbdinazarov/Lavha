@@ -5,6 +5,8 @@
     <string name="SvipeIntroMessage">Telegram kanallaridagi eng qiziqarli qisqa videolar — bitta tasmada.</string>
     <string name="SvipeProfileImagesTab">Profil rasmlari</string>
     <string name="SvipePhotoDeleted">O\'chirilgan</string>
+    <string name="SvipeOldProfilesTab">Eski profillar</string>
+    <string name="SvipeOldNumbersTab">Eski raqamlar</string>
     <string name="SvipeNumberHistory">Raqamlar tarixi</string>
     <string name="SvipeNumberHistoryReused">Bir nechta akkaunt ishlatgan raqamlar</string>
     <string name="SvipeNumberHistoryMoved">Raqamini o\'zgartirgan akkauntlar</string>

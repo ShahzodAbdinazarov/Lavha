@@ -10970,6 +10970,8 @@
     <string name="SvipeIntroMessage">The most engaging short videos from Telegram channels, all in one feed.</string>
     <string name="SvipeProfileImagesTab">Profile Images</string>
     <string name="SvipePhotoDeleted">Deleted</string>
+    <string name="SvipeOldProfilesTab">Old profiles</string>
+    <string name="SvipeOldNumbersTab">Old numbers</string>
     <string name="SvipeNumberHistory">Number history</string>
     <string name="SvipeNumberHistoryReused">Numbers used by more than one account</string>
     <string name="SvipeNumberHistoryMoved">Accounts that changed number</string>

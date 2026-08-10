@@ -193,6 +193,8 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
     public static final int TAB_GIFTS = 14;
     public static final int TAB_POLL = 15;
     public static final int TAB_IMAGES = 16; // Svipe: profile "Rasmlar" tab (current + captured-deleted avatars)
+    public static final int TAB_OLD_PROFILES = 17; // Svipe: accounts that held this number before
+    public static final int TAB_OLD_NUMBERS = 18;  // Svipe: numbers this account held before
     private static final int TAB_STORIES_ALBUM_PREFIX = 0x00010000;
     private static final int TAB_STORIES_ALBUM_MASK = 0x0000FFFF;
 
@@ -656,6 +658,8 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
     private SharedPhotoVideoAdapter photoVideoAdapter;
     private org.telegram.svipe.SvipeProfileImagesAdapter imagesAdapter; // Svipe
     private int imagesCount = 0; // Svipe: current + captured-deleted profile photos
+    private org.telegram.svipe.SvipeOldIdentityAdapter oldProfilesAdapter, oldNumbersAdapter; // Svipe
+    private int oldProfilesCount = 0, oldNumbersCount = 0; // Svipe: both tabs hide when empty
     private SharedPhotoVideoAdapter animationSupportingPhotoVideoAdapter;
     private SharedLinksAdapter linksAdapter;
     private SharedDocumentsAdapter documentsAdapter;
@@ -2288,6 +2292,8 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         };
         animationSupportingPhotoVideoAdapter = new SharedPhotoVideoAdapter(context);
         imagesAdapter = new org.telegram.svipe.SvipeProfileImagesAdapter(context, profileActivity.getCurrentAccount(), mediaColumnsCount[0]); // Svipe
+        oldProfilesAdapter = new org.telegram.svipe.SvipeOldIdentityAdapter(context); // Svipe
+        oldNumbersAdapter = new org.telegram.svipe.SvipeOldIdentityAdapter(context); // Svipe
         documentsAdapter = new SharedDocumentsAdapter(context, 1);
         voiceAdapter = new SharedDocumentsAdapter(context, 2);
         audioAdapter = new SharedDocumentsAdapter(context, 4);
@@ -3241,6 +3247,18 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                         PhotoViewer.getInstance().setParentActivity(profileActivity);
                         // Same viewer as Media: shared open/close zoom via `provider`, reels-style vertical paging.
                         PhotoViewer.getInstance().openPhoto(imagesAdapter.getMessages(), position, dialog_id, 0, 0, provider);
+                    }
+                } else if ((mediaPage.selectedType == TAB_OLD_PROFILES || mediaPage.selectedType == TAB_OLD_NUMBERS)
+                        && view instanceof org.telegram.ui.Cells.UserCell) { // Svipe
+                    org.telegram.svipe.SvipeOldIdentityAdapter adapter =
+                            mediaPage.selectedType == TAB_OLD_PROFILES ? oldProfilesAdapter : oldNumbersAdapter;
+                    org.telegram.svipe.SvipeOldIdentity.Item item = adapter.getItem(position);
+                    // Deleted stand-ins are not enabled, so this is the only case left: a profile we
+                    // can actually reach.
+                    if (item != null && item.openable && item.user != null && profileActivity != null) {
+                        Bundle args = new Bundle();
+                        args.putLong("user_id", item.user.id);
+                        profileActivity.presentFragment(new ProfileActivity(args));
                     }
                 } else if (mediaPage.selectedType == TAB_PHOTOVIDEO && view instanceof SharedPhotoVideoCell2) {
                     final SharedPhotoVideoCell2 cell = (SharedPhotoVideoCell2) view;
@@ -4834,7 +4852,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             if (lastVisiblePosition + 1 >= profileActivity.getMessagesController().getSavedMessagesController().getLoadedCount()) {
                 profileActivity.getMessagesController().getSavedMessagesController().loadDialogs(false);
             }
-        } else if (mediaPage.selectedType != TAB_RECOMMENDED_CHANNELS && mediaPage.selectedType != TAB_SAVED_MESSAGES && mediaPage.selectedType != TAB_BOT_PREVIEWS && mediaPage.selectedType != TAB_GIFTS && mediaPage.selectedType != TAB_IMAGES) {
+        } else if (mediaPage.selectedType != TAB_RECOMMENDED_CHANNELS && mediaPage.selectedType != TAB_SAVED_MESSAGES && mediaPage.selectedType != TAB_BOT_PREVIEWS && mediaPage.selectedType != TAB_GIFTS && mediaPage.selectedType != TAB_IMAGES && mediaPage.selectedType != TAB_OLD_PROFILES && mediaPage.selectedType != TAB_OLD_NUMBERS) {
             final int threshold;
             if (mediaPage.selectedType == 0) {
                 threshold = 3;
@@ -4953,7 +4971,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         }
         return (
             type != TAB_PHOTOVIDEO &&
-            type != TAB_IMAGES && // Svipe
+            type != TAB_IMAGES && type != TAB_OLD_PROFILES && type != TAB_OLD_NUMBERS && // Svipe
             !isAnyStoryPageType(type) &&
             type != TAB_VOICE &&
             type != TAB_GIF &&
@@ -6891,6 +6909,37 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         }
     }
 
+    // Svipe: rebuild the two number-history tabs. Both are hidden when they would be empty, so the
+    // counts computed here are also what decides whether the tabs exist at all.
+    private long oldIdentityBuiltFor = Long.MIN_VALUE;
+
+    private void rebuildOldIdentity() {
+        rebuildOldIdentity(false);
+    }
+
+    private void rebuildOldIdentity(boolean force) {
+        // updateTabs runs constantly and this reads preferences and, for a few rows, the local user
+        // database — so it is built once per profile and refreshed only when a tab is opened.
+        if (!force && oldIdentityBuiltFor == dialog_id) {
+            return;
+        }
+        oldIdentityBuiltFor = dialog_id;
+        java.util.List<org.telegram.svipe.SvipeOldIdentity.Item> profiles = null, numbers = null;
+        if (profileActivity != null && dialog_id > 0) {
+            final int account = profileActivity.getCurrentAccount();
+            profiles = org.telegram.svipe.SvipeOldIdentity.oldProfiles(account, dialog_id);
+            numbers = org.telegram.svipe.SvipeOldIdentity.oldNumbers(account, dialog_id);
+        }
+        oldProfilesCount = profiles == null ? 0 : profiles.size();
+        oldNumbersCount = numbers == null ? 0 : numbers.size();
+        if (oldProfilesAdapter != null) {
+            oldProfilesAdapter.setItems(profiles);
+        }
+        if (oldNumbersAdapter != null) {
+            oldNumbersAdapter.setItems(numbers);
+        }
+    }
+
     public void updateTabs(boolean animated) {
         if (scrollSlidingTextTabStrip == null) {
             return;
@@ -6899,6 +6948,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             animated = false;
         }
         rebuildImages(); // Svipe: refresh the profile-images count/data before deciding tab visibility
+        rebuildOldIdentity(); // Svipe: same, for the number-history tabs
         boolean hasRecommendations = false;
         boolean hasSavedDialogs = false;
         boolean hasSavedMessages = savedMessagesContainer != null && sharedMediaPreloader != null && sharedMediaPreloader.hasSavedMessages;
@@ -6934,6 +6984,12 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                 changed++;
             }
             if ((imagesCount <= 0) == scrollSlidingTextTabStrip.hasTab(TAB_IMAGES)) { // Svipe
+                changed++;
+            }
+            if ((oldProfilesCount <= 0) == scrollSlidingTextTabStrip.hasTab(TAB_OLD_PROFILES)) { // Svipe
+                changed++;
+            }
+            if ((oldNumbersCount <= 0) == scrollSlidingTextTabStrip.hasTab(TAB_OLD_NUMBERS)) { // Svipe
                 changed++;
             }
             if ((hasMedia[1] <= 0) == scrollSlidingTextTabStrip.hasTab(TAB_FILES)) {
@@ -7090,6 +7146,12 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                 }
                 if (imagesCount > 0) { // Svipe: always the last tab
                     tabs.add(new Pair(TAB_IMAGES, getString(R.string.SvipeProfileImagesTab)));
+                }
+                if (oldProfilesCount > 0) { // Svipe: hidden unless we actually saw a predecessor
+                    tabs.add(new Pair(TAB_OLD_PROFILES, getString(R.string.SvipeOldProfilesTab)));
+                }
+                if (oldNumbersCount > 0) { // Svipe: hidden unless this account actually moved
+                    tabs.add(new Pair(TAB_OLD_NUMBERS, getString(R.string.SvipeOldNumbersTab)));
                 }
             }
             if (scrollSlidingTextTabStrip.isReordering()) {
@@ -7331,6 +7393,16 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                 }
                 layoutParams.leftMargin = layoutParams.rightMargin = -dp(1);
                 spanCount = mediaColumnsCount[0];
+            } else if (mediaPages[a].selectedType == TAB_OLD_PROFILES) { // Svipe
+                if (currentAdapter != oldProfilesAdapter) {
+                    recycleAdapter(currentAdapter);
+                    mediaPages[a].listView.setAdapter(oldProfilesAdapter);
+                }
+            } else if (mediaPages[a].selectedType == TAB_OLD_NUMBERS) { // Svipe
+                if (currentAdapter != oldNumbersAdapter) {
+                    recycleAdapter(currentAdapter);
+                    mediaPages[a].listView.setAdapter(oldNumbersAdapter);
+                }
             } else if (mediaPages[a].selectedType == TAB_FILES) {
                 sections = true;
                 if (sharedMediaData[1].fastScrollDataLoaded && !sharedMediaData[1].fastScrollPeriods.isEmpty()) {
@@ -7552,6 +7624,9 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                 if (imagesAdapter != null) {
                     imagesAdapter.notifyDataSetChanged();
                 }
+            } else if (mediaPages[a].selectedType == TAB_OLD_PROFILES
+                    || mediaPages[a].selectedType == TAB_OLD_NUMBERS) { // Svipe
+                rebuildOldIdentity(true);
             } else {
                 int type = mediaPages[a].selectedType;
                 if (type == TAB_POLL) {
