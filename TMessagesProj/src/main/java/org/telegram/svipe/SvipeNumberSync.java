@@ -16,15 +16,17 @@ import java.util.List;
  * usually happened before it was installed.
  *
  * Opening a profile does two things, in this order:
- *   1. contributes what this device saw about that person — but only if the owner turned sharing on
- *      (see {@link SvipeConfig#isNumberSyncEnabled}); these are other people's phone numbers, and
- *      uploading them is a decision, not a default;
- *   2. asks for the pooled answer and merges it straight back into the local ledger, so the profile
- *      tabs read from one place, keep working offline, and survive the server going away.
+ *   1. contributes what this device saw about that person, when sharing is on
+ *      (see {@link SvipeConfig#isNumberSyncEnabled});
+ *   2. asks for the pooled PAST and merges it into the local ledger, so the profile tabs read from
+ *      one place, keep working offline, and survive the server going away.
  *
- * Reading requires proof that Telegram itself shows us this person's number — we send the number we
- * can see, and the server refuses if it is not one it already holds for them. So the pool can never
- * tell us about somebody Telegram would not have told us about anyway.
+ * The server answers with two things and only two: the numbers that account held BEFORE its current
+ * one, and the bare Telegram ids of accounts that were on its current number earlier. It never sends
+ * the number anybody is on today — not for this person, not for the ids — and nothing about the
+ * present is synced between devices at all. Who a number belongs to now is Telegram's to disclose,
+ * and it already decides that correctly; an id is only a place to look, which this client then looks
+ * at with the user's own Telegram credentials. If Telegram will not show them, they stay unshown.
  */
 public class SvipeNumberSync {
 
@@ -51,25 +53,10 @@ public class SvipeNumberSync {
         }
         lastSynced.put(userId, now);
 
-        final String proof = proofNumberFor(account, userId);
-        if (proof.length() == 0) {
-            return;      // we cannot see their number, so we have nothing to prove with and no claim
-        }
-
         if (SvipeConfig.isNumberSyncEnabled(account)) {
             contribute(account, userId);
         }
-        fetch(account, userId, proof, callback, false);
-    }
-
-    /** The number Telegram shows us for them right now, else the last one we wrote down. */
-    private static String proofNumberFor(int account, long userId) {
-        TLRPC.User user = MessagesController.getInstance(account).getUser(userId);
-        if (user != null && user.phone != null && user.phone.length() > 0) {
-            return SvipeNumberHistory.normalize(user.phone);
-        }
-        List<SvipeNumberHistory.Number> numbers = SvipeNumberHistory.numbersOfAccount(userId);
-        return numbers.isEmpty() ? "" : numbers.get(numbers.size() - 1).phone;
+        fetch(account, userId, callback, false);
     }
 
     /** Send what this device knows about that person, and about whoever else held their numbers. */
@@ -129,22 +116,23 @@ public class SvipeNumberSync {
      * A 403 is the expected answer for anyone we are not allowed to ask about, and is not an error
      * worth surfacing: the profile simply shows what this device saw by itself.
      */
-    private static void fetch(int account, long userId, String proof, Callback callback, boolean retried) {
+    private static void fetch(int account, long userId, Callback callback, boolean retried) {
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {
                 return;
             }
-            SvipeApi.get("/v1/numbers/" + userId + "?proof_phone=" + proof, token, (res, code, err) -> {
+            SvipeApi.get("/v1/numbers/" + userId, token, (res, code, err) -> {
                 if (code == 401 && !retried) {
                     SvipeAuth.invalidateAccessToken(account);
-                    fetch(account, userId, proof, callback, true);
+                    fetch(account, userId, callback, true);
                     return;
                 }
                 if (res == null || code < 200 || code >= 300) {
                     lastSynced.remove(userId);   // let the next open try again
                     return;
                 }
-                boolean changed = merge(res.optJSONArray("numbers")) | merge(res.optJSONArray("neighbours"));
+                boolean changed = mergeOldNumbers(userId, res.optJSONArray("old_numbers"))
+                        | SvipeOldProfiles.store(userId, res.optJSONArray("old_profile_ids"));
                 if (callback != null) {
                     AndroidUtilities.runOnUIThread(() -> callback.onMerged(changed));
                 }
@@ -152,7 +140,8 @@ public class SvipeNumberSync {
         });
     }
 
-    private static boolean merge(JSONArray array) {
+    /** Numbers this account has left behind. The one it is on now is never among them. */
+    private static boolean mergeOldNumbers(long userId, JSONArray array) {
         if (array == null) {
             return false;
         }
@@ -162,11 +151,8 @@ public class SvipeNumberSync {
             if (o == null) {
                 continue;
             }
-            changed |= SvipeNumberHistory.merge(
-                    o.optLong("subject_tg_id"),
-                    o.optString("phone"),
-                    parse(o.optString("first_seen")),
-                    parse(o.optString("last_seen")));
+            changed |= SvipeNumberHistory.merge(userId, o.optString("phone"),
+                    parse(o.optString("first_seen")), parse(o.optString("last_seen")));
         }
         return changed;
     }

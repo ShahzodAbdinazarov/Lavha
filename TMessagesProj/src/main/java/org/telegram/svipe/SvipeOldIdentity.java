@@ -47,24 +47,42 @@ public class SvipeOldIdentity {
         }
     }
 
-    /** Accounts that held this person's number before them, oldest first. */
+    /**
+     * Accounts that held this person's number before them.
+     *
+     * Two sources, one list: what this device watched happen (keyed by the number it can see), and
+     * the ids the server sends — which arrive WITHOUT a number attached, because the server never
+     * discloses the number anybody is on today. Either way an id is only a place to look; whether
+     * the person behind it is visible at all is Telegram's answer, asked with the reader's own
+     * credentials, and an id Telegram will not resolve stays a deleted-account row.
+     */
     public static List<Item> oldProfiles(int account, long userId) {
         ArrayList<Item> out = new ArrayList<>();
+        java.util.LinkedHashSet<Long> ids = new java.util.LinkedHashSet<>();
+
         String phone = currentNumberOf(account, userId);
-        if (TextUtils.isEmpty(phone)) {
-            return out;
-        }
-        for (SvipeNumberHistory.Account seen : SvipeNumberHistory.accountsOnNumber(phone)) {
-            if (seen.userId == userId || seen.userId == 0) {
-                continue;
+        if (!TextUtils.isEmpty(phone)) {
+            for (SvipeNumberHistory.Account seen : SvipeNumberHistory.accountsOnNumber(phone)) {
+                if (seen.userId != userId && seen.userId != 0) {
+                    ids.add(seen.userId);
+                }
             }
-            TLRPC.User user = resolve(account, seen.userId);
-            // Where they went: their own current number, which is the useful half of "they moved".
-            String movedTo = currentNumberOf(account, seen.userId);
+        }
+        for (Long id : SvipeOldProfiles.get(userId)) {
+            if (id != null && id != userId) {
+                ids.add(id);
+            }
+        }
+
+        for (Long id : ids) {
+            TLRPC.User user = resolve(account, id);
             if (user != null && !UserObject.isDeleted(user)) {
+                // Where they are now, only if Telegram itself hands it to this device. Our servers
+                // never send it, and this never asks for it.
+                String movedTo = !TextUtils.isEmpty(user.phone) ? SvipeNumberHistory.normalize(user.phone) : "";
                 out.add(new Item(user, movedTo, true));
             } else {
-                out.add(new Item(deletedStandIn(seen.userId), movedTo, false));
+                out.add(new Item(deletedStandIn(id), "", false));
             }
         }
         return out;
