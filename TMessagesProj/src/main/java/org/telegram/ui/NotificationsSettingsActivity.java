@@ -1055,10 +1055,14 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 }
                 case 7: {
                     // Bots. The switch is the rule itself; tapping the row opens the exceptions.
+                    // The cell is built with an image slot like every other row here, so leaving the
+                    // icon at 0 did not save the space — it indented the text and left a hole where
+                    // Private Chats, Groups and Channels each have theirs.
                     NotificationsCheckCell checkCell = (NotificationsCheckCell) holder.itemView;
-                    checkCell.setTextAndValueAndCheck(
+                    checkCell.setTextAndValueAndIconAndCheck(
                             getString(R.string.SvipeNotificationsBots),
                             org.telegram.svipe.SvipeBotNotificationsActivity.rowValue(currentAccount),
+                            R.drawable.msg_bot,
                             !org.telegram.svipe.SvipeBotMute.isEnabled(currentAccount),
                             0, true, true);
                     break;
