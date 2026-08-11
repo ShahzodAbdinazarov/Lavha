@@ -1085,8 +1085,22 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
         AndroidUtilities.runOnUIThread(upNextTick, 1000);
     }
 
-    /** The first related reference autoplay has not already used, or null. */
+    /**
+     * What plays next: the show's next episode if this page is inside a playlist, otherwise the first
+     * unused related reference.
+     *
+     * <p>A playlist wins outright. Somebody watching episode 4 of a show wants episode 5, and the
+     * related pipe — which answers "what should this user watch" — will happily offer something else
+     * entirely. When the show runs out, {@code getPlaylistNext} returns null and this falls through to
+     * related, which is the right ending: the show is over, the evening is not.
+     */
     private SvipeDiscover.Item pickUpNext() {
+        if (watchPage != null) {
+            final SvipeDiscover.Item episode = watchPage.getPlaylistNext();
+            if (episode != null) {
+                return episode;
+            }
+        }
         syncRelatedSnapshot();
         for (int i = 0; i < relatedSnapshot.size(); i++) {
             final SvipeDiscover.Item item = relatedSnapshot.get(i);

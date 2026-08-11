@@ -5,6 +5,7 @@ import static org.telegram.messenger.LocaleController.getString;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.os.Bundle;
@@ -137,12 +138,18 @@ public class SvipeWatchActivity extends BaseFragment {
     private static final int TYPE_VERSION = 10;
     /** A selected tab with nothing in it — a film whose cast never matched, most often. */
     private static final int TYPE_TAB_EMPTY = 11;
+    /** The playlist panel: a header that folds, then one row per episode. */
+    private static final int TYPE_PLAYLIST_BAR = 12;
+    private static final int TYPE_PLAYLIST_ITEM = 13;
 
     private static final int TAB_RELATED = 0;
     private static final int TAB_ACTORS = 1;
     private static final int TAB_VERSIONS = 2;
 
     private static final int RELATED_PAGE_SIZE = 20;
+
+    /** Episodes resolved ahead of the one on screen — one screenful, so scrolling never shows blanks. */
+    private static final int PLAYLIST_RESOLVE_AHEAD = 8;
     /** Placeholder rows shown while the first related page loads — about one screenful. */
     private static final int RELATED_SKELETONS = 4;
     /**
@@ -189,6 +196,20 @@ public class SvipeWatchActivity extends BaseFragment {
     private int firstTabRow = -1;
     private boolean pinInFlight;
     private final ArrayList<Row> related = new ArrayList<>();
+
+    /**
+     * The show this page is playing an episode OF, when it was opened from one.
+     *
+     * <p>A playlist here is a list of references, not a channel: the episodes stay in whichever
+     * channels published them and this page holds the running order. That is why opening episode 12
+     * costs nothing to prepare — there is nothing to build, only a list to index into.
+     */
+    private SvipeMovies.SeriesPage playlist;
+    private final ArrayList<Row> playlistRows = new ArrayList<>();
+    private int playlistIndex = -1;
+    /** Open on arrival, the way YouTube shows the playlist you came in through. */
+    private boolean playlistExpanded = true;
+    private int firstPlaylistRow = -1;
     /** channelId:messageId of everything already on this page, so a related page cannot repeat it. */
     private final HashSet<String> shownKeys = new HashSet<>();
     // username (lowercase) -> resolved chat, so a channel is resolved once across related pages.
@@ -238,6 +259,25 @@ public class SvipeWatchActivity extends BaseFragment {
             ref.local = local;   // on the REFERENCE, so a mini-bar restore cannot lose it
         }
         return new SvipeWatchActivity(ref, mo, chat);
+    }
+
+    /**
+     * Open a show at one episode, with the whole run order attached.
+     *
+     * <p>The page is otherwise the ordinary watch page — same player, same related list underneath —
+     * because an episode IS a long-form video. What the playlist adds is a panel and an order to
+     * advance along, and both are additions to this screen rather than a screen of their own.
+     */
+    public static SvipeWatchActivity ofSeries(SvipeMovies.SeriesPage page, int index) {
+        final int at = index >= 0 && index < page.episodes.size() ? index : 0;
+        SvipeWatchActivity fragment = new SvipeWatchActivity(page.episodes.get(at).asItem());
+        fragment.playlist = page;
+        fragment.playlistIndex = at;
+        for (SvipeMovies.Episode e : page.episodes) {
+            fragment.playlistRows.add(new Row(e.asItem()));
+        }
+        org.telegram.svipe.SvipeSeriesProgress.setLastEpisode(page.series.id, at);
+        return fragment;
     }
 
     private SvipeWatchActivity(SvipeDiscover.Item ref, MessageObject mo, TLRPC.Chat chat) {
@@ -390,6 +430,9 @@ public class SvipeWatchActivity extends BaseFragment {
             return;
         }
         watched = row;
+        // Autoplay and the panel's "now playing" mark both read the index, and a swap that came from
+        // the related list (or from autoplay walking off the end of the show) has moved off the run.
+        syncPlaylistIndex(row.ref);
         // A different video is a different film (or none): its cast, its copies and the open tab all
         // belong to the post we just left.
         movieDetail = null;
@@ -487,6 +530,10 @@ public class SvipeWatchActivity extends BaseFragment {
                         openItem(v.toItem());
                     }
                 }
+                return;
+            }
+            if (type == TYPE_PLAYLIST_ITEM) {
+                playEpisode(position - firstPlaylistRow);
                 return;
             }
             final Row row = relatedRowAt(position);
@@ -635,6 +682,16 @@ public class SvipeWatchActivity extends BaseFragment {
             rows.add(TYPE_CHANNEL);
         }
         rows.add(TYPE_ACTIONS);
+        firstPlaylistRow = -1;
+        if (playlist != null && !playlist.isEmpty()) {
+            rows.add(TYPE_PLAYLIST_BAR);
+            if (playlistExpanded) {
+                firstPlaylistRow = rows.size();
+                for (int i = 0; i < playlistRows.size(); i++) {
+                    rows.add(TYPE_PLAYLIST_ITEM);
+                }
+            }
+        }
         if (hasCaptionBody()) {
             rows.add(TYPE_CAPTION);
         }
@@ -669,6 +726,80 @@ public class SvipeWatchActivity extends BaseFragment {
         }
         if (adapter != null) {
             adapter.notifyDataSetChanged();
+        }
+    }
+
+    // ---------------- the playlist ----------------
+
+    /**
+     * Swap the page onto another episode of the same show.
+     *
+     * <p>In place, like a related tap: the overlay player keeps its surface and back still means "the
+     * screen I came from" rather than the eighty-ninth watch page on a stack.
+     */
+    private void playEpisode(int index) {
+        if (playlist == null || index < 0 || index >= playlistRows.size() || index == playlistIndex) {
+            return;
+        }
+        playlistIndex = index;
+        // openRow, not openItem: the playlist row may already hold its resolved message, and reusing
+        // it paints the new episode's title and actions immediately instead of blanking for a round-trip.
+        openRow(playlistRows.get(index));
+    }
+
+    /**
+     * The episode after the one playing, for the player's autoplay step — or null at the end of the
+     * show, which is where autoplay should stop rather than wander off into related videos.
+     *
+     * <p>Deliberately NOT filtered against what autoplay has already played: a playlist's order is
+     * explicit and finite, so "next" is always index + 1 and the run ends by running out.
+     */
+    public SvipeDiscover.Item getPlaylistNext() {
+        if (playlist == null || playlistIndex < 0) {
+            return null;
+        }
+        final int next = playlistIndex + 1;
+        return next < playlistRows.size() ? playlistRows.get(next).ref : null;
+    }
+
+    /** Keep {@link #playlistIndex} honest when the page is swapped by anything but a playlist tap. */
+    private void syncPlaylistIndex(SvipeDiscover.Item ref) {
+        if (playlist == null || ref == null) {
+            return;
+        }
+        for (int i = 0; i < playlistRows.size(); i++) {
+            final SvipeDiscover.Item candidate = playlistRows.get(i).ref;
+            if (candidate.channelId == ref.channelId && candidate.messageId == ref.messageId) {
+                playlistIndex = i;
+                if (playlist.series != null) {
+                    org.telegram.svipe.SvipeSeriesProgress.setLastEpisode(playlist.series.id, i);
+                }
+                return;
+            }
+        }
+        playlistIndex = -1;   // the user tapped out of the show, into a related video
+    }
+
+    /**
+     * Resolve the episodes around the one being drawn.
+     *
+     * <p>A show is a long list and every row wants a thumbnail, but a thumbnail costs a getMessages.
+     * Resolving a window around what is on screen keeps the list filled while scrolling without
+     * spending ninety requests on a user who watches one episode. The batcher already coalesces per
+     * channel, so a window usually costs ONE request.
+     */
+    private void resolveAround(int index) {
+        final int from = Math.max(0, index - 2);
+        final int to = Math.min(playlistRows.size(), index + PLAYLIST_RESOLVE_AHEAD);
+        final ArrayList<Row> want = new ArrayList<>();
+        for (int i = from; i < to; i++) {
+            final Row row = playlistRows.get(i);
+            if (row.mo == null && !row.resolving) {
+                want.add(row);
+            }
+        }
+        if (!want.isEmpty()) {
+            resolveBatch(want);
         }
     }
 
@@ -1294,7 +1425,8 @@ public class SvipeWatchActivity extends BaseFragment {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             final int type = holder.getItemViewType();
-            return type == TYPE_RELATED || type == TYPE_ACTOR || type == TYPE_VERSION;
+            return type == TYPE_RELATED || type == TYPE_ACTOR || type == TYPE_VERSION
+                    || type == TYPE_PLAYLIST_ITEM;
         }
 
         @Override
@@ -1350,6 +1482,12 @@ public class SvipeWatchActivity extends BaseFragment {
                 case TYPE_RELATED_SKELETON:
                     view = new RelatedSkeletonView(ctx);
                     break;
+                case TYPE_PLAYLIST_BAR:
+                    view = new PlaylistBarView(ctx);
+                    break;
+                case TYPE_PLAYLIST_ITEM:
+                    view = new EpisodeCell(ctx);
+                    break;
                 default:
                     SvipeWideVideoCell cell = new SvipeWideVideoCell(ctx, currentAccount);
                     cell.setDelegate(cellDelegate);
@@ -1390,8 +1528,214 @@ public class SvipeWatchActivity extends BaseFragment {
                     ((SvipeWideVideoCell) holder.itemView).bind(row.ref, row.mo, row.chat);
                     break;
                 }
+                case TYPE_PLAYLIST_BAR:
+                    ((PlaylistBarView) holder.itemView).bind();
+                    break;
+                case TYPE_PLAYLIST_ITEM: {
+                    final int index = position - firstPlaylistRow;
+                    ((EpisodeCell) holder.itemView).bind(index);
+                    // Resolve what is on screen and nothing else: a show can be ninety episodes, and
+                    // resolving all of them up front is ninety getMessages nobody asked for.
+                    resolveAround(index);
+                    break;
+                }
                 default:
                     break;   // spacer / header / skeleton render themselves
+            }
+        }
+    }
+
+
+    /**
+     * The playlist panel's header — show title, position, and the fold.
+     *
+     * <p>Shaped like YouTube's: a tinted block directly under the action row that says WHICH list you
+     * are inside and where in it you are, and folds away when you would rather see the page. The
+     * share icon shares the SHOW (svipe.uz/<code>), not the episode: what is worth passing on here is
+     * "this show is in Svipe", and the link opens a page that offers the app.
+     */
+    private class PlaylistBarView extends FrameLayout {
+        private final TextView title;
+        private final TextView position;
+        private final ImageView chevron;
+        private final ImageView shareIcon;
+
+        PlaylistBarView(Context context) {
+            super(context);
+            setPadding(dp(12), dp(6), dp(12), dp(6));
+
+            LinearLayout block = new LinearLayout(context);
+            block.setOrientation(LinearLayout.HORIZONTAL);
+            block.setGravity(Gravity.CENTER_VERTICAL);
+            block.setPadding(dp(14), dp(10), dp(6), dp(10));
+            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+            bg.setColor(Theme.getColor(Theme.key_windowBackgroundGray));
+            bg.setCornerRadius(dp(12));
+            block.setBackground(bg);
+            addView(block, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+            LinearLayout texts = new LinearLayout(context);
+            texts.setOrientation(LinearLayout.VERTICAL);
+
+            title = new TextView(context);
+            title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+            title.setTypeface(AndroidUtilities.bold());
+            title.setMaxLines(1);
+            title.setEllipsize(TextUtils.TruncateAt.END);
+            title.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+            texts.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+            position = new TextView(context);
+            position.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            position.setMaxLines(1);
+            position.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+            texts.addView(position, LayoutHelper.createLinear(
+                    LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 2, 0, 0));
+
+            block.addView(texts, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+
+            shareIcon = new ImageView(context);
+            shareIcon.setScaleType(ImageView.ScaleType.CENTER);
+            shareIcon.setImageResource(R.drawable.msg_share);
+            shareIcon.setColorFilter(new PorterDuffColorFilter(
+                    Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), PorterDuff.Mode.SRC_IN));
+            shareIcon.setOnClickListener(v -> shareSeries());
+            block.addView(shareIcon, LayoutHelper.createLinear(36, 36, Gravity.CENTER_VERTICAL));
+
+            chevron = new ImageView(context);
+            chevron.setScaleType(ImageView.ScaleType.CENTER);
+            chevron.setImageResource(R.drawable.arrow_more);
+            chevron.setColorFilter(new PorterDuffColorFilter(
+                    Theme.getColor(Theme.key_windowBackgroundWhiteGrayText), PorterDuff.Mode.SRC_IN));
+            block.addView(chevron, LayoutHelper.createLinear(36, 36, Gravity.CENTER_VERTICAL));
+
+            block.setOnClickListener(v -> togglePlaylist());
+        }
+
+        void bind() {
+            if (playlist == null || playlist.series == null) {
+                return;
+            }
+            title.setText(playlist.series.title);
+            position.setText(LocaleController.formatString(R.string.SvipePlaylistPosition,
+                    Math.max(playlistIndex, 0) + 1, playlistRows.size()));
+            chevron.setRotation(playlistExpanded ? 180f : 0f);
+            shareIcon.setVisibility(
+                    playlist.shareUrl != null && !playlist.shareUrl.isEmpty() ? VISIBLE : GONE);
+        }
+    }
+
+    private void togglePlaylist() {
+        playlistExpanded = !playlistExpanded;
+        rebuildRows();
+    }
+
+    /**
+     * Share the SHOW as a svipe.uz link.
+     *
+     * <p>The whole reason the playlist is not a Telegram channel: a channel link ends in Telegram and
+     * teaches nobody that Svipe exists, while this link opens a page that shows the show and offers
+     * the app. Falls back to nothing rather than to a t.me link — sharing the episode instead of the
+     * show is what the episode's own share chip is for.
+     */
+    private void shareSeries() {
+        if (playlist == null || getParentActivity() == null) {
+            return;
+        }
+        final String link = playlist.shareUrl;
+        if (link == null || link.isEmpty()) {
+            return;
+        }
+        final String caption = getString(R.string.SvipeSharePromo) + "\n\n"
+                + link.replaceFirst("^https?://", "");
+        showDialog(new ShareAlert(getParentActivity(), null, caption, false, link, false));
+    }
+
+    /**
+     * One episode in the panel.
+     *
+     * <p>Compact on purpose — a show is dozens of rows and the full-width card the related list uses
+     * would make the panel a second page. The row that is playing is marked rather than merely
+     * highlighted: colour alone disappears on a bright thumbnail.
+     */
+    private class EpisodeCell extends FrameLayout {
+        private final BackupImageView thumb;
+        private final TextView index;
+        private final TextView label;
+        private final TextView duration;
+        private final ImageView playing;
+
+        EpisodeCell(Context context) {
+            super(context);
+            setPadding(dp(12), dp(4), dp(12), dp(4));
+
+            index = new TextView(context);
+            index.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            index.setGravity(Gravity.CENTER);
+            index.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+            addView(index, LayoutHelper.createFrame(24, 54, Gravity.LEFT | Gravity.CENTER_VERTICAL, 0, 0, 0, 0));
+
+            playing = new ImageView(context);
+            playing.setScaleType(ImageView.ScaleType.CENTER);
+            playing.setImageResource(R.drawable.msg_played);
+            playing.setColorFilter(new PorterDuffColorFilter(
+                    Theme.getColor(Theme.key_chats_actionBackground), PorterDuff.Mode.SRC_IN));
+            addView(playing, LayoutHelper.createFrame(24, 54, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+
+            thumb = new BackupImageView(context);
+            thumb.setRoundRadius(dp(6));
+            addView(thumb, LayoutHelper.createFrame(96, 54, Gravity.LEFT | Gravity.CENTER_VERTICAL, 30, 0, 0, 0));
+
+            LinearLayout texts = new LinearLayout(context);
+            texts.setOrientation(LinearLayout.VERTICAL);
+            texts.setGravity(Gravity.CENTER_VERTICAL);
+
+            label = new TextView(context);
+            label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+            label.setMaxLines(2);
+            label.setEllipsize(TextUtils.TruncateAt.END);
+            label.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+            texts.addView(label, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+            duration = new TextView(context);
+            duration.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+            duration.setMaxLines(1);
+            duration.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+            texts.addView(duration, LayoutHelper.createLinear(
+                    LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 3, 0, 0));
+
+            addView(texts, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,
+                    Gravity.LEFT | Gravity.CENTER_VERTICAL, 134, 0, 8, 0));
+        }
+
+        void bind(int position) {
+            if (playlist == null || position < 0 || position >= playlist.episodes.size()) {
+                return;
+            }
+            final SvipeMovies.Episode episode = playlist.episodes.get(position);
+            final boolean isNow = position == playlistIndex;
+            index.setVisibility(isNow ? GONE : VISIBLE);
+            playing.setVisibility(isNow ? VISIBLE : GONE);
+            index.setText(String.valueOf(position + 1));
+            label.setText(episode.label(position));
+            label.setTypeface(isNow ? AndroidUtilities.bold() : android.graphics.Typeface.DEFAULT);
+            label.setTextColor(Theme.getColor(isNow
+                    ? Theme.key_chats_actionBackground : Theme.key_windowBackgroundWhiteBlackText));
+            duration.setText(episode.durationMs > 0
+                    ? AndroidUtilities.formatShortDuration(episode.durationMs / 1000) : "");
+
+            // The thumbnail is whatever the resolve has produced so far: a placeholder colour until
+            // MTProto answers, never a blank the row later grows into (the size is fixed above).
+            final MessageObject mo = playlistRows.get(position).mo;
+            final TLRPC.PhotoSize size = mo == null ? null
+                    : org.telegram.messenger.FileLoader.getClosestPhotoSizeWithSize(
+                            mo.photoThumbs, AndroidUtilities.dp(96), true);
+            if (size != null) {
+                thumb.setImage(org.telegram.messenger.ImageLocation.getForObject(size, mo.photoThumbsObject),
+                        "96_54", null, null, mo);
+            } else {
+                thumb.setImageDrawable(new android.graphics.drawable.ColorDrawable(
+                        Theme.getColor(Theme.key_windowBackgroundGray)));
             }
         }
     }

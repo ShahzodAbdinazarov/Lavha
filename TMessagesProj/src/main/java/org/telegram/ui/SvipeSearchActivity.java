@@ -48,13 +48,12 @@ public class SvipeSearchActivity extends DialogsActivity {
         exploreGrid.setMovieDelegate(new org.telegram.ui.Components.SvipeExploreGrid.MovieDelegate() {
             @Override
             public void onSeriesTapped(org.telegram.svipe.SvipeMovies.Series series) {
-                // A show's playlist IS a Telegram channel, so "open the show" is literally opening
-                // that channel — every episode, in order, in the client the user already has. Until
-                // the server has built it the card is inert rather than opening a half-answer.
-                if (series.hasChannel()) {
-                    org.telegram.messenger.browser.Browser.openUrl(
-                            getParentActivity(), "https://t.me/" + series.tgUsername);
-                }
+                // A show opens IN THE APP, on the watch page, with its episodes as a playlist panel.
+                // It used to open t.me/<generated channel> — a design that needed a public channel
+                // built per show before a card did anything, and that sent the tap out of Svipe the
+                // moment it worked. The playlist is a list of references now, so there is nothing to
+                // build and nothing to leave for.
+                openSeries(series);
             }
         });
         exploreGrid.setOnReelTapListener((items, position) -> {
@@ -82,6 +81,41 @@ public class SvipeSearchActivity extends DialogsActivity {
         });
         return exploreGrid;
     }
+
+    /**
+     * Fetch a show's episode list, then open it where the viewer left off.
+     *
+     * <p>The list is fetched on the tap rather than carried on the card: a card is one of thirty on
+     * screen and the episodes are only wanted for the one that is pressed.
+     */
+    private void openSeries(org.telegram.svipe.SvipeMovies.Series series) {
+        if (series == null || seriesLoading) {
+            return;
+        }
+        seriesLoading = true;
+        org.telegram.svipe.SvipeMovies.seriesDetail(currentAccount, series.id, (page, error) -> {
+            org.telegram.messenger.AndroidUtilities.runOnUIThread(() -> {
+                seriesLoading = false;
+                if (page == null || page.isEmpty() || getParentActivity() == null) {
+                    // Nothing to play: a show whose episodes all failed their reference check. Saying
+                    // so beats a screen that opens onto a black player.
+                    if (getParentActivity() != null) {
+                        org.telegram.ui.Components.BulletinFactory.of(SvipeSearchActivity.this)
+                                .createErrorBulletin(org.telegram.messenger.LocaleController.getString(
+                                        org.telegram.messenger.R.string.SvipeSeriesEmpty))
+                                .show();
+                    }
+                    return;
+                }
+                final int at = Math.min(
+                        org.telegram.svipe.SvipeSeriesProgress.lastEpisode(page.series.id),
+                        page.episodes.size() - 1);
+                presentFragment(SvipeWatchActivity.ofSeries(page, at));
+            });
+        });
+    }
+
+    private boolean seriesLoading;
 
     @Override
     protected void svipeOnExploreGridVisible() {

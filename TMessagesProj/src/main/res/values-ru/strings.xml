@@ -531,4 +531,20 @@
     <string name="SvipeNotificationsBotsExceptionsCount_few">%1$d исключения</string>
     <string name="SvipeNotificationsBotsExceptionsCount_many">%1$d исключений</string>
     <string name="SvipeNotificationsBotsExceptionsCount_other">%1$d исключений</string>
+    <string name="SvipeSeasonEpisode">С%1$d · Э%2$d</string>
+    <string name="SvipeEpisodeNo">Серия %1$d</string>
+    <string name="SvipeSeriesPlayAll">Смотреть всё</string>
+    <string name="SvipeSeriesResume">Продолжить</string>
+    <string name="SvipeSeriesEmpty">Серий пока нет</string>
+    <string name="SvipePlaylistTitle">Плейлист</string>
+    <string name="SvipePlaylistPosition">%1$d / %2$d</string>
+    <string name="SvipePlaylistUpNext">Далее</string>
+    <string name="SvipeSeriesEpisodesCount_one">%1$d серия</string>
+    <string name="SvipeSeriesEpisodesCount_few">%1$d серии</string>
+    <string name="SvipeSeriesEpisodesCount_many">%1$d серий</string>
+    <string name="SvipeSeriesEpisodesCount_other">%1$d серий</string>
+    <string name="SvipeSeriesSeasonsCount_one">%1$d сезон</string>
+    <string name="SvipeSeriesSeasonsCount_few">%1$d сезона</string>
+    <string name="SvipeSeriesSeasonsCount_many">%1$d сезонов</string>
+    <string name="SvipeSeriesSeasonsCount_other">%1$d сезонов</string>
 </resources>

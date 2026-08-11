@@ -264,4 +264,16 @@
     <string name="SvipeNotificationsBotOff">O\'chirilgan</string>
     <string name="SvipeNotificationsBotsExceptionsCount_one">%1$d ta istisno</string>
     <string name="SvipeNotificationsBotsExceptionsCount_other">%1$d ta istisno</string>
+    <string name="SvipeSeasonEpisode">%1$d-fasl · %2$d-qism</string>
+    <string name="SvipeEpisodeNo">%1$d-qism</string>
+    <string name="SvipeSeriesPlayAll">Barchasini ijro etish</string>
+    <string name="SvipeSeriesResume">Davom ettirish</string>
+    <string name="SvipeSeriesEmpty">Hozircha qism yo\'q</string>
+    <string name="SvipePlaylistTitle">Pleylist</string>
+    <string name="SvipePlaylistPosition">%1$d / %2$d</string>
+    <string name="SvipePlaylistUpNext">Keyingisi</string>
+    <string name="SvipeSeriesEpisodesCount_one">%1$d ta qism</string>
+    <string name="SvipeSeriesEpisodesCount_other">%1$d ta qism</string>
+    <string name="SvipeSeriesSeasonsCount_one">%1$d ta fasl</string>
+    <string name="SvipeSeriesSeasonsCount_other">%1$d ta fasl</string>
 </resources>

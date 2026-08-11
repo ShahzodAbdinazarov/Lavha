@@ -11428,4 +11428,16 @@
     <string name="SvipeNotificationsBotOff">Muted</string>
     <string name="SvipeNotificationsBotsExceptionsCount_one">%1$d exception</string>
     <string name="SvipeNotificationsBotsExceptionsCount_other">%1$d exceptions</string>
+    <string name="SvipeSeasonEpisode">S%1$d · E%2$d</string>
+    <string name="SvipeEpisodeNo">Episode %1$d</string>
+    <string name="SvipeSeriesPlayAll">Play all</string>
+    <string name="SvipeSeriesResume">Resume</string>
+    <string name="SvipeSeriesEmpty">No episodes yet</string>
+    <string name="SvipePlaylistTitle">Playlist</string>
+    <string name="SvipePlaylistPosition">%1$d / %2$d</string>
+    <string name="SvipePlaylistUpNext">Up next</string>
+    <string name="SvipeSeriesEpisodesCount_one">%1$d episode</string>
+    <string name="SvipeSeriesEpisodesCount_other">%1$d episodes</string>
+    <string name="SvipeSeriesSeasonsCount_one">%1$d season</string>
+    <string name="SvipeSeriesSeasonsCount_other">%1$d seasons</string>
 </resources>

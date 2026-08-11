@@ -290,6 +290,67 @@ public final class SvipeMovies {
         void onResult(List<Series> series, Integer nextOffset, String error);
     }
 
+    /**
+     * One episode of a show — a Telegram post, plus where it sits in the running order.
+     *
+     * <p>Nothing is copied anywhere to make this playable: the episode stays in whatever channel
+     * published it and we hold a reference to it. That is the whole difference between this playlist
+     * and the channel-building design it replaces — a playlist here costs one row, not a channel.
+     */
+    public static class Episode {
+        public long channelId;
+        public int messageId;
+        public String username;
+        public String postUrl;
+        public int season;        // 0 when the caption never said
+        public int episode;       // 0 when the caption never said
+        public int durationMs;
+        public String title;
+
+        /** The list position as a human reads it: "S2 · 7-qism", or a plain index when unnumbered. */
+        public String label(int index) {
+            if (episode > 0 && season > 0) {
+                return LocaleController.formatString(R.string.SvipeSeasonEpisode, season, episode);
+            }
+            if (episode > 0) {
+                return LocaleController.formatString(R.string.SvipeEpisodeNo, episode);
+            }
+            return LocaleController.formatString(R.string.SvipeEpisodeNo, index + 1);
+        }
+
+        /**
+         * The same episode shaped as a feed reference, which is the only currency the player and the
+         * watch page understand. 16:9 because a show is long-form by definition — the aspect decides
+         * which player opens, and a missing one would route an episode into the reels player.
+         */
+        public SvipeDiscover.Item asItem() {
+            SvipeDiscover.Item r = new SvipeDiscover.Item();
+            r.channelId = channelId;
+            r.messageId = messageId;
+            r.username = username;
+            r.width = 16;
+            r.height = 9;
+            r.durationMs = durationMs;
+            return r;
+        }
+    }
+
+    /** A show together with its episodes, in playlist order. This IS the playlist. */
+    public static class SeriesPage {
+        public Series series;
+        public final List<Episode> episodes = new ArrayList<>();
+        /** {@code svipe.uz/<code>} for the SHOW — a page that sells the app, not a Telegram link. */
+        public String shareUrl;
+
+        public boolean isEmpty() {
+            return episodes.isEmpty();
+        }
+    }
+
+    public interface SeriesPageCallback {
+        void onResult(SeriesPage page, String error);
+    }
+
     public static class ActorPage {
         public Actor actor;
         public final List<Movie> movies = new ArrayList<>();
@@ -421,6 +482,35 @@ public final class SvipeMovies {
         });
     }
 
+    /** A show and every episode it has, in order — the playlist behind the show page. */
+    public static void seriesDetail(int account, long seriesId, SeriesPageCallback cb) {
+        get(account, "/v1/series/" + seriesId, (res, err) -> {
+            if (res == null || !res.has("series")) {
+                cb.onResult(null, err != null ? err : "empty");
+                return;
+            }
+            SeriesPage page = new SeriesPage();
+            page.series = parseSeries(res.optJSONObject("series"));
+            page.shareUrl = res.isNull("share_url") ? null : res.optString("share_url", null);
+            JSONArray arr = res.optJSONArray("episodes");
+            for (int i = 0; arr != null && i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                Episode e = new Episode();
+                e.channelId = o.optLong("channel_id");
+                e.messageId = o.optInt("message_id");
+                e.username = o.isNull("username") ? null : o.optString("username", null);
+                e.postUrl = o.isNull("post_url") ? null : o.optString("post_url", null);
+                e.season = o.isNull("season") ? 0 : o.optInt("season");
+                e.episode = o.isNull("episode") ? 0 : o.optInt("episode");
+                e.durationMs = o.optInt("duration_ms");
+                e.title = o.isNull("title") ? null : o.optString("title", null);
+                if (e.messageId != 0) page.episodes.add(e);
+            }
+            cb.onResult(page, null);
+        });
+    }
+
     public static void movie(int account, long movieId, MovieCallback cb) {
         get(account, "/v1/movies/" + movieId, (res, err) -> {
             if (res == null || !res.has("movie")) {
@@ -436,6 +526,28 @@ public final class SvipeMovies {
      * not: by-post skipped the versions, because the watch page only wanted the cast back then — and
      * the moment that page grew a "Variants" tab it silently had nothing to put in it.
      */
+    private static Series parseSeries(JSONObject o) {
+        Series s = new Series();
+        if (o == null) return s;
+        s.id = o.optLong("id");
+        s.title = o.optString("title", "");
+        s.year = o.isNull("year") ? 0 : o.optInt("year");
+        s.episodeCount = o.optInt("episode_count");
+        s.seasonCount = o.optInt("season_count");
+        s.country = o.isNull("country") ? null : o.optString("country", null);
+        JSONArray g = o.optJSONArray("genres");
+        for (int j = 0; g != null && j < g.length(); j++) {
+            String v = g.optString(j, null);
+            if (v != null && !v.isEmpty()) s.genres.add(v);
+        }
+        s.posterChannelId = o.optLong("poster_channel_id");
+        s.posterMessageId = o.optInt("poster_message_id");
+        s.posterUsername = o.isNull("poster_username") ? null : o.optString("poster_username", null);
+        s.tgUsername = o.isNull("tg_username") ? null : o.optString("tg_username", null);
+        s.channelStatus = o.optString("channel_status", "pending");
+        return s;
+    }
+
     private static MovieDetail parseDetail(JSONObject res) {
         MovieDetail d = new MovieDetail();
         d.movie = parseMovie(res.optJSONObject("movie"));
