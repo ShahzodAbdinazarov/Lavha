@@ -2,6 +2,7 @@ package org.telegram.svipe;
 
 import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.Utilities;
 
@@ -36,6 +37,35 @@ public class SvipeApi {
      */
     public static final int CLIENT_LEVEL = 2;
     public static final String CLIENT_LEVEL_HEADER = "X-Svipe-Client";
+
+    /**
+     * What this build actually is: {@code <versionCode>/<versionName>/<package>}.
+     *
+     * Distinct from the capability level above and never a substitute for it — nothing server-side
+     * may branch on a version number, because that is how you end up with behaviour nobody can
+     * reason about. This is for knowing which builds are in use: how a release is spreading, and
+     * whether an old one is still out there. The package tells the three builds apart (Play, .web,
+     * .beta), which the version code alone cannot.
+     */
+    public static final String CLIENT_VERSION_HEADER = "X-Svipe-Version";
+
+    private static String clientVersion;
+
+    private static String clientVersion() {
+        if (clientVersion == null) {
+            String value = "";
+            try {
+                android.content.Context context = ApplicationLoader.applicationContext;
+                android.content.pm.PackageInfo info = context.getPackageManager()
+                        .getPackageInfo(context.getPackageName(), 0);
+                value = info.versionCode + "/" + info.versionName + "/" + context.getPackageName();
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+            clientVersion = value;
+        }
+        return clientVersion;
+    }
 
     public interface JsonCallback {
         void run(JSONObject result, int httpCode, String error);
@@ -173,6 +203,10 @@ public class SvipeApi {
                 conn.setReadTimeout(25000);
                 conn.setRequestProperty("Accept", "application/json");
                 conn.setRequestProperty(CLIENT_LEVEL_HEADER, String.valueOf(CLIENT_LEVEL));
+                final String version = clientVersion();
+                if (version.length() > 0) {
+                    conn.setRequestProperty(CLIENT_VERSION_HEADER, version);
+                }
                 if (bearer != null) {
                     conn.setRequestProperty("Authorization", "Bearer " + bearer);
                 }
