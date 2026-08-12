@@ -1500,15 +1500,43 @@ public class SvipeExploreGrid extends RecyclerListView {
                 fetchMessagesForGroup(local, group);
                 return;
             }
-            sendResolveForGroup(account, username, channelId, group);
+            // A channel we cannot address yet: take each poster off the post's own public link
+            // instead of buying the channel. One messages.getWebPage per card is more CALLS than one
+            // resolve per channel, but they are calls on a bucket that does not flood — 30 of them
+            // measured 0.9 s, while the 30 resolves they replace are what closes the whole app down
+            // for half an hour. See SvipeWebRef.
+            webPageGroup(account, username, channelId, group);
         });
+    }
+
+    /** Posters through the link-preview path — no channel, no resolveUsername. */
+    private void webPageGroup(final int account, final String username, final long channelId,
+                              final ArrayList<GridItem> group) {
+        for (GridItem gi : group) {
+            final GridItem item = gi;
+            org.telegram.svipe.video.SvipeWebRef.fetch(account, username, item.ref.messageId,
+                    channelId, (mo, page) -> {
+                item.resolving = false;
+                if (mo == null || mo.getDocument() == null) {
+                    return;   // a deleted post, or previews are off: the card simply stays blank
+                }
+                item.mo = mo;
+                item.resolved = true;
+                org.telegram.svipe.SvipeObserved.note(account, channelId, item.ref.messageId, mo);
+                final int pos = adapterPositionOf(item);
+                if (pos >= 0) {
+                    adapter.notifyItemChanged(pos);
+                }
+            });
+        }
     }
 
     private void sendResolveForGroup(final int account, final String username, final long channelId,
                                      final ArrayList<GridItem> group) {
         final MessagesController mc = MessagesController.getInstance(account);
         final ConnectionsManager cm = ConnectionsManager.getInstance(account);
-        if (org.telegram.svipe.SvipeChannelResolve.blocked(account)) {
+        if (org.telegram.svipe.SvipeChannelResolve.blocked(account)
+                || org.telegram.svipe.SvipeChannelResolve.exhausted(account)) {
             for (GridItem gi : group) {
                 gi.resolving = false;
             }
@@ -1516,7 +1544,12 @@ public class SvipeExploreGrid extends RecyclerListView {
         }
         TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
         req.username = username;
+        // A grid page is a dozen channels at once — exactly the burst Telegram floods on. Paced,
+        // and behind the player: a poster can arrive a second late, a tapped video cannot.
+        org.telegram.svipe.SvipeChannelResolve.pace(false, () -> {
+        org.telegram.svipe.SvipeChannelResolve.spend(account);
         cm.sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+            org.telegram.svipe.SvipeChannelResolve.sent();
             if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
                 org.telegram.svipe.SvipeChannelResolve.noteError(account, error);
                 for (GridItem gi : group) {
@@ -1548,6 +1581,7 @@ public class SvipeExploreGrid extends RecyclerListView {
             resolvedChats.put(username, chat);
             fetchMessagesForGroup(chat, group);
         }));
+        });
     }
 
     private void fetchMessagesForGroup(TLRPC.Chat chat, ArrayList<GridItem> group) {

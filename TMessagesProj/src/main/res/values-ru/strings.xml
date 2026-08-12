@@ -466,6 +466,7 @@
     <string name="SvipeVideoDownload">Скачать</string>
     <string name="SvipeVideoDownloaded">Скачано</string>
     <string name="SvipeVideoPlaybackFailed">Не удалось воспроизвести это видео</string>
+    <string name="SvipeVideoFloodWait">Telegram ограничивает этот аккаунт. Повторите через %1$d мин.</string>
     <string name="SvipeMusicPlaybackFailed">Сейчас не удалось воспроизвести этот трек</string>
     <string name="SvipeWatchInPlayer">Смотреть в Svipe</string>
     <string name="SvipeSearchVideos">Поиск видео</string>

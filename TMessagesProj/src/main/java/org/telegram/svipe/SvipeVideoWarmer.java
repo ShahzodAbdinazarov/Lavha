@@ -142,7 +142,7 @@ public final class SvipeVideoWarmer {
         SvipeRefResolver.resolve(account, ref, () -> {
             if (index == 0) preloadLead(account, ref);
             resolveNext(account, head, index + 1, done);
-        }, null);
+        }, null, true);   // warm-up: nothing is on screen waiting, so it queues behind the user
     }
 
     /**

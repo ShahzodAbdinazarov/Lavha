@@ -137,6 +137,129 @@ public final class SvipeChannelResolve {
         return prefs().getLong(KEY_BLOCKED_UNTIL + account, 0) > System.currentTimeMillis();
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // pacing — what actually earns the flood
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Telegram floods on the BURST, not on the total. Measured on a real account: opening the app and
+     * scrolling for forty seconds asked for 48 resolves across ~20 channels, because a page of the
+     * feed is thirty different channels and three surfaces (the grid's posters, the pager's
+     * read-ahead, the player itself) each want their own the moment they are bound. Spread over a
+     * minute the same traffic passes unnoticed; fired together it costs the account FLOOD_WAIT_2222,
+     * and then NOTHING in Svipe resolves — the feed draws blank cards and every tap says "Couldn't
+     * play this video".
+     *
+     * <p>So every {@code contacts.resolveUsername} in the app goes through here: one in the air at a
+     * time, spaced, urgent callers (something is on screen waiting to play) ahead of background ones
+     * (a poster, a read-ahead). This is a queue, not a drop — a paced resolve still happens.
+     */
+    private static final long MIN_GAP_MS = 1200;
+
+    /**
+     * A ceiling per rolling hour, persisted so a restart cannot reset it. The pacing above stops
+     * bursts; this stops the slow grind — a very long session still must not walk the account into a
+     * window that takes hours to clear. Past the budget we behave exactly like a flood window: the
+     * caller is told "no chat", and every surface already knows how to degrade (reels skip, the grid
+     * leaves the card blank, the watch page offers Retry).
+     */
+    private static final int BUDGET_PER_HOUR = 150;
+    private static final String KEY_SPENT = "resolve_spent_";
+    private static final String KEY_WINDOW = "resolve_window_";
+
+    /**
+     * How long a dispatched resolve may hold the lane before it is assumed lost. Every caller is
+     * supposed to call {@link #sent()}, but a request whose callback never runs (tgnet can re-queue
+     * one behind a flood wait) would otherwise wedge the lane shut and stop the app resolving
+     * ANYTHING — a worse failure than the bursts this queue exists to prevent.
+     */
+    private static final long LANE_WATCHDOG_MS = 12_000;
+
+    private static final java.util.ArrayDeque<Runnable> queue = new java.util.ArrayDeque<>();
+    private static boolean inFlight;
+    private static long lastSentAt;
+    /** Bumped on every dispatch, so a watchdog only frees the lane it was armed for. */
+    private static int laneTicket;
+
+    /** True when this account has spent its hourly resolve budget. Treated exactly like a flood. */
+    public static boolean exhausted(int account) {
+        final long now = System.currentTimeMillis();
+        final long window = prefs().getLong(KEY_WINDOW + account, 0);
+        if (now - window >= 60 * 60 * 1000L) {
+            return false;   // a new hour starts on the next spend
+        }
+        return prefs().getInt(KEY_SPENT + account, 0) >= BUDGET_PER_HOUR;
+    }
+
+    /** Count one resolve against the hourly budget, rolling the window when it has run out. */
+    public static void spend(int account) {
+        final long now = System.currentTimeMillis();
+        final long window = prefs().getLong(KEY_WINDOW + account, 0);
+        if (now - window >= 60 * 60 * 1000L) {
+            prefs().edit().putLong(KEY_WINDOW + account, now).putInt(KEY_SPENT + account, 1).apply();
+            return;
+        }
+        prefs().edit().putInt(KEY_SPENT + account, prefs().getInt(KEY_SPENT + account, 0) + 1).apply();
+    }
+
+    /**
+     * Queue one resolve. {@code send} is run on the UI thread when its turn comes, and the caller
+     * MUST call {@link #sent()} once the request settles (answer, error or timeout) — otherwise the
+     * lane stays occupied and nothing else resolves.
+     */
+    public static void pace(final boolean urgent, final Runnable send) {
+        AndroidUtilities.runOnUIThread(() -> {
+            if (urgent) {
+                queue.addFirst(send);
+            } else {
+                queue.addLast(send);
+            }
+            pump();
+        });
+    }
+
+    /** One resolve settled: free the lane and let the next one go, no sooner than the gap allows. */
+    public static void sent() {
+        AndroidUtilities.runOnUIThread(() -> {
+            if (!inFlight) {
+                return;   // the watchdog already freed this one
+            }
+            laneTicket++;
+            inFlight = false;
+            lastSentAt = System.currentTimeMillis();
+            pump();
+        });
+    }
+
+    private static void pump() {
+        if (inFlight || queue.isEmpty()) {
+            return;
+        }
+        final long waited = System.currentTimeMillis() - lastSentAt;
+        if (waited < MIN_GAP_MS) {
+            AndroidUtilities.runOnUIThread(SvipeChannelResolve::pump, MIN_GAP_MS - waited);
+            return;
+        }
+        final Runnable next = queue.pollFirst();
+        if (next == null) {
+            return;
+        }
+        inFlight = true;
+        lastSentAt = System.currentTimeMillis();
+        final int ticket = ++laneTicket;
+        AndroidUtilities.runOnUIThread(() -> {
+            if (inFlight && laneTicket == ticket) {
+                inFlight = false;
+                pump();
+            }
+        }, LANE_WATCHDOG_MS);
+        try {
+            next.run();
+        } catch (Exception e) {
+            inFlight = false;
+        }
+    }
+
     /** Seconds still to wait, for anything that wants to say so out loud. 0 when not blocked. */
     public static int blockedForSeconds(int account) {
         long until = prefs().getLong(KEY_BLOCKED_UNTIL + account, 0);

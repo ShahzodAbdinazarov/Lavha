@@ -170,7 +170,7 @@ public final class SvipeReelWarmer {
         SvipeRefResolver.resolve(account, ref, () -> {
             if (index == 0) preloadHead(account, ref);
             resolveHead(account, w, index + 1, done);
-        }, null);
+        }, null, true);   // warm-up: nothing is on screen waiting, so it queues behind the user
     }
 
     /**

@@ -945,7 +945,10 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
                         + (saved ? "user-choice" : select != null ? "LOCAL-cache" : "network-auto"));
                 p.preparePlayer(qualities, select);
             } else {
-                int reference = FileLoader.getInstance(account).getFileReference(mo);
+                // A document that arrived through a link preview refreshes its file_reference through
+                // that WebPage — FileRefController re-calls messages.getWebPage, no channel needed.
+                int reference = FileLoader.getInstance(account).getFileReference(
+                        current != null && current.refParent != null ? current.refParent : mo);
                 VideoPlayer.VideoUri vu = VideoPlayer.VideoUri.of(account, doc, null, reference, false);
                 // A file that merely EXISTS is not a file we can play: an interrupted download leaves a
                 // short one at the finished name, and reading it ends in "Source error / EOF" while the
@@ -972,6 +975,8 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
             // After preparePlayer, which is where ExoPlayer's own default would otherwise win.
             p.setPlaybackSpeed(savedSpeed(mo));
             telemetry.onPlayRequested();
+            // Somebody is watching: hold the observation flush off until this quiets down.
+            org.telegram.svipe.SvipeObserved.touch();
             p.setPlayWhenReady(true);
             p.play();
         } catch (Exception e) {

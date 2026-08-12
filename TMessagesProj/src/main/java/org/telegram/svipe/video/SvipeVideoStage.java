@@ -81,6 +81,7 @@ public class SvipeVideoStage extends FrameLayout {
     private final BackupImageView cover; // video thumbnail shown until the first frame renders
     /** Failure + retry over the picture. Without it a playback failure is an indefinite black frame. */
     private final LinearLayout errorView;
+    private final TextView errorText;
     private Runnable retryAction;
     private final SvipeVideoControls controls;
     private final SvipeVideoGestures gestures;
@@ -133,7 +134,7 @@ public class SvipeVideoStage extends FrameLayout {
         errorView.setGravity(Gravity.CENTER);
         errorView.setBackgroundColor(0x99000000);
         errorView.setVisibility(GONE);
-        final TextView errorText = new TextView(context);
+        errorText = new TextView(context);
         errorText.setText(LocaleController.getString(R.string.SvipeVideoPlaybackFailed));
         errorText.setTextColor(0xFFFFFFFF);
         errorText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
@@ -284,6 +285,21 @@ public class SvipeVideoStage extends FrameLayout {
     public void showError(Runnable retry) {
         retryAction = retry;
         errorView.setVisibility(retry != null ? VISIBLE : GONE);
+        if (retry == null) {
+            return;
+        }
+        // Name the real cause when we know it. A post whose channel we cannot address because
+        // Telegram has this account inside a contacts.resolveUsername flood window is not a broken
+        // video, and "Couldn't play this video" sends the user off retrying something that cannot
+        // work for the next half hour. Say what is happening and how long it lasts instead.
+        final int waitSeconds = org.telegram.svipe.SvipeChannelResolve.blockedForSeconds(
+                org.telegram.messenger.UserConfig.selectedAccount);
+        if (waitSeconds > 0) {
+            errorText.setText(LocaleController.formatString(R.string.SvipeVideoFloodWait,
+                    Math.max(1, (waitSeconds + 59) / 60)));
+        } else {
+            errorText.setText(LocaleController.getString(R.string.SvipeVideoPlaybackFailed));
+        }
     }
 
     public void showCover(MessageObject mo) {

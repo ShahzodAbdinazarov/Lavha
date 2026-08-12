@@ -301,6 +301,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         boolean liked;        // local like state (authoritative for the UI)
         int likeCount;        // total reactions count, kept in sync locally
         boolean resolving;    // an MTProto resolve is in flight (prevents duplicate prefetch)
+        Object refParent;     // TLRPC.WebPage when the document came from a link preview (SvipeWebRef)
         final java.util.ArrayList<Runnable> resolveCallbacks = new java.util.ArrayList<>(); // waiters for an in-flight resolve — never dropped
         int resolveAttempts;  // bounded retry counter for transient resolve failures
         boolean preloadStarted;                          // a head-preload was requested
@@ -324,6 +325,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         @Override public boolean isResolving() { return resolving; }
         @Override public void setResolving(boolean r) { resolving = r; }
         @Override public java.util.ArrayList<Runnable> resolveCallbacks() { return resolveCallbacks; }
+        @Override public Object refParent() { return refParent; }
+        @Override public void setRefParent(Object parent) { refParent = parent; }
     }
 
     public ReelsActivity(Bundle args) {
@@ -1714,6 +1717,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
 
 
     private void startPlayback(MessageObject mo, TLRPC.Document doc, int pos, FeedItem item) {
+        org.telegram.svipe.SvipeObserved.touch();   // watching: keep background reporting away
         // Async callers (resolve callbacks, the start checker, deferred recovery) can land after the
         // fragment paused or died — never start audio/video in the background or on a dead fragment.
         // Nothing is lost: onResume re-arms the start checker, which re-kicks within one tick.
@@ -1897,7 +1901,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                             + " fromQueue=" + item.fromQueue);
                     player.preparePlayer(qualities, cached);
                 } else {
-                    int reference = FileLoader.getInstance(account).getFileReference(mo);
+                    // The parent is what a stale file_reference is refreshed through: a WebPage when
+                    // the document came from a link preview, the message itself otherwise.
+                    int reference = FileLoader.getInstance(account).getFileReference(
+                            item != null && item.refParent != null ? item.refParent : mo);
                     VideoPlayer.VideoUri vu = VideoPlayer.VideoUri.of(account, doc, null, reference, false);
                     playbackSource = vu.isCached() ? "local_cache" : "network";
                     playbackRungs = 0;
@@ -2229,7 +2236,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 }
                 p.preparePlayer(qualities, SvipeVideoLadder.cachedQualityOf(qualities));
             } else {
-                int reference = FileLoader.getInstance(account).getFileReference(item.mo);
+                int reference = FileLoader.getInstance(account).getFileReference(
+                        item.refParent != null ? item.refParent : item.mo);
                 VideoPlayer.VideoUri vu = VideoPlayer.VideoUri.of(account, doc, null, reference, false);
                 FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_NORMAL);
                 p.preparePlayer(vu.uri, "other");

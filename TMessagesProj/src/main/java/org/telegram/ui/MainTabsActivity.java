@@ -402,6 +402,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         // reels is finished, not at a guessed delay after it (see SvipeWarmup).
         // Settings the user changed on another device come first: they are one small GET, and a
         // rule adopted after the media warm-ups would have applied a beat late.
+        // Whatever the last run could not send comes back first — it costs one prefs read and it is
+        // the only place the observation queue is ever loaded.
+        org.telegram.svipe.SvipeObserved.restore();
         SvipeWarmup.enqueue("settings", (acc, done) -> { SvipeSettingsSync.pull(acc); done.run(); });
         SvipeWarmup.enqueue("reels", SvipeReelWarmer::warm);
         SvipeWarmup.enqueue("video", SvipeVideoWarmer::warm);

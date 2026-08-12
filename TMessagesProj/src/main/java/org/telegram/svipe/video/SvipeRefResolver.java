@@ -45,6 +45,14 @@ public class SvipeRefResolver {
 
         /** Waiters for an in-flight resolve — never dropped. Must be the same list instance every call. */
         ArrayList<Runnable> resolveCallbacks();
+
+        /**
+         * What the file loader must be handed to refresh this document's file_reference: the
+         * {@link TLRPC.WebPage} when the message came from a link preview ({@link SvipeWebRef}), and
+         * null when it came from the channel itself — then the message IS the parent, as always.
+         */
+        Object refParent();
+        void setRefParent(Object parent);
     }
 
     public interface Delegate {
@@ -76,6 +84,7 @@ public class SvipeRefResolver {
         public MessageObject mo;    // filled after MTProto resolution
         public TLRPC.Chat chat;
         public boolean resolving;
+        public Object refParent;    // TLRPC.WebPage when the document came from a link preview
         public final ArrayList<Runnable> resolveCallbacks = new ArrayList<>();
 
         public static VideoRef of(SvipeDiscover.Item item) {
@@ -103,6 +112,8 @@ public class SvipeRefResolver {
         @Override public boolean isResolving() { return resolving; }
         @Override public void setResolving(boolean r) { resolving = r; }
         @Override public ArrayList<Runnable> resolveCallbacks() { return resolveCallbacks; }
+        @Override public Object refParent() { return refParent; }
+        @Override public void setRefParent(Object parent) { refParent = parent; }
     }
 
     private SvipeRefResolver() {}
@@ -183,7 +194,7 @@ public class SvipeRefResolver {
      * layer down until the app was restarted (see SvipeAuth).
      */
     private static void withChat(final int account, final String username, final long channelId,
-                                 final ChatCallback cb) {
+                                 final boolean urgent, final ChatCallback cb) {
         TLRPC.Chat cached = cachedChat(account, username);
         if (cached != null) {
             cb.run(cached);
@@ -199,15 +210,20 @@ public class SvipeRefResolver {
                 cb.run(local);
                 return;
             }
-            sendResolve(account, username, channelId, cb);
+            sendResolve(account, username, channelId, urgent, cb);
         });
     }
 
     private static void sendResolve(final int account, final String username, final long channelId,
-                                    final ChatCallback cb) {
+                                    final boolean urgent, final ChatCallback cb) {
         if (org.telegram.svipe.SvipeChannelResolve.blocked(account)) {
             // Inside an open flood window. Asking again is what makes Telegram extend it.
             FileLog.d("svipe: resolve @" + username + " skipped, flood window open");
+            cb.run(null);
+            return;
+        }
+        if (org.telegram.svipe.SvipeChannelResolve.exhausted(account)) {
+            FileLog.d("svipe: resolve @" + username + " skipped, hourly budget spent");
             cb.run(null);
             return;
         }
@@ -225,8 +241,13 @@ public class SvipeRefResolver {
         TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
         req.username = username;
         final java.util.concurrent.atomic.AtomicBoolean answered = new java.util.concurrent.atomic.AtomicBoolean();
+        // Paced, not fired: see SvipeChannelResolve#pace. Urgent when somebody is waiting on this
+        // reference to play; a poster or a read-ahead waits its turn behind them.
+        org.telegram.svipe.SvipeChannelResolve.pace(urgent, () -> {
+        org.telegram.svipe.SvipeChannelResolve.spend(account);
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
             if (!answered.compareAndSet(false, true)) return; // the timeout already gave up on this one
+            org.telegram.svipe.SvipeChannelResolve.sent();
             TLRPC.Chat chat = null;
             if (error == null && response instanceof TLRPC.TL_contacts_resolvedPeer) {
                 TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
@@ -247,9 +268,11 @@ public class SvipeRefResolver {
         }, FAIL_FAST);
         AndroidUtilities.runOnUIThread(() -> {
             if (!answered.compareAndSet(false, true)) return;
+            org.telegram.svipe.SvipeChannelResolve.sent();
             FileLog.d("svipe: resolve @" + username + " timed out");
             drainResolve(key, null);
         }, STEP_TIMEOUT_MS);
+        });
     }
 
     private static void drainResolve(String key, TLRPC.Chat chat) {
@@ -273,6 +296,16 @@ public class SvipeRefResolver {
      *                 null-guarded for exactly that case.
      */
     public static void resolve(final int account, final Ref ref, final Runnable onResolved, final Delegate delegate) {
+        resolve(account, ref, onResolved, delegate, false);
+    }
+
+    /**
+     * @param prefetch true when nothing is on screen waiting for this reference — a warm-up or a
+     *                 read-ahead. Those queue BEHIND whatever the user is actually looking at, so a
+     *                 warm-up that wants thirty channels cannot push the tapped video to the back.
+     */
+    public static void resolve(final int account, final Ref ref, final Runnable onResolved,
+                               final Delegate delegate, final boolean prefetch) {
         if (ref.message() != null && ref.chat() != null) { if (onResolved != null) onResolved.run(); return; }
         // Queue-restored item: we already hold a playable MessageObject, only the chat is missing
         // (needed for the action rail). That is a cache lookup now, usually free.
@@ -285,12 +318,50 @@ public class SvipeRefResolver {
         if (ref.isResolving()) return;
         ref.setResolving(true);
         final String username = ref.username().toLowerCase();
-        withChat(account, username, ref.channelId(), chat -> {
-            if (chat == null) {
-                fail(ref, delegate, true); // network/flood/timeout — the caller's policy decides
+        // Order matters, and it is not the obvious one.
+        //
+        //  1. a channel we can ALREADY address costs nothing and returns the real message (views,
+        //     reactions, the lot), so it stays first;
+        //  2. otherwise the post's own public link — messages.getWebPage — which hands over a
+        //     playable document without ever touching contacts.resolveUsername. That call is the
+        //     flood-limited one: 30 channels through resolveUsername is a 37-minute window, the same
+        //     30 through getWebPage measured 0.9 s with no flood at all;
+        //  3. only if the preview has nothing (deleted post, previews off) do we pay for a resolve,
+        //     and even then it goes through the paced lane.
+        //
+        // The channel is still wanted — for the rail, subscribe, reactions — but it is fetched AFTER
+        // the video is playing, in the background, and a flood window now costs a rail rather than
+        // the video.
+        final TLRPC.Chat cached = cachedChat(account, username);
+        if (cached != null) {
+            fetchMessage(account, ref, username, cached, delegate);
+            return;
+        }
+        org.telegram.svipe.SvipeChannelResolve.lookup(account, ref.channelId(), local -> {
+            if (local != null) {
+                cacheFor(account).put(username, local);
+                fetchMessage(account, ref, username, local, delegate);
                 return;
             }
-            fetchMessage(account, ref, username, chat, delegate);
+            SvipeWebRef.fetch(account, username, ref.messageId(), ref.channelId(), (mo, page) -> {
+                if (mo != null) {
+                    ref.setResolving(false);
+                    ref.setMessage(mo);
+                    ref.setRefParent(page);
+                    // Free knowledge, sent home whenever the app is next idle (SvipeObserved).
+                    org.telegram.svipe.SvipeObserved.note(account, ref.channelId(), ref.messageId(), mo);
+                    if (delegate != null) delegate.onResolved(ref);
+                    drainCallbacks(ref);
+                    return;
+                }
+                sendResolve(account, username, ref.channelId(), !prefetch, chat -> {
+                    if (chat == null) {
+                        fail(ref, delegate, true); // network/flood/timeout — the caller's policy decides
+                        return;
+                    }
+                    fetchMessage(account, ref, username, chat, delegate);
+                });
+            });
         });
     }
 
@@ -319,6 +390,7 @@ public class SvipeRefResolver {
             MessagesController.getInstance(account).putUsers(mm.users, false);
             MessagesController.getInstance(account).putChats(mm.chats, false);
             if (mm.messages == null || mm.messages.isEmpty()) {
+                org.telegram.svipe.SvipeObserved.noteGone(account, ref.channelId(), ref.messageId());
                 fail(ref, delegate, false); // message gone — give up
                 return;
             }
@@ -328,6 +400,7 @@ public class SvipeRefResolver {
                 fail(ref, delegate, false); // not a playable video — give up
                 return;
             }
+            org.telegram.svipe.SvipeObserved.note(account, ref.channelId(), ref.messageId(), mo);
             AndroidUtilities.runOnUIThread(() -> {
                 ref.setResolving(false);
                 ref.setMessage(mo);
@@ -368,7 +441,7 @@ public class SvipeRefResolver {
     public static void resolveChatOnly(final int account, final Ref ref, final Runnable onResolved) {
         if (ref.isResolving()) return;
         ref.setResolving(true);
-        withChat(account, ref.username().toLowerCase(), ref.channelId(), chat ->
+        withChat(account, ref.username().toLowerCase(), ref.channelId(), true, chat ->
                 AndroidUtilities.runOnUIThread(() -> {
                     ref.setResolving(false);
                     if (chat != null) ref.setChat(chat);

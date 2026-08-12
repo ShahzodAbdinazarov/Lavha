@@ -94,7 +94,7 @@ public class SvipeMusicResolver {
     private static void sendResolve(int account, String username, ArrayList<SvipeMusic.Track> group,
                                     Map<String, TLRPC.Message> resolved, Runnable done,
                                     ConcurrentHashMap<String, TLRPC.Chat> chats) {
-        if (SvipeChannelResolve.blocked(account)) {
+        if (SvipeChannelResolve.blocked(account) || SvipeChannelResolve.exhausted(account)) {
             // Telegram is already making this account wait. Asking anyway is not merely useless: a
             // call inside an open flood window is what makes Telegram extend it.
             done.run();
@@ -102,7 +102,11 @@ public class SvipeMusicResolver {
         }
         TLRPC.TL_contacts_resolveUsername req = new TLRPC.TL_contacts_resolveUsername();
         req.username = username;
+        // Through the same paced lane as every other resolve in the app — see SvipeChannelResolve.
+        SvipeChannelResolve.pace(true, () -> {
+        SvipeChannelResolve.spend(account);
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+            SvipeChannelResolve.sent();
             if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
                 SvipeChannelResolve.noteError(account, error);
                 done.run();
@@ -135,6 +139,7 @@ public class SvipeMusicResolver {
             // request behind the wait, so this callback — and the `done` barrier the caller is
             // waiting on — would simply never run (see SvipeAuth for the measured case).
         }), ConnectionsManager.RequestFlagFailOnServerErrors);
+        });
     }
 
     private static void fetchMessages(int account, TLRPC.Chat chat, ArrayList<SvipeMusic.Track> group,

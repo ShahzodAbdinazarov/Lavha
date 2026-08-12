@@ -6741,6 +6741,12 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
     protected void onPause() {
         super.onPause();
         isResumed = false;
+        // The app is leaving the foreground: nothing is being watched, so this is the one moment
+        // when a batch of observations cannot get in anybody's way (SvipeObserved).
+        try {
+            org.telegram.svipe.SvipeObserved.flush(currentAccount, true);
+        } catch (Exception ignore) {
+        }
         pipActivityHandler.onPause();
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.stopAllHeavyOperations, 4096);
         ApplicationLoader.mainInterfacePaused = true;
