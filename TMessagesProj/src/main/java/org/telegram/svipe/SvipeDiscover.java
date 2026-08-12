@@ -56,6 +56,12 @@ public class SvipeDiscover {
         // share sheet prefers it over the raw t.me link because it carries the install loop.
         public String shareUrl;
         /**
+         * Telegram's own inline placeholder for this media (photoStrippedSize), base64, served by
+         * the backend. A couple of hundred bytes that draw a blurred card the moment the JSON lands
+         * — before any MTProto and without a single byte of the video being fetched.
+         */
+        public String thumbB64;
+        /**
          * The id of the recommendation PAGE this reference arrived with, so an event about it can be
          * attributed back to the ranking that served it. The reels feed carries one; the discover /
          * long-form responses do not yet, so this stays null and their events land unattributed —
@@ -502,6 +508,7 @@ public class SvipeDiscover {
             it.height = o.optInt("height", 0);
             it.durationMs = o.optInt("duration_ms", 0);
             it.shareUrl = o.isNull("share_url") ? null : o.optString("share_url", null);
+            it.thumbB64 = o.isNull("thumb_b64") ? null : o.optString("thumb_b64", null);
             it.recId = recId;
             out.add(it);
         }

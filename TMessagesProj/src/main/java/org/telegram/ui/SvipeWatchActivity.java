@@ -465,6 +465,10 @@ public class SvipeWatchActivity extends BaseFragment {
         }
         if (row.mo == null) {
             resolveWatched();
+        } else {
+            // Already playable — it came from the link path, which carries no channel. Fill the
+            // header behind the video rather than in front of it.
+            enrichWatched();
         }
         loadRelated();
         loadMovie();
@@ -928,6 +932,9 @@ public class SvipeWatchActivity extends BaseFragment {
                 likeCount = totalReactions(row.mo);
             }
             rebuildRows();
+            // A message that arrived through the link path has no chat with it: fill the header
+            // behind the video (SvipeWatchActivity#enrichWatched).
+            enrichWatched();
             // Unconditional on purpose. The controller opened this reference with resolveHere=false
             // (SvipeVideoPlayerController.onWatchPageOpened) and is waiting on exactly this callback;
             // firing it only on success left a failed resolve as a permanently black player with no
@@ -991,7 +998,99 @@ public class SvipeWatchActivity extends BaseFragment {
                 fetchMessages(local, group, done);
                 return;
             }
-            sendResolveGroup(username, group, done);
+            webPageGroup(username, head.ref.channelId, group, done);
+        });
+    }
+
+    /**
+     * Episode thumbnails and related cards through the posts' own links — no channel bought.
+     *
+     * <p>This page holds the app's widest spread of channels: a related list is a dozen different
+     * ones and a show's playlist can be ninety posts. It used to be the biggest single source of
+     * contacts.resolveUsername for exactly that reason. Rows whose link has no preview at all are
+     * collected and cost ONE resolve between them, instead of a column of blanks.
+     */
+    private void webPageGroup(final String username, final long channelId,
+                              final ArrayList<Row> group, final Runnable done) {
+        final int[] pending = {group.size()};
+        final ArrayList<Row> missed = new ArrayList<>();
+        for (Row row : group) {
+            final Row r = row;
+            org.telegram.svipe.video.SvipeWebRef.fetch(currentAccount, username, r.ref.messageId,
+                    channelId, (mo, page) -> {
+                if (mo != null) {
+                    r.mo = mo;
+                    r.resolving = false;
+                    org.telegram.svipe.SvipeObserved.note(currentAccount, channelId, r.ref.messageId, mo);
+                } else {
+                    missed.add(r);
+                }
+                if (--pending[0] == 0) {
+                    if (!missed.isEmpty()) {
+                        sendResolveGroup(username, missed, done);
+                    } else if (done != null) {
+                        done.run();
+                    }
+                    if (adapter != null) adapter.notifyDataSetChanged();
+                }
+            });
+        }
+    }
+
+    /**
+     * Fill the header for a video that opened through its link: the channel (avatar, name,
+     * subscribe) and the post's own view count, which a preview does not carry.
+     *
+     * <p>Runs AFTER the video is playing and through the paced lane, so a flood window costs a plain
+     * header rather than the video. The real message is not swapped in — its counters are copied onto
+     * the one on screen, because the document, and so the file being played, is the same either way.
+     */
+    private void enrichWatched() {
+        if (watched == null || watched.chat != null || watched.ref == null
+                || watched.ref.username == null || watched.ref.username.isEmpty()) {
+            return;
+        }
+        final Row row = watched;
+        final String username = row.ref.username.toLowerCase();
+        final TLRPC.Chat cached = resolvedChats.get(username);
+        if (cached != null) {
+            row.chat = cached;
+            refreshHeader(row);
+            return;
+        }
+        org.telegram.svipe.SvipeChannelResolve.lookup(currentAccount, row.ref.channelId, local -> {
+            if (local != null) {
+                resolvedChats.put(username, local);
+                row.chat = local;
+                refreshHeader(row);
+                return;
+            }
+            final ArrayList<Row> single = new ArrayList<>();
+            single.add(row);
+            // Counters only: the message this page is playing must not be replaced under the player.
+            enrichRow(username, single);
+        });
+    }
+
+    private void enrichRow(final String username, final ArrayList<Row> single) {
+        final Row row = single.get(0);
+        final MessageObject playing = row.mo;
+        sendResolveGroup(username, single, () -> {
+            if (row.mo != null && row.mo != playing && playing != null
+                    && row.mo.messageOwner != null && playing.messageOwner != null) {
+                playing.messageOwner.views = row.mo.messageOwner.views;
+                playing.messageOwner.forwards = row.mo.messageOwner.forwards;
+                playing.messageOwner.reactions = row.mo.messageOwner.reactions;
+                if (row.mo.messageOwner.date != 0) playing.messageOwner.date = row.mo.messageOwner.date;
+                row.mo = playing;   // keep the object the player was handed
+            }
+            refreshHeader(row);
+        });
+    }
+
+    private void refreshHeader(Row row) {
+        AndroidUtilities.runOnUIThread(() -> {
+            if (adapter != null) adapter.notifyDataSetChanged();
         });
     }
 
@@ -1992,10 +2091,16 @@ public class SvipeWatchActivity extends BaseFragment {
                 avatar.setForUserOrChat(chat, new AvatarDrawable(chat));
                 name.setText(chat.title != null ? chat.title : ("@" + watched.ref.username));
             } else {
+                // No chat yet — this post opened through its public link (SvipeWebRef). The link
+                // itself carries the channel's NAME, so show that rather than the raw handle while
+                // the background enrichment fetches the real thing.
+                final String fromPage =
+                        org.telegram.svipe.video.SvipeWebRef.channelTitle(watched.ref.channelId);
+                final String shown = fromPage != null ? fromPage : ("@" + watched.ref.username);
                 AvatarDrawable ad = new AvatarDrawable();
-                ad.setInfo(0, watched.ref.username, null);
+                ad.setInfo(watched.ref.channelId, shown, null);
                 avatar.setImageDrawable(ad);
-                name.setText("@" + watched.ref.username);
+                name.setText(shown);
             }
             // Opportunistic: shown only when the full chat is already cached — a watch page must not
             // spend a round-trip on a subscriber count.

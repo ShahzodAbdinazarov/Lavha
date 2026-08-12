@@ -55,6 +55,10 @@ public final class SvipeObserved {
 
     /** channel:message -> the observation, newest write wins. Insertion-ordered so drops are FIFO. */
     private static final LinkedHashMap<String, JSONObject> pending = new LinkedHashMap<>();
+    /** How many batches one background flush may send before it leaves the rest for next time. */
+    private static final int MAX_BACKGROUND_BATCHES = 5;
+    private static int drained;
+
     private static boolean scheduled;
     private static boolean sending;
     private static long lastActivityAt;
@@ -71,17 +75,39 @@ public final class SvipeObserved {
      *           worth reporting, they just carry different fields
      */
     public static void note(int account, long channelId, int messageId, MessageObject mo) {
+        note(account, channelId, messageId, mo, "video");
+    }
+
+    /**
+     * @param kind which catalog this reference belongs to — {@code "video"} or {@code "music"}. The
+     *             two live in different tables on the server and carry different fields: an audio
+     *             document has the tags a track list shows, a video has dimensions and streaming.
+     */
+    public static void note(int account, long channelId, int messageId, MessageObject mo, String kind) {
         if (mo == null || channelId == 0 || messageId <= 0) {
             return;
         }
         try {
             final JSONObject o = new JSONObject();
+            o.put("kind", kind);
             o.put("channel_id", channelId);
             o.put("message_id", messageId);
             final TLRPC.Document doc = mo.getDocument();
             if (doc != null) {
                 o.put("doc_id", doc.id);
                 if (doc.size > 0) o.put("size", doc.size);
+                if (doc.mime_type != null && !doc.mime_type.isEmpty()) o.put("mime_type", doc.mime_type);
+                // Telegram's inline placeholder — it came with the message, so reporting it costs
+                // nothing and saves everybody else the wait for a picture (see SvipeThumb).
+                for (int i = 0; doc.thumbs != null && i < doc.thumbs.size(); i++) {
+                    final TLRPC.PhotoSize ps = doc.thumbs.get(i);
+                    if (ps instanceof TLRPC.TL_photoStrippedSize && ps.bytes != null
+                            && ps.bytes.length > 0 && ps.bytes.length <= 2048) {
+                        o.put("thumb_b64", android.util.Base64.encodeToString(
+                                ps.bytes, android.util.Base64.NO_WRAP));
+                        break;
+                    }
+                }
                 for (int i = 0; i < doc.attributes.size(); i++) {
                     TLRPC.DocumentAttribute a = doc.attributes.get(i);
                     if (a instanceof TLRPC.TL_documentAttributeVideo) {
@@ -89,6 +115,15 @@ public final class SvipeObserved {
                         if (v.duration > 0) o.put("duration_ms", (int) (v.duration * 1000));
                         if (v.w > 0) o.put("width", v.w);
                         if (v.h > 0) o.put("height", v.h);
+                        o.put("supports_streaming", v.supports_streaming);
+                    } else if (a instanceof TLRPC.TL_documentAttributeAudio) {
+                        final TLRPC.TL_documentAttributeAudio au = (TLRPC.TL_documentAttributeAudio) a;
+                        if (au.duration > 0) o.put("duration_ms", au.duration * 1000);
+                        if (au.title != null && !au.title.isEmpty()) o.put("title", au.title);
+                        if (au.performer != null && !au.performer.isEmpty()) o.put("performer", au.performer);
+                    } else if (a instanceof TLRPC.TL_documentAttributeFilename) {
+                        final String fn = ((TLRPC.TL_documentAttributeFilename) a).file_name;
+                        if (fn != null && !fn.isEmpty()) o.put("file_name", fn);
                     }
                 }
             }
@@ -97,6 +132,7 @@ public final class SvipeObserved {
                 if (m.views > 0) o.put("views", m.views);
                 if (m.forwards > 0) o.put("forwards", m.forwards);
                 if (m.edit_date > 0) o.put("edit_date", m.edit_date);
+                if (m.date > 0) o.put("posted_at", m.date);
                 if (m.message != null && !m.message.isEmpty()) o.put("caption", m.message);
                 if (m.reactions != null && m.reactions.results != null) {
                     int total = 0;
@@ -112,19 +148,62 @@ public final class SvipeObserved {
         }
     }
 
+    /**
+     * Record what a resolved CHANNEL turned out to be — its name and how many people follow it.
+     *
+     * <p>Called from the one funnel every resolve passes through ({@link SvipeChannelResolve#remember}),
+     * so no surface has to remember to do it. The avatar is deliberately not reported: a photo's
+     * access_hash and file_reference are minted per account, so one device's copy is unusable to
+     * anybody else — the name and the count are the parts that travel.
+     */
+    public static void noteChannel(int account, TLRPC.Chat chat) {
+        if (chat == null || chat.id == 0 || chat.min) {
+            return;   // a "min" chat carries a title but not a trustworthy one
+        }
+        try {
+            final JSONObject o = new JSONObject();
+            o.put("channel_id", chat.id);
+            if (chat.title != null && !chat.title.isEmpty()) o.put("title", chat.title);
+            if (chat.username != null && !chat.username.isEmpty()) o.put("username", chat.username);
+            if (chat.participants_count > 0) o.put("subscribers", chat.participants_count);
+            if (o.length() <= 1) {
+                return;   // nothing but the id: not worth a row
+            }
+            enqueueChannel(account, chat.id, o);
+        } catch (Exception ignore) {
+        }
+    }
+
     /** Record that a post could not be had at all — deleted, or its channel went private. */
     public static void noteGone(int account, long channelId, int messageId) {
+        noteGone(account, channelId, messageId, "video");
+    }
+
+    public static void noteGone(int account, long channelId, int messageId, String kind) {
         if (channelId == 0 || messageId <= 0) {
             return;
         }
         try {
             final JSONObject o = new JSONObject();
+            o.put("kind", kind);
             o.put("channel_id", channelId);
             o.put("message_id", messageId);
             o.put("gone", true);
             enqueue(account, channelId + ":" + messageId, o);
         } catch (Exception ignore) {
         }
+    }
+
+    /** Channel observations, same discipline as the post ones and flushed in the same request. */
+    private static final LinkedHashMap<Long, JSONObject> pendingChannels = new LinkedHashMap<>();
+
+    private static synchronized void enqueueChannel(int account, long channelId, JSONObject o) {
+        pendingChannels.remove(channelId);
+        pendingChannels.put(channelId, o);
+        while (pendingChannels.size() > MAX_QUEUED) {
+            pendingChannels.remove(pendingChannels.keySet().iterator().next());
+        }
+        schedule(account);
     }
 
     private static synchronized void enqueue(int account, String key, JSONObject o) {
@@ -156,7 +235,7 @@ public final class SvipeObserved {
      *                   stay out of the way of, and the quiet check is skipped
      */
     public static synchronized void flush(final int account, final boolean background) {
-        if (sending || pending.isEmpty()) {
+        if (sending || (pending.isEmpty() && pendingChannels.isEmpty())) {
             return;
         }
         if (!background && System.currentTimeMillis() - lastActivityAt < QUIET_MS) {
@@ -168,7 +247,12 @@ public final class SvipeObserved {
             batch.add(e.getValue());
             if (batch.size() >= BATCH) break;
         }
-        if (batch.isEmpty()) {
+        final ArrayList<JSONObject> channelBatch = new ArrayList<>();
+        for (JSONObject o : pendingChannels.values()) {
+            channelBatch.add(o);
+            if (channelBatch.size() >= BATCH) break;
+        }
+        if (batch.isEmpty() && channelBatch.isEmpty()) {
             return;
         }
         sending = true;
@@ -176,6 +260,7 @@ public final class SvipeObserved {
             try {
                 final JSONObject body = new JSONObject();
                 body.put("items", new JSONArray(batch));
+                body.put("channels", new JSONArray(channelBatch));
                 // A token we already hold, never a fresh auth chain: this call is not worth waking
                 // the bot flow for. No token -> put it back and wait for a moment when there is one.
                 final String token = SvipeAuth.getStoredToken(account);
@@ -193,8 +278,20 @@ public final class SvipeObserved {
                             for (int i = 0; i < batch.size(); i++) {
                                 pending.values().remove(batch.get(i));
                             }
+                            for (int i = 0; i < channelBatch.size(); i++) {
+                                pendingChannels.values().remove(channelBatch.get(i));
+                            }
                             FileLog.d("svipe: observed flushed " + batch.size()
                                     + ", queued " + pending.size());
+                            if (background && !pending.isEmpty() && drained < MAX_BACKGROUND_BATCHES) {
+                                // Nothing is competing for the connection now, and a queue that only
+                                // ever drains 60 at a time takes days to catch up after a busy
+                                // session. Keep going while the app is away, but bounded.
+                                drained++;
+                                flush(account, true);
+                            } else {
+                                drained = 0;
+                            }
                         }
                         // On failure the batch simply stays queued. There is no retry policy on
                         // purpose: the next flush IS the retry, twenty minutes from now.

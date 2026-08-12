@@ -124,6 +124,14 @@ public final class SvipeChannelResolve {
         MessagesController mc = MessagesController.getInstance(account);
         mc.putUsers(peer.users, false);
         mc.putChats(peer.chats, false);
+        // Every resolve in the app funnels through here, so this is the one place that sees a fresh
+        // channel — its name and its follower count go home with the next background batch, and the
+        // next person's grid can draw the card without resolving anything (SvipeObserved).
+        if (peer.chats != null) {
+            for (int i = 0; i < peer.chats.size(); i++) {
+                SvipeObserved.noteChannel(account, peer.chats.get(i));
+            }
+        }
         final ArrayList<TLRPC.User> users = peer.users == null ? new ArrayList<>() : new ArrayList<>(peer.users);
         final ArrayList<TLRPC.Chat> chats = peer.chats == null ? new ArrayList<>() : new ArrayList<>(peer.chats);
         if (users.isEmpty() && chats.isEmpty()) {

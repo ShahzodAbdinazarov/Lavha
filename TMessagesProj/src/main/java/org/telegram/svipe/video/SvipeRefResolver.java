@@ -365,6 +365,90 @@ public class SvipeRefResolver {
         });
     }
 
+    /**
+     * Fill in what the link path cannot: the CHANNEL, and the counters that live on the real post.
+     *
+     * <p>A document from a preview plays, but it carries no chat — so the rail has no avatar, no
+     * channel name beyond the handle, no subscribe, and the meta line has no view count. This buys
+     * exactly that, AFTER the video is already playing, through the paced lane and at background
+     * priority: if the account is inside a flood window the video keeps playing and the rail simply
+     * stays plain, which is the trade this whole design is built on.
+     *
+     * <p>The real message is not swapped in — its counters are copied ONTO the message being played.
+     * Swapping would hand the player a different object mid-playback for no gain; the document, and
+     * therefore the file, is the same one either way.
+     */
+    public static void enrich(final int account, final Ref ref, final Runnable onFilled) {
+        if (ref == null || ref.chat() != null || ref.username() == null || ref.username().isEmpty()) {
+            return;
+        }
+        final String username = ref.username().toLowerCase();
+        final TLRPC.Chat cached = cachedChat(account, username);
+        if (cached != null) {
+            fillFrom(account, ref, cached, onFilled);
+            return;
+        }
+        org.telegram.svipe.SvipeChannelResolve.lookup(account, ref.channelId(), local -> {
+            if (local != null) {
+                cacheFor(account).put(username, local);
+                fillFrom(account, ref, local, onFilled);
+                return;
+            }
+            sendResolve(account, username, ref.channelId(), false, chat -> {
+                if (chat != null) {
+                    fillFrom(account, ref, chat, onFilled);
+                }
+            });
+        });
+    }
+
+    /** Set the chat, then copy the post's own counters onto the message already on screen. */
+    private static void fillFrom(final int account, final Ref ref, final TLRPC.Chat chat,
+                                 final Runnable onFilled) {
+        AndroidUtilities.runOnUIThread(() -> {
+            ref.setChat(chat);
+            if (onFilled != null) onFilled.run();
+        });
+        final MessageObject mo = ref.message();
+        if (mo == null || mo.messageOwner == null) {
+            return;
+        }
+        TLRPC.TL_inputChannel inputChannel = new TLRPC.TL_inputChannel();
+        inputChannel.channel_id = chat.id;
+        inputChannel.access_hash = chat.access_hash;
+        TLRPC.TL_channels_getMessages gm = new TLRPC.TL_channels_getMessages();
+        gm.channel = inputChannel;
+        gm.id.add(ref.messageId());
+        ConnectionsManager.getInstance(account).sendRequest(gm, (resp, err) -> {
+            if (err != null || !(resp instanceof TLRPC.messages_Messages)) {
+                return;
+            }
+            final TLRPC.messages_Messages mm = (TLRPC.messages_Messages) resp;
+            if (mm.messages == null || mm.messages.isEmpty()) {
+                return;
+            }
+            final TLRPC.Message real = mm.messages.get(0);
+            if (real == null || real instanceof TLRPC.TL_messageEmpty) {
+                return;
+            }
+            MessagesController.getInstance(account).putUsers(mm.users, false);
+            MessagesController.getInstance(account).putChats(mm.chats, false);
+            AndroidUtilities.runOnUIThread(() -> {
+                mo.messageOwner.views = real.views;
+                mo.messageOwner.forwards = real.forwards;
+                mo.messageOwner.reactions = real.reactions;
+                mo.messageOwner.edit_date = real.edit_date;
+                if (real.date != 0) mo.messageOwner.date = real.date;
+                if (real.message != null && !real.message.isEmpty()) {
+                    mo.messageOwner.message = real.message;
+                }
+                org.telegram.svipe.SvipeObserved.note(account, ref.channelId(), ref.messageId(),
+                        new MessageObject(account, real, false, true));
+                if (onFilled != null) onFilled.run();
+            });
+        }, FAIL_FAST);
+    }
+
     /** Second round-trip: the post itself. */
     private static void fetchMessage(final int account, final Ref ref, final String username,
                                      final TLRPC.Chat chat, final Delegate delegate) {

@@ -89,6 +89,11 @@ public class SvipeWideVideoCell extends LinearLayout {
     }
 
     private final int account;
+    /** Air on both sides of the picture, so the card has an edge of its own. */
+    private static final int CARD_SIDE_MARGIN_DP = 12;
+    /** And above it, so a card never sits welded to the chip row or to the block before it. */
+    private static final int CARD_TOP_MARGIN_DP = 10;
+
     private final WideThumbView thumb;
     private final BackupImageView avatar;
     private final TextView title;
@@ -104,7 +109,11 @@ public class SvipeWideVideoCell extends LinearLayout {
         setOrientation(VERTICAL);
 
         thumb = new WideThumbView(context);
-        addView(thumb, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        // Rounded, and inset from the screen edge: a card should read as an object on the page
+        // rather than a band across it. Matches the reference this cell was measured against.
+        thumb.setRoundRadius(AndroidUtilities.dp(12));
+        addView(thumb, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,
+                CARD_SIDE_MARGIN_DP, CARD_TOP_MARGIN_DP, CARD_SIDE_MARGIN_DP, 0));
 
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(HORIZONTAL);
@@ -179,15 +188,19 @@ public class SvipeWideVideoCell extends LinearLayout {
         this.ref = ref;
         this.mo = mo;
         thumb.bindRef(ref);
-        bindThumb(thumb, mo, true);
+        bindThumb(thumb, mo, true, ref);
 
         final TLRPC.Chat chat = chatFor(account, ref, chatHint);
         if (chat != null) {
             avatar.setForUserOrChat(chat, new AvatarDrawable(chat));
         } else {
             // Not resolved yet: a letter avatar off the @username, so the row never shows a hole.
+            // The channel's real NAME, when a link preview has already told us one — the letter
+            // avatar is then drawn from that instead of from the handle (SvipeWebRef#channelTitle).
+            final String known = ref == null ? null
+                    : org.telegram.svipe.video.SvipeWebRef.channelTitle(ref.channelId);
             AvatarDrawable ad = new AvatarDrawable();
-            ad.setInfo(0, ref != null ? ref.username : null, null);
+            ad.setInfo(0, known != null ? known : (ref != null ? ref.username : null), null);
             avatar.setImageDrawable(ad);
         }
         title.setText(titleOverride != null ? titleOverride : captionOf(mo));
@@ -200,8 +213,24 @@ public class SvipeWideVideoCell extends LinearLayout {
 
     /** Loads a resolved message's Telegram video thumbnail into a cell, or clears it if unresolved. */
     public static void bindThumb(BackupImageView iv, MessageObject mo, boolean wide) {
+        bindThumb(iv, mo, wide, null);
+    }
+
+    /**
+     * @param ref the backend reference this cell was built from, if any. It carries Telegram's own
+     *            inline blur, so a card that has not resolved yet is a blurred frame instead of an
+     *            empty rectangle — and a card that never resolves at least shows what it is. Nothing
+     *            is downloaded for it: the bytes came with the list JSON (SvipeThumb).
+     */
+    public static void bindThumb(BackupImageView iv, MessageObject mo, boolean wide,
+                                 SvipeDiscover.Item ref) {
         if (mo == null || mo.getDocument() == null) {
-            iv.getImageReceiver().clearImage();
+            final android.graphics.drawable.Drawable blur = org.telegram.svipe.SvipeThumb.of(ref);
+            if (blur != null) {
+                iv.getImageReceiver().setImageBitmap(blur);
+            } else {
+                iv.getImageReceiver().clearImage();
+            }
             return;
         }
         TLRPC.Document doc = mo.getDocument();
@@ -353,6 +382,13 @@ public class SvipeWideVideoCell extends LinearLayout {
         private final TextPaint badgeText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         private float aspect = 16f / 9f;
         private String duration;
+        /**
+         * A playlist is drawn as a STACK: two strips peeking above the thumbnail, the way YouTube
+         * draws one. It is the only thing that tells a viewer, before any text is read, that tapping
+         * this card starts a run of videos rather than one — and our shows used to render with
+         * exactly the same card as a single film, which said nothing.
+         */
+        private boolean stacked;
 
         public WideThumbView(Context context) {
             super(context);
@@ -362,14 +398,32 @@ public class SvipeWideVideoCell extends LinearLayout {
             badgeText.setTypeface(AndroidUtilities.bold());
         }
 
+        /** Height of the peeking layers — extra room ABOVE the picture, not taken out of it. */
+        private int stackTop() {
+            return stacked ? AndroidUtilities.dp(10) : 0;
+        }
+
         public void bindRef(SvipeDiscover.Item ref) {
             final float a = ref == null
                     ? 16f / 9f
                     : Math.min(MAX_CARD_ASPECT, Math.max(SvipeDiscover.LANDSCAPE_MIN_ASPECT, ref.aspect()));
-            final int seconds = ref == null ? 0 : ref.durationMs / 1000;
-            final String d = seconds > 0 ? AndroidUtilities.formatShortDuration(seconds) : null;
-            if (a != aspect) {
+            // A show: the badge counts EPISODES instead of minutes, because the length of the first
+            // one says nothing about what the card opens into.
+            final org.telegram.svipe.SvipeMovies.Series show =
+                    ref instanceof org.telegram.svipe.SvipeMovies.SeriesRef
+                            ? ((org.telegram.svipe.SvipeMovies.SeriesRef) ref).series : null;
+            final String d;
+            if (show != null && show.episodeCount > 0) {
+                d = org.telegram.messenger.LocaleController.formatPluralString(
+                        "SvipeSeriesVideosCount", show.episodeCount);
+            } else {
+                final int seconds = ref == null ? 0 : ref.durationMs / 1000;
+                d = seconds > 0 ? AndroidUtilities.formatShortDuration(seconds) : null;
+            }
+            final boolean stack = show != null;
+            if (a != aspect || stack != stacked) {
                 aspect = a;
+                stacked = stack;
                 requestLayout();
             }
             if (!TextUtils.equals(d, duration)) {
@@ -381,29 +435,100 @@ public class SvipeWideVideoCell extends LinearLayout {
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             final int width = MeasureSpec.getSize(widthMeasureSpec);
-            final int height = Math.max(1, Math.round(width / aspect));
+            // The stack is added ON TOP of the picture: a playlist card is a few pixels taller than
+            // a video card, and the thumbnail keeps its full 16:9.
+            final int height = Math.max(1, Math.round(width / aspect)) + stackTop();
             super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY));
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
+            final int top = stackTop();
+            if (top > 0) {
+                drawStack(canvas, top);
+            }
             if (!getImageReceiver().hasBitmapImage()) {
                 final float inset = AndroidUtilities.dp(1);
-                rect.set(inset, inset, getWidth() - inset, getHeight() - inset);
+                rect.set(inset, top + inset, getWidth() - inset, getHeight() - inset);
                 shimmer.draw(canvas, rect, AndroidUtilities.dp(3), this);
             }
-            super.onDraw(canvas);
+            if (top > 0) {
+                // Draw the picture into the space below the strips. drawFromStart + setSize is what
+                // BackupImageView honours; translating alone would stretch it past the bottom.
+                drawFromStart = true;
+                setSize(getWidth(), getHeight() - top);
+                canvas.save();
+                canvas.translate(0, top);
+                super.onDraw(canvas);
+                canvas.restore();
+            } else {
+                super.onDraw(canvas);
+            }
             if (duration != null) {
-                final float pad = AndroidUtilities.dp(4);
-                final float margin = AndroidUtilities.dp(6);
+                final float pad = AndroidUtilities.dp(6);
+                final float margin = AndroidUtilities.dp(8);
+                final float glyph = stacked ? AndroidUtilities.dp(13) : 0;
+                final float gap = stacked ? AndroidUtilities.dp(5) : 0;
                 final float tw = badgeText.measureText(duration);
                 final float th = badgeText.getTextSize();
                 final float right = getWidth() - margin;
                 final float bottom = getHeight() - margin;
-                rect.set(right - tw - pad * 2, bottom - th - pad * 1.6f, right, bottom);
-                canvas.drawRoundRect(rect, AndroidUtilities.dp(3), AndroidUtilities.dp(3), badgePaint);
-                canvas.drawText(duration, rect.left + pad, rect.bottom - pad * 0.8f, badgeText);
+                rect.set(right - tw - glyph - gap - pad * 2, bottom - th - pad * 1.4f, right, bottom);
+                final float r = AndroidUtilities.dp(6);
+                canvas.drawRoundRect(rect, r, r, badgePaint);
+                if (stacked) {
+                    drawPlaylistGlyph(canvas, rect.left + pad, rect.centerY(), glyph);
+                }
+                canvas.drawText(duration, rect.left + pad + glyph + gap,
+                        rect.bottom - pad * 0.7f, badgeText);
             }
+        }
+
+        /**
+         * The little "list with a play arrow" that marks a count as a NUMBER OF VIDEOS rather than a
+         * length. Drawn rather than shipped as an asset: it is three lines and a triangle, and an
+         * icon in the theme's colours needs no tinting.
+         */
+        private void drawPlaylistGlyph(Canvas canvas, float left, float cy, float size) {
+            final float lineH = Math.max(1f, AndroidUtilities.dp(1.5f));
+            final float w = size;
+            final float gap = size / 3.2f;
+            badgePaint.setColor(Color.WHITE);
+            for (int i = 0; i < 2; i++) {
+                final float y = cy - gap + i * gap;
+                rect.set(left, y - lineH / 2f, left + w, y + lineH / 2f);
+                canvas.drawRoundRect(rect, lineH, lineH, badgePaint);
+            }
+            // third line is short, and the play arrow sits at its right
+            rect.set(left, cy + gap - lineH / 2f, left + w * 0.55f, cy + gap + lineH / 2f);
+            canvas.drawRoundRect(rect, lineH, lineH, badgePaint);
+            final android.graphics.Path p = new android.graphics.Path();
+            p.moveTo(left + w * 0.68f, cy + gap - size * 0.28f);
+            p.lineTo(left + w, cy + gap);
+            p.lineTo(left + w * 0.68f, cy + gap + size * 0.28f);
+            p.close();
+            canvas.drawPath(p, badgePaint);
+            badgePaint.setColor(0x99000000);
+        }
+
+        /**
+         * The two layers behind the picture. Each is narrower and dimmer than the one in front, so
+         * the card reads as a pile of cards seen from the front — the same trick YouTube uses for a
+         * playlist, and the reason it needs no label to be understood.
+         */
+        private void drawStack(Canvas canvas, int top) {
+            final float r = AndroidUtilities.dp(2);
+            final int base = Theme.getColor(Theme.key_windowBackgroundWhiteGrayText);
+            final float step = top / 2f;   // two visible steps, both ABOVE the picture
+            // farthest layer: narrowest and dimmest
+            badgePaint.setColor(androidx.core.graphics.ColorUtils.setAlphaComponent(base, 70));
+            rect.set(AndroidUtilities.dp(26), 0, getWidth() - AndroidUtilities.dp(26), step + r);
+            canvas.drawRoundRect(rect, r, r, badgePaint);
+            // nearer layer: wider, brighter, sitting on the picture's top edge
+            badgePaint.setColor(androidx.core.graphics.ColorUtils.setAlphaComponent(base, 130));
+            rect.set(AndroidUtilities.dp(13), step, getWidth() - AndroidUtilities.dp(13), top + r);
+            canvas.drawRoundRect(rect, r, r, badgePaint);
+            badgePaint.setColor(0x99000000);   // back to the duration badge's own colour
         }
     }
 

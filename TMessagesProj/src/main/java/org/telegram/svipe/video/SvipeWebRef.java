@@ -98,9 +98,26 @@ public final class SvipeWebRef {
         return pages.get(channelId + ":" + messageId);
     }
 
+    /**
+     * Channel titles the previews told us, keyed by channel id. A page for a t.me post carries the
+     * CHANNEL's name in {@code title} (the caption is in {@code description}), so a page we fetched
+     * to play a video also, for free, tells the rail what to call the channel while the real chat is
+     * still being fetched — the difference between "@titanlar_hujumi_cloud" and "Titanlar hujumi".
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<Long, String> titles =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The channel's name as its own posts advertise it, or null. */
+    public static String channelTitle(long channelId) {
+        return channelId == 0 ? null : titles.get(channelId);
+    }
+
     private static synchronized void remember(long channelId, int messageId, TLRPC.WebPage page) {
         if (page != null && channelId != 0 && messageId != 0) {
             pages.put(channelId + ":" + messageId, page);
+            if (page.title != null && !page.title.isEmpty()) {
+                titles.put(channelId, page.title);
+            }
         }
     }
 

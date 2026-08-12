@@ -111,7 +111,7 @@ public class SvipeMusicResolver {
                         && mo.messageOwner.media.document != null
                         && MessageObject.isMusicDocument(mo.messageOwner.media.document)) {
                     resolved.put(track.key(), mo.messageOwner);
-                    SvipeObserved.note(account, channelId, track.messageId, mo);
+                    SvipeObserved.note(account, channelId, track.messageId, mo, "music");
                 } else {
                     anyMissed[0] = true;
                 }
@@ -213,6 +213,8 @@ public class SvipeMusicResolver {
                     if (m != null && m.media != null && m.media.document != null
                         && MessageObject.isMusicDocument(m.media.document)) {
                         resolved.put(t.key(), m);
+                        SvipeObserved.note(account, t.channelId, t.messageId,
+                                new MessageObject(account, m, false, true), "music");
                     } else if (m == null) {
                         // getMessages succeeded but the post is gone (TL_messageEmpty or absent id):
                         // a permanent dead reference. Report it so the backend can stop serving the
@@ -220,6 +222,7 @@ public class SvipeMusicResolver {
                         // success branch — a transient error above never reaches here, so a network
                         // blip can't wrongly retire a live track.
                         try {
+                            SvipeObserved.noteGone(account, t.channelId, t.messageId, "music");
                             org.json.JSONObject p = new org.json.JSONObject();
                             p.put("reason", "ref_dead");
                             SvipeMusic.sendEvent(account, t, "PLAY_FAILED", p);

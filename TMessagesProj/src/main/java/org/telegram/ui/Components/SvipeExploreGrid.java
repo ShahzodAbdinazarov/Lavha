@@ -1729,7 +1729,7 @@ public class SvipeExploreGrid extends RecyclerListView {
                 return;
             }
             PortraitImageView iv = (PortraitImageView) holder.itemView;
-            SvipeWideVideoCell.bindThumb(iv, gi.mo, false);
+            SvipeWideVideoCell.bindThumb(iv, gi.mo, false, gi.ref);
         }
 
         @Override

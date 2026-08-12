@@ -541,6 +541,10 @@
     <string name="SvipePlaylistPosition">%1$d / %2$d</string>
     <string name="SvipePlaylistUpNext">Далее</string>
     <string name="SvipeSeriesEpisodesCount_one">%1$d серия</string>
+    <string name="SvipeSeriesVideosCount_one">%1$d видео</string>
+    <string name="SvipeSeriesVideosCount_few">%1$d видео</string>
+    <string name="SvipeSeriesVideosCount_many">%1$d видео</string>
+    <string name="SvipeSeriesVideosCount_other">%1$d видео</string>
     <string name="SvipeSeriesEpisodesCount_few">%1$d серии</string>
     <string name="SvipeSeriesEpisodesCount_many">%1$d серий</string>
     <string name="SvipeSeriesEpisodesCount_other">%1$d серий</string>
