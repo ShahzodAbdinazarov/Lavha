@@ -226,6 +226,18 @@ public class SvipeExploreGrid extends RecyclerListView {
     private boolean loadingLongs;
     private int composedShorts;
     private int composedLongs;
+    /**
+     * The "carry on where you stopped" card, or null. Fetched separately from both pipes
+     * ({@code GET /v1/videos/continue}) because it must not take part in their caching or rotation:
+     * a refresh may move it down the page, but what it resumes never changes.
+     */
+    private GridItem continueCard;
+    /** {@code channel:message} of that card, so the cell knows to draw the resume bar on it. */
+    private String continueKey;
+    /** How far into that video the viewer is, 0..1 — the fill of the bar. */
+    private float continueProgress;
+    /** Bumped on every refresh, so the continue card does not sit welded to the first slot. */
+    private int continueSlotSpin;
     private int shortFailures;
     private int longFailures;
 
@@ -308,6 +320,13 @@ public class SvipeExploreGrid extends RecyclerListView {
             this.ref = ref;
             this.wide = wide;
         }
+
+        /**
+         * Which of the three columns this tile occupies, decided by the composer that placed it.
+         * Asking the layout manager instead was unreliable — a wide card eats all three spans, so
+         * neither the adapter index nor the span index it reports lines up with the row as drawn.
+         */
+        int tileColumn = -1;
     }
 
     public SvipeExploreGrid(Context context, int account) {
@@ -976,6 +995,8 @@ public class SvipeExploreGrid extends RecyclerListView {
      */
     private void refreshBothPipes() {
         final int seq = contentSeq;
+        continueSlotSpin++;
+        loadContinue(seq);
         final RefreshBatch batch = new RefreshBatch();
         loadingShorts = true;    // both flags also block scroll-pagination until the swap completes
         loadingLongs = true;
@@ -1193,6 +1214,9 @@ public class SvipeExploreGrid extends RecyclerListView {
     private void loadBothPipes() {
         final int seq = contentSeq;   // pin these requests to the current browse content
         final boolean wasIdle = !isLoading();
+        if (continueCard == null && shorts.isEmpty() && longs.isEmpty()) {
+            loadContinue(seq);        // first browse load: ask what is unfinished, once
+        }
         // First browse load of the session: the app-start warm-up may already hold both page-0s.
         // They go through the ordinary page path, so composition, cursors and failure handling are
         // identical to a live fetch — the only difference is that nothing was waited for.
@@ -1345,13 +1369,59 @@ public class SvipeExploreGrid extends RecyclerListView {
      * can arrive — holding them back keeps every earlier row whole and keeps the display append-only
      * (see {@link #recomposeBrowse}), and once both pipes are done the tail can no longer move.
      */
+    /**
+     * Ask what this viewer left unfinished and pin it near the top.
+     *
+     * <p>Best-effort in every direction: no card when there is nothing to continue, when the call
+     * fails, or when the answer arrives after the user has moved on ({@code seq} guard). The card is
+     * an ordinary stacked playlist card — the show it belongs to, opened at the episode and second
+     * the server named.
+     */
+    private void loadContinue(final int seq) {
+        org.telegram.svipe.SvipeMovies.continueWatching(account, (offer, error) -> {
+            if (seq != contentSeq) {
+                return;
+            }
+            if (offer == null) {
+                continueCard = null;
+            } else if (offer.series != null) {
+                continueCard = new GridItem(org.telegram.svipe.SvipeMovies.SeriesRef.of(offer.series));
+            } else {
+                // A lone video: the ordinary full-width card, with the "carry on" line under it.
+                continueCard = new GridItem(offer.video, true);
+            }
+            continueKey = continueCard == null ? null
+                    : continueCard.ref.channelId + ":" + continueCard.ref.messageId;
+            continueProgress = offer == null ? 0f : offer.progress;
+            if (continueCard != null) {
+                // It is not part of either pipe, so nothing else would ever resolve it — and an
+                // unresolved card has no title, no channel, no views and no picture.
+                final ArrayList<GridItem> one = new ArrayList<>(1);
+                one.add(continueCard);
+                resolveThumbnails(one);
+            }
+            if (!items.isEmpty() || continueCard != null) {
+                composeBrowse();
+                adapter.notifyDataSetChanged();
+            }
+        });
+    }
+
     private void composeBrowse() {
         items.clear();
         int si = 0;
         int li = 0;
+        // The offer is placed as one of the LONG cards, never as an extra row: the page owes the eye
+        // one wide card and three tiles per round, and a card squeezed in between broke that rhythm.
+        // Which round it lands in moves with the refresh, so a pull-down visibly changes the page.
+        final int continueRound = continueCard == null ? -1 : (continueSlotSpin % 2);
+        int round = 0;
         while (true) {
             boolean placed = false;
-            if (li < longs.size()) {
+            if (round == continueRound) {
+                items.add(continueCard);       // this round's wide card IS the offer
+                placed = true;
+            } else if (li < longs.size()) {
                 items.add(longs.get(li++));
                 placed = true;
             } else if (longsOffset != null) {
@@ -1364,7 +1434,9 @@ public class SvipeExploreGrid extends RecyclerListView {
                     break;
                 }
                 for (int k = 0; k < SPAN_COUNT; k++) {
-                    items.add(shorts.get(si++));
+                    final GridItem tile = shorts.get(si++);
+                    tile.tileColumn = k;
+                    items.add(tile);
                 }
                 placed = true;
             }
@@ -1374,10 +1446,14 @@ public class SvipeExploreGrid extends RecyclerListView {
             if (!placed) {
                 break;   // both pipes are done and gave nothing this round
             }
+            round++;
         }
         if (shortsOffset == null && longsOffset == null) {
+            int tail = 0;
             while (si < shorts.size()) {
-                items.add(shorts.get(si++));
+                final GridItem tile = shorts.get(si++);
+                tile.tileColumn = tail++ % SPAN_COUNT;
+                items.add(tile);
             }
         }
         composedShorts = si;
@@ -1432,9 +1508,15 @@ public class SvipeExploreGrid extends RecyclerListView {
      * thumbnails can be resolved. {@code wide} is the browse pipe's orientation, or null for a single
      * stream, where the cell shape comes from the reference's own dimensions.
      */
-    private static ArrayList<GridItem> fillPipe(ArrayList<GridItem> target, List<SvipeDiscover.Item> refs, Boolean wide) {
+    private ArrayList<GridItem> fillPipe(ArrayList<GridItem> target, List<SvipeDiscover.Item> refs, Boolean wide) {
         final ArrayList<GridItem> fresh = new ArrayList<>(refs.size());
         for (SvipeDiscover.Item ref : refs) {
+            // Dropped HERE, as the page arrives, and never during composition: the layout owes the
+            // page one long card and three tiles per round, and pulling an item out mid-round leaves
+            // a row of two. The pipe is what may be short, never the rhythm.
+            if (continueKey != null && continueKey.equals(ref.channelId + ":" + ref.messageId)) {
+                continue;
+            }
             final GridItem gi = wide == null ? new GridItem(ref) : new GridItem(ref, wide);
             target.add(gi);
             fresh.add(gi);
@@ -1522,8 +1604,10 @@ public class SvipeExploreGrid extends RecyclerListView {
                 if (mo == null || mo.getDocument() == null) {
                     // No preview for this post. Collect it: if the whole group came back empty the
                     // channel is worth ONE resolve, rather than a column of permanently blank cards.
+                    // No preview: hand it to the channel path, which can tell "deleted" from
+                    // "not previewable" — and reports the dead ones.
                     missed.add(item);
-                    if (--pending[0] == 0 && missed.size() == group.size()) {
+                    if (--pending[0] == 0) {
                         sendResolveForGroup(account, username, channelId, missed);
                     }
                     return;
@@ -1562,9 +1646,25 @@ public class SvipeExploreGrid extends RecyclerListView {
         cm.sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
             org.telegram.svipe.SvipeChannelResolve.sent();
             if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
+                org.telegram.messenger.FileLog.d("svipe: grid resolve @" + username + " failed: "
+                        + (error == null ? "shape" : error.text));
                 org.telegram.svipe.SvipeChannelResolve.noteError(account, error);
                 for (GridItem gi : group) {
                     gi.resolving = false;
+                }
+                if (isChannelDead(error)) {
+                    // The HANDLE itself is gone — a renamed channel, a deleted one, one that went
+                    // private. Nothing about these references can ever resolve, so the cards stop
+                    // pretending to load: they leave the grid and the server is told, exactly as a
+                    // deleted post is. That endless shimmer was this case, unhandled.
+                    final ArrayList<SvipeDiscover.Item> dead = new ArrayList<>();
+                    for (GridItem gi : group) {
+                        dead.add(gi.ref);
+                    }
+                    for (SvipeDiscover.Item ref : dead) {
+                        org.telegram.svipe.SvipeObserved.noteGone(account, ref.channelId, ref.messageId);
+                        removeRef(ref);
+                    }
                 }
                 return;
             }
@@ -1593,6 +1693,21 @@ public class SvipeExploreGrid extends RecyclerListView {
             fetchMessagesForGroup(chat, group);
         }));
         });
+    }
+
+    /**
+     * True when the error says the REFERENCE can never work again, as opposed to "not right now".
+     * A handle that no longer exists is the quiet one: nothing retries it and nothing removes it, so
+     * the tile shimmers for as long as the app is open.
+     */
+    private static boolean isChannelDead(TLRPC.TL_error error) {
+        if (error == null || error.text == null) {
+            return false;
+        }
+        final String t = error.text;
+        return t.contains("USERNAME_NOT_OCCUPIED") || t.contains("USERNAME_INVALID")
+                || t.contains("CHANNEL_PRIVATE") || t.contains("CHANNEL_INVALID")
+                || t.contains("PEER_ID_INVALID");
     }
 
     private void fetchMessagesForGroup(TLRPC.Chat chat, ArrayList<GridItem> group) {
@@ -1628,6 +1743,7 @@ public class SvipeExploreGrid extends RecyclerListView {
                 }
                 byId.put(m.id, new MessageObject(account, m, false, true));
             }
+            final ArrayList<SvipeDiscover.Item> dead = new ArrayList<>();
             for (GridItem gi : group) {
                 MessageObject mo = byId.get(gi.ref.messageId);
                 if (mo != null && mo.getDocument() != null) {
@@ -1638,7 +1754,17 @@ public class SvipeExploreGrid extends RecyclerListView {
                     if (pos >= 0) {
                         adapter.notifyItemChanged(pos);
                     }
+                } else {
+                    // The channel answered and this post was NOT in the answer (deleted, or no longer
+                    // a video). That is a fact, not a network blip — the tile can never fill, so it
+                    // leaves the grid instead of spinning forever, and the server is told so the next
+                    // person is not served the same hole.
+                    dead.add(gi.ref);
                 }
+            }
+            for (SvipeDiscover.Item ref : dead) {
+                org.telegram.svipe.SvipeObserved.noteGone(account, ref.channelId, ref.messageId);
+                removeRef(ref);
             }
         }));
     }
@@ -1723,12 +1849,33 @@ public class SvipeExploreGrid extends RecyclerListView {
                 // A film row is the same card, told what to write on its two lines: the film's title
                 // and "year · ★ rating" instead of the caption and "channel · views · age".
                 final SvipeMovies.Movie movie = gi.movie();
+                // The continue card is the same card, saying what it is instead of a genre: the show's
+                // name on the first line, "carry on" on the second.
+                final SvipeMovies.Series show = gi.series();
+                final boolean carryOn = (show != null && show.resumeIndex >= 0)
+                        || (continueKey != null && gi.ref != null
+                            && continueKey.equals(gi.ref.channelId + ":" + gi.ref.messageId));
+                // A SHOW is filled from the episode the card stands for — its caption, its channel,
+                // its views, its age — exactly like any other card. Only a FILM keeps the catalog's
+                // own title and "year · rating"; a film is a work we know about, a show is a video.
+                final boolean film = show == null && movie != null;
+                // "Where you stopped" is drawn ON the picture as a progress bar, so the second line
+                // stays what it is everywhere else: channel · views · age.
                 ((SvipeWideVideoCell) holder.itemView).bind(gi.ref, gi.mo, chatHintFor(gi),
-                        movie != null ? movie.title : null,
-                        movie != null ? SvipeMovies.cardMeta(movie) : null);
+                        film ? movie.title : null,
+                        film ? SvipeMovies.cardMeta(movie) : null,
+                        carryOn ? continueProgress : 0f);
                 return;
             }
             PortraitImageView iv = (PortraitImageView) holder.itemView;
+            // Column position drives the outer margins, so a row of three lines up with the wide card.
+            // Asked of the layout manager rather than derived from the index: a wide card eats three
+            // spans, so position % 3 says nothing about which column a tile actually lands in.
+            // The composer stamped the column when it laid the row out; a single-stream list (search,
+            // a shelf) is a plain 3-up grid, so its index does say which column an item is in.
+            final int col = gi.tileColumn >= 0 ? gi.tileColumn
+                    : (position - headerRows()) % SPAN_COUNT;
+            iv.setEdges(col == 0, col == SPAN_COUNT - 1);
             SvipeWideVideoCell.bindThumb(iv, gi.mo, false, gi.ref);
         }
 
@@ -1806,12 +1953,37 @@ public class SvipeExploreGrid extends RecyclerListView {
      * Portrait cell (3:2). Shows the shimmer placeholder until the Telegram thumbnail bitmap is
      * available — so a cell never flashes black while /v1/discover items are resolving their thumbs.
      */
+    /**
+     * A short's tile. Rounded and spaced like the wide card above it, in proportion: a third of the
+     * width means a third of the radius and half the gap, so the two shapes read as one system rather
+     * than a card sitting on a mosaic. The inset is drawn INSIDE the view — the grid's span layout
+     * owns the outer geometry, and an item decoration would have to fight it.
+     */
     private static class PortraitImageView extends BackupImageView {
         private final SvipeWideVideoCell.Shimmer shimmer = new SvipeWideVideoCell.Shimmer();
         private final RectF rect = new RectF();
+        /** Half of the gap between two tiles; the outer edge gets the card's own margin. */
+        static final int TILE_GAP_DP = 2;
+        private boolean firstInRow;
+        private boolean lastInRow;
 
         PortraitImageView(Context context) {
             super(context);
+            setRoundRadius(AndroidUtilities.dp(8));
+        }
+
+        /** Which column this tile sits in, so the row lines up with the card's 12dp margins. */
+        void setEdges(boolean first, boolean last) {
+            if (first != firstInRow || last != lastInRow || getPaddingTop() == 0) {
+                firstInRow = first;
+                lastInRow = last;
+                // Applied HERE, not in onMeasure: padding set during a measure pass only takes effect
+                // on the NEXT one, so every tile drew the previous tile's margins — which is why the
+                // row looked like the gaps had been assigned at random.
+                final int outer = AndroidUtilities.dp(SvipeWideVideoCell.CARD_SIDE_MARGIN_DP);
+                final int gap = AndroidUtilities.dp(TILE_GAP_DP);
+                setPadding(first ? outer : gap, gap, last ? outer : gap, gap);
+            }
         }
 
         @Override
@@ -1823,12 +1995,24 @@ public class SvipeExploreGrid extends RecyclerListView {
 
         @Override
         protected void onDraw(Canvas canvas) {
+            // The picture has to be told to live inside the padding — BackupImageView otherwise sets
+            // the image coords to the whole view on every draw and paints straight over the gaps,
+            // which is why only the tiles with NO image looked spaced.
+            final int innerW = getWidth() - getPaddingLeft() - getPaddingRight();
+            final int innerH = getHeight() - getPaddingTop() - getPaddingBottom();
+            drawFromStart = true;
+            setSize(innerW, innerH);
             if (!getImageReceiver().hasBitmapImage()) {
                 final float inset = AndroidUtilities.dp(1);
-                rect.set(inset, inset, getWidth() - inset, getHeight() - inset);
-                shimmer.draw(canvas, rect, AndroidUtilities.dp(3), this);
+                rect.set(getPaddingLeft() + inset, getPaddingTop() + inset,
+                        getWidth() - getPaddingRight() - inset,
+                        getHeight() - getPaddingBottom() - inset);
+                shimmer.draw(canvas, rect, AndroidUtilities.dp(8), this);
             }
+            canvas.save();
+            canvas.translate(getPaddingLeft(), getPaddingTop());
             super.onDraw(canvas);
+            canvas.restore();
         }
     }
 

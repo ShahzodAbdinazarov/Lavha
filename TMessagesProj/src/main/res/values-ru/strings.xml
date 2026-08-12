@@ -542,6 +542,7 @@
     <string name="SvipePlaylistUpNext">Далее</string>
     <string name="SvipeSeriesEpisodesCount_one">%1$d серия</string>
     <string name="SvipeSeriesVideosCount_one">%1$d видео</string>
+    <string name="SvipeContinueWatching">Продолжить просмотр</string>
     <string name="SvipeSeriesVideosCount_few">%1$d видео</string>
     <string name="SvipeSeriesVideosCount_many">%1$d видео</string>
     <string name="SvipeSeriesVideosCount_other">%1$d видео</string>

@@ -245,6 +245,16 @@ public final class SvipeMovies {
         public String posterUsername;
         public String tgUsername;      // null until the server has built the playlist channel
         public String channelStatus = "pending";
+        /**
+         * Where this viewer stopped, when the show arrived as the "continue watching" offer:
+         * {@link #resumeIndex} is the episode to open and {@link #resumeMs} the second to open it at
+         * (0 when the last one was finished and the offer is the NEXT episode). -1 means the card is
+         * an ordinary shelf card and opens wherever the local progress says.
+         */
+        public int resumeIndex = -1;
+        public long resumeMs;
+        /** Inline blur for the poster post, when the server had one (see SvipeThumb). */
+        public String posterThumbB64;
 
         public boolean hasChannel() {
             return tgUsername != null && !tgUsername.isEmpty();
@@ -280,6 +290,7 @@ public final class SvipeMovies {
             r.channelId = s.posterChannelId;
             r.messageId = s.posterMessageId;
             r.username = s.posterUsername;
+            r.thumbB64 = s.posterThumbB64;
             r.width = 16;
             r.height = 9;
             return r;
@@ -447,6 +458,78 @@ public final class SvipeMovies {
     }
 
     /** One page of shows, biggest first. */
+    /** What the viewer left unfinished: a show at an episode, or a lone video at a second. */
+    public static class Continue {
+        public Series series;              // set when the offer is a show
+        public SvipeDiscover.Item video;   // set when it is a single long video
+        public long positionMs;
+        /** 0..1 of the video already watched — the card draws it as a bar along the picture. */
+        public float progress;
+    }
+
+    public interface ContinueCallback {
+        /** The offer, or null when there is nothing to carry on with. */
+        void onResult(Continue offer, String error);
+    }
+
+    /**
+     * What this viewer left unfinished — {@code GET /v1/videos/continue}.
+     *
+     * <p>Server-side, and derived from telemetry the app was already sending, so it survives a
+     * reinstall and follows the account to another device. The answer is ONE offer: a show at the
+     * episode to resume, or a lone video at its second. Rendered as the ordinary stacked playlist
+     * card, pinned near the top of the Video tab — a refresh may move it down, but never changes what
+     * it resumes.
+     */
+    public static void continueWatching(int account, ContinueCallback cb) {
+        get(account, "/v1/videos/continue", (res, err) -> {
+            if (res == null || !res.optBoolean("available", false)) {
+                cb.onResult(null, err);
+                return;
+            }
+            final Continue offer = new Continue();
+            offer.positionMs = res.optLong("position_ms", 0);
+            final long fullMs = res.optLong("duration_ms", 0);
+            offer.progress = fullMs > 0 ? Math.min(1f, offer.positionMs / (float) fullMs) : 0f;
+            final long channelId = res.optLong("channel_id");
+            final int messageId = res.optInt("message_id");
+            final String username = res.isNull("username") ? null : res.optString("username", null);
+            final String blur = res.isNull("thumb_b64") ? null : res.optString("thumb_b64", null);
+            if ("series".equals(res.optString("kind")) && res.optLong("series_id") > 0) {
+                final Series s = new Series();
+                s.id = res.optLong("series_id");
+                s.title = res.isNull("series_title") ? null : res.optString("series_title", null);
+                s.episodeCount = res.optInt("episode_count", 0);
+                s.resumeIndex = res.optInt("index", 0);
+                s.resumeMs = offer.positionMs;
+                // The poster is the EPISODE being resumed rather than the show's own: the card should
+                // show where the viewer IS, not where the show starts.
+                s.posterChannelId = channelId;
+                s.posterMessageId = messageId;
+                s.posterUsername = username;
+                s.posterThumbB64 = blur;
+                if (s.title == null || s.title.isEmpty()) {
+                    s.title = username != null ? ("@" + username) : "";
+                }
+                offer.series = s;
+            } else {
+                final SvipeDiscover.Item v = new SvipeDiscover.Item();
+                v.channelId = channelId;
+                v.messageId = messageId;
+                v.username = username;
+                v.thumbB64 = blur;
+                v.width = 16;
+                v.height = 9;
+                offer.video = v;
+            }
+            // Whoever opens this reference next opens it where it was left — the player consumes the
+            // request once, so an ordinary later visit goes back to the local mark.
+            org.telegram.svipe.video.SvipeVideoPlayerController.requestStartAt(
+                    channelId, messageId, offer.positionMs);
+            cb.onResult(offer, null);
+        });
+    }
+
     public static void series(int account, int offset, int limit, SeriesCallback cb) {
         get(account, "/v1/series?limit=" + limit + "&offset=" + offset, (res, err) -> {
             if (res == null) {

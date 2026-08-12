@@ -275,6 +275,7 @@
     <string name="SvipePlaylistUpNext">Keyingisi</string>
     <string name="SvipeSeriesEpisodesCount_one">%1$d ta qism</string>
     <string name="SvipeSeriesVideosCount_one">%1$d ta video</string>
+    <string name="SvipeContinueWatching">Ko\'rishda davom etish</string>
     <string name="SvipeSeriesVideosCount_other">%1$d ta video</string>
     <string name="SvipeSeriesEpisodesCount_other">%1$d ta qism</string>
     <string name="SvipeSeriesSeasonsCount_one">%1$d ta fasl</string>

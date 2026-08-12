@@ -311,7 +311,10 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
         current = ref;
         // A paused return carries the position it is returning TO; every other open starts from
         // wherever this video was last left — in this player OR in Telegram's own.
-        if (!startPaused) resumeMs = savedStartMs(ref.mo);
+        if (!startPaused) {
+            resumeMs = pendingStartFor(ref);
+            if (resumeMs <= 0) resumeMs = savedStartMs(ref.mo);
+        }
         final boolean autoplayed = pendingAutoplay;
         pendingAutoplay = false;
         telemetry.onOpen(account, ref, autoplayed);
@@ -736,6 +739,32 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
      * knows the short-term positions of videos watched moments ago in that player and applies
      * Telegram's own rules about which videos are worth remembering at all.
      */
+    /**
+     * Start positions handed in from OUTSIDE the player — today, the server's "continue watching"
+     * answer, which knows where this account stopped on any device. Consulted before the local mark,
+     * and consumed once: a second open of the same episode goes back to the ordinary rules.
+     */
+    private static final java.util.HashMap<String, Long> pendingStart = new java.util.HashMap<>();
+
+    /** Open this reference at {@code ms} the next time it plays. */
+    public static void requestStartAt(long channelId, int messageId, long ms) {
+        if (ms > 0) {
+            synchronized (pendingStart) {
+                pendingStart.put(channelId + ":" + messageId, ms);
+            }
+        }
+    }
+
+    private static long pendingStartFor(SvipeRefResolver.VideoRef ref) {
+        if (ref == null) {
+            return 0;
+        }
+        synchronized (pendingStart) {
+            final Long ms = pendingStart.remove(ref.channelId + ":" + ref.messageId);
+            return ms == null ? 0 : ms;
+        }
+    }
+
     private static long savedStartMs(MessageObject mo) {
         if (mo == null) return 0;
         try {
@@ -965,6 +994,9 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
                 // running when it was buried takes the ordinary autoplay path below.)
                 startPaused = false;
                 p.setPlayWhenReady(false);
+            }
+            if (resumeMs <= 0) {
+                resumeMs = pendingStartFor(current);
             }
             if (resumeMs <= 0) {
                 resumeMs = savedStartMs(mo);   // resolved after open(): the message arrived only now

@@ -90,7 +90,7 @@ public class SvipeWideVideoCell extends LinearLayout {
 
     private final int account;
     /** Air on both sides of the picture, so the card has an edge of its own. */
-    private static final int CARD_SIDE_MARGIN_DP = 12;
+    public static final int CARD_SIDE_MARGIN_DP = 12;
     /** And above it, so a card never sits welded to the chip row or to the block before it. */
     private static final int CARD_TOP_MARGIN_DP = 10;
 
@@ -185,8 +185,19 @@ public class SvipeWideVideoCell extends LinearLayout {
      */
     public void bind(SvipeDiscover.Item ref, MessageObject mo, TLRPC.Chat chatHint,
                      CharSequence titleOverride, CharSequence metaOverride) {
+        bind(ref, mo, chatHint, titleOverride, metaOverride, 0f);
+    }
+
+    /**
+     * @param watched 0..1 of the video already seen, drawn as the bar along the bottom of the
+     *                picture. That mark is what says "carry on here", so the second line stays what
+     *                it is on every other card: channel, views, age.
+     */
+    public void bind(SvipeDiscover.Item ref, MessageObject mo, TLRPC.Chat chatHint,
+                     CharSequence titleOverride, CharSequence metaOverride, float watched) {
         this.ref = ref;
         this.mo = mo;
+        thumb.setWatched(watched);
         thumb.bindRef(ref);
         bindThumb(thumb, mo, true, ref);
 
@@ -225,11 +236,13 @@ public class SvipeWideVideoCell extends LinearLayout {
     public static void bindThumb(BackupImageView iv, MessageObject mo, boolean wide,
                                  SvipeDiscover.Item ref) {
         if (mo == null || mo.getDocument() == null) {
+            // Clear FIRST. A recycled cell still holds the last card's picture, and a blur that fails
+            // to decode (or an item with none) used to leave that stranger's thumbnail on screen —
+            // which is how a show ended up advertising somebody else's video.
+            iv.getImageReceiver().clearImage();
             final android.graphics.drawable.Drawable blur = org.telegram.svipe.SvipeThumb.of(ref);
             if (blur != null) {
                 iv.getImageReceiver().setImageBitmap(blur);
-            } else {
-                iv.getImageReceiver().clearImage();
             }
             return;
         }
@@ -380,6 +393,7 @@ public class SvipeWideVideoCell extends LinearLayout {
         private final RectF rect = new RectF();
         private final Paint badgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final TextPaint badgeText = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Rect textInk = new android.graphics.Rect();
         private float aspect = 16f / 9f;
         private String duration;
         /**
@@ -389,6 +403,12 @@ public class SvipeWideVideoCell extends LinearLayout {
          * exactly the same card as a single film, which said nothing.
          */
         private boolean stacked;
+        /**
+         * How far into this video the viewer already is, 0..1, or 0 when it is not a resume. Drawn as
+         * the bar across the bottom of the picture — the mark every video app uses for "you were
+         * here", and the reason the words "continue watching" no longer need a line of their own.
+         */
+        private float watched;
 
         public WideThumbView(Context context) {
             super(context);
@@ -403,6 +423,15 @@ public class SvipeWideVideoCell extends LinearLayout {
             return stacked ? AndroidUtilities.dp(10) : 0;
         }
 
+        /** Set the resume bar (0 hides it). */
+        public void setWatched(float fraction) {
+            final float f = fraction <= 0 ? 0 : Math.min(1f, fraction);
+            if (f != watched) {
+                watched = f;
+                invalidate();
+            }
+        }
+
         public void bindRef(SvipeDiscover.Item ref) {
             final float a = ref == null
                     ? 16f / 9f
@@ -413,19 +442,28 @@ public class SvipeWideVideoCell extends LinearLayout {
                     ref instanceof org.telegram.svipe.SvipeMovies.SeriesRef
                             ? ((org.telegram.svipe.SvipeMovies.SeriesRef) ref).series : null;
             final String d;
-            if (show != null && show.episodeCount > 0) {
+            if (show != null && show.resumeIndex >= 0 && show.episodeCount > 0) {
+                // Where in the run they are, rather than how long the run is: "6 / 87" is the only
+                // number that means anything on a card offering to carry on.
+                d = (show.resumeIndex + 1) + " / " + show.episodeCount;
+            } else if (show != null && show.episodeCount > 0) {
                 d = org.telegram.messenger.LocaleController.formatPluralString(
                         "SvipeSeriesVideosCount", show.episodeCount);
             } else {
                 final int seconds = ref == null ? 0 : ref.durationMs / 1000;
                 d = seconds > 0 ? AndroidUtilities.formatShortDuration(seconds) : null;
             }
-            final boolean stack = show != null;
+            // A stack means "this opens a run of videos": only a show earns it, and a single video
+            // never does — not even the continue card, which is one video with a bookmark in it.
+            // Assigned unconditionally: a recycled cell that kept a stale true drew phantom strips
+            // above an ordinary card.
+            final boolean stack = show != null && show.episodeCount > 1;
             if (a != aspect || stack != stacked) {
                 aspect = a;
                 stacked = stack;
                 requestLayout();
             }
+            stacked = stack;
             if (!TextUtils.equals(d, duration)) {
                 duration = d;
                 invalidate();
@@ -464,23 +502,54 @@ public class SvipeWideVideoCell extends LinearLayout {
             } else {
                 super.onDraw(canvas);
             }
+            if (watched > 0) {
+                // A track across the very bottom of the picture, filled to where they stopped.
+                final float h = AndroidUtilities.dp(3);
+                final float floor = getHeight();
+                badgePaint.setColor(0x66000000);
+                rect.set(0, floor - h, getWidth(), floor);
+                canvas.drawRect(rect, badgePaint);
+                badgePaint.setColor(0xFFE53935);   // the one red in the app: "you are here"
+                rect.set(0, floor - h, getWidth() * watched, floor);
+                canvas.drawRect(rect, badgePaint);
+                badgePaint.setColor(0x99000000);
+            }
             if (duration != null) {
-                final float pad = AndroidUtilities.dp(6);
-                final float margin = AndroidUtilities.dp(8);
+                // Margin clears the picture's 12dp corner radius: at 8dp the plate ran into the round
+                // and clipped the last digit, which is what made a "1 / 87" look broken.
+                final float padH = AndroidUtilities.dp(7);
+                final float padV = AndroidUtilities.dp(4);
+                final float margin = AndroidUtilities.dp(12);
                 final float glyph = stacked ? AndroidUtilities.dp(13) : 0;
                 final float gap = stacked ? AndroidUtilities.dp(5) : 0;
-                final float tw = badgeText.measureText(duration);
-                final float th = badgeText.getTextSize();
+                // Width from the text's actual INK, not from measureText: an advance width that comes
+                // back short by a few pixels is what pushed "1 / 87" out through the right edge of its
+                // plate. And the text is drawn RIGHT-aligned against that edge, so even if the two
+                // ever disagree again the overflow lands in the gap next to the icon, never outside.
+                badgeText.getTextBounds(duration, 0, duration.length(), textInk);
+                final float tw = Math.max(textInk.width(), badgeText.measureText(duration));
+                final Paint.FontMetrics fm = badgeText.getFontMetrics();
+                final float th = fm.descent - fm.ascent;
                 final float right = getWidth() - margin;
                 final float bottom = getHeight() - margin;
-                rect.set(right - tw - glyph - gap - pad * 2, bottom - th - pad * 1.4f, right, bottom);
+                rect.set(right - tw - glyph - gap - padH * 2, bottom - th - padV * 2, right, bottom);
                 final float r = AndroidUtilities.dp(6);
                 canvas.drawRoundRect(rect, r, r, badgePaint);
+                // Keep the plate's own geometry: drawPlaylistGlyph reuses this same RectF for its
+                // lines, so reading rect.right afterwards gave the ICON's edge — which is how the
+                // count ended up drawn on top of the icon.
+                final float plateLeft = rect.left;
+                final float plateRight = rect.right;
+                final float plateMidY = rect.centerY();
                 if (stacked) {
-                    drawPlaylistGlyph(canvas, rect.left + pad, rect.centerY(), glyph);
+                    drawPlaylistGlyph(canvas, plateLeft + padH, plateMidY, glyph);
                 }
-                canvas.drawText(duration, rect.left + pad + glyph + gap,
-                        rect.bottom - pad * 0.7f, badgeText);
+                // Baseline from the font's own metrics, so the text sits centred in the plate instead
+                // of being pushed against its floor.
+                badgeText.setTextAlign(Paint.Align.RIGHT);
+                canvas.drawText(duration, plateRight - padH,
+                        plateMidY - (fm.ascent + fm.descent) / 2f, badgeText);
+                badgeText.setTextAlign(Paint.Align.LEFT);
             }
         }
 

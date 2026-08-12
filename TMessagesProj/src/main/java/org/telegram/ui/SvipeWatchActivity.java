@@ -269,7 +269,21 @@ public class SvipeWatchActivity extends BaseFragment {
      * advance along, and both are additions to this screen rather than a screen of their own.
      */
     public static SvipeWatchActivity ofSeries(SvipeMovies.SeriesPage page, int index) {
+        return ofSeries(page, index, 0);
+    }
+
+    /**
+     * @param startMs where to open the episode, when the caller knows better than this device does —
+     *                the server's "continue watching" answer, which followed the account here from
+     *                wherever it was last watched. 0 keeps the local mark.
+     */
+    public static SvipeWatchActivity ofSeries(SvipeMovies.SeriesPage page, int index, long startMs) {
         final int at = index >= 0 && index < page.episodes.size() ? index : 0;
+        if (startMs > 0) {
+            final SvipeMovies.Episode e = page.episodes.get(at);
+            org.telegram.svipe.video.SvipeVideoPlayerController.requestStartAt(
+                    e.channelId, e.messageId, startMs);
+        }
         SvipeWatchActivity fragment = new SvipeWatchActivity(page.episodes.get(at).asItem());
         fragment.playlist = page;
         fragment.playlistIndex = at;

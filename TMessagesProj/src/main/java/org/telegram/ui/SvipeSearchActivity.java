@@ -107,10 +107,14 @@ public class SvipeSearchActivity extends DialogsActivity {
                     }
                     return;
                 }
-                final int at = Math.min(
-                        org.telegram.svipe.SvipeSeriesProgress.lastEpisode(page.series.id),
-                        page.episodes.size() - 1);
-                presentFragment(SvipeWatchActivity.ofSeries(page, at));
+                // A "continue watching" card names BOTH the episode and the second to open it at —
+                // that is the whole point of it, and it beats the local mark, which knows only this
+                // device. An ordinary shelf card falls back to what this phone remembers.
+                final int at = series.resumeIndex >= 0
+                        ? Math.min(series.resumeIndex, page.episodes.size() - 1)
+                        : Math.min(org.telegram.svipe.SvipeSeriesProgress.lastEpisode(page.series.id),
+                                   page.episodes.size() - 1);
+                presentFragment(SvipeWatchActivity.ofSeries(page, at, series.resumeMs));
             });
         });
     }
