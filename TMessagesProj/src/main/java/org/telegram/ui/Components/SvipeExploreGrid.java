@@ -1512,13 +1512,21 @@ public class SvipeExploreGrid extends RecyclerListView {
     /** Posters through the link-preview path — no channel, no resolveUsername. */
     private void webPageGroup(final int account, final String username, final long channelId,
                               final ArrayList<GridItem> group) {
+        final int[] pending = {group.size()};
+        final ArrayList<GridItem> missed = new ArrayList<>();
         for (GridItem gi : group) {
             final GridItem item = gi;
             org.telegram.svipe.video.SvipeWebRef.fetch(account, username, item.ref.messageId,
                     channelId, (mo, page) -> {
                 item.resolving = false;
                 if (mo == null || mo.getDocument() == null) {
-                    return;   // a deleted post, or previews are off: the card simply stays blank
+                    // No preview for this post. Collect it: if the whole group came back empty the
+                    // channel is worth ONE resolve, rather than a column of permanently blank cards.
+                    missed.add(item);
+                    if (--pending[0] == 0 && missed.size() == group.size()) {
+                        sendResolveForGroup(account, username, channelId, missed);
+                    }
+                    return;
                 }
                 item.mo = mo;
                 item.resolved = true;
@@ -1526,6 +1534,9 @@ public class SvipeExploreGrid extends RecyclerListView {
                 final int pos = adapterPositionOf(item);
                 if (pos >= 0) {
                     adapter.notifyItemChanged(pos);
+                }
+                if (--pending[0] == 0 && !missed.isEmpty()) {
+                    sendResolveForGroup(account, username, channelId, missed);
                 }
             });
         }

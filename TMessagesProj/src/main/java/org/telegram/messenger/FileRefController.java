@@ -351,6 +351,14 @@ public class FileRefController extends BaseController {
 
     @SuppressWarnings("unchecked")
     public void requestReference(Object parentObject, Object... args) {
+        // A Svipe post that was opened through its public link has no channel behind it — its
+        // document came from messages.getWebPage and only that WebPage can refresh the reference.
+        // Swapping the parent HERE covers every caller at once, including the ones deep inside
+        // MediaController that never see our code. See SvipeWebRef#parentFor.
+        final Object svipeParent = org.telegram.svipe.video.SvipeWebRef.parentFor(parentObject);
+        if (svipeParent != null) {
+            parentObject = svipeParent;
+        }
         if (BuildVars.LOGS_ENABLED) {
             FileLog.d("start loading request reference parent " + getObjectString(parentObject) + " args = " + args[0]);
         }

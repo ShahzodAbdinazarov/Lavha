@@ -87,8 +87,46 @@ public class SvipeMusicResolver {
                 fetchMessages(account, local, group, resolved, done);
                 return;
             }
-            sendResolve(account, username, group, resolved, done, chats);
+            // Nothing local. Take each track off the post's own public link rather than buying the
+            // channel: messages.getWebPage answers with the audio document (verified against prod —
+            // a cold link comes back empty and full on the retry, which SvipeWebRef does) and it does
+            // not flood, which contacts.resolveUsername very much does. Only a link that has nothing
+            // falls through to the resolve below.
+            webPageGroup(account, username, channelId, group, resolved, done, chats);
         });
+    }
+
+    /** Tracks through the link-preview path — no channel, no resolveUsername. */
+    private static void webPageGroup(int account, String username, long channelId,
+                                     ArrayList<SvipeMusic.Track> group,
+                                     Map<String, TLRPC.Message> resolved, Runnable done,
+                                     ConcurrentHashMap<String, TLRPC.Chat> chats) {
+        final int[] pending = {group.size()};
+        final boolean[] anyMissed = {false};
+        for (SvipeMusic.Track t : group) {
+            final SvipeMusic.Track track = t;
+            org.telegram.svipe.video.SvipeWebRef.fetch(account, username, track.messageId, channelId,
+                    (mo, page) -> {
+                if (mo != null && mo.messageOwner != null && mo.messageOwner.media != null
+                        && mo.messageOwner.media.document != null
+                        && MessageObject.isMusicDocument(mo.messageOwner.media.document)) {
+                    resolved.put(track.key(), mo.messageOwner);
+                    SvipeObserved.note(account, channelId, track.messageId, mo);
+                } else {
+                    anyMissed[0] = true;
+                }
+                if (--pending[0] == 0) {
+                    if (anyMissed[0]) {
+                        // Some links had no preview at all. Those tracks are worth ONE resolve for
+                        // the whole channel — and the ones already resolved above are simply
+                        // re-filled, which costs nothing but a map write.
+                        sendResolve(account, username, group, resolved, done, chats);
+                    } else {
+                        done.run();
+                    }
+                }
+            });
+        }
     }
 
     private static void sendResolve(int account, String username, ArrayList<SvipeMusic.Track> group,

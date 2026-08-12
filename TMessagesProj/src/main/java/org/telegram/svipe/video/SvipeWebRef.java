@@ -59,6 +59,51 @@ public final class SvipeWebRef {
         void run(MessageObject mo, TLRPC.WebPage page);
     }
 
+    /**
+     * Pages we have fetched, keyed {@code channelId:messageId}, so an expired file_reference can be
+     * refreshed through the page it came from no matter who asks. Bounded: a viewer moves through a
+     * lot of posts in a session and a WebPage is not free.
+     */
+    private static final java.util.LinkedHashMap<String, TLRPC.WebPage> pages =
+            new java.util.LinkedHashMap<String, TLRPC.WebPage>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(java.util.Map.Entry<String, TLRPC.WebPage> eldest) {
+                    return size() > 300;
+                }
+            };
+
+    /**
+     * The WebPage that must stand in for {@code parentObject} when refreshing a file reference, or
+     * null when this parent has nothing to do with us.
+     *
+     * <p>Called from {@link org.telegram.messenger.FileRefController#requestReference}, which is the
+     * one place every loader passes through — including the music player, which builds its own
+     * MessageObject far from any Svipe code.
+     */
+    public static synchronized Object parentFor(Object parentObject) {
+        long channelId = 0;
+        int messageId = 0;
+        if (parentObject instanceof MessageObject) {
+            final MessageObject mo = (MessageObject) parentObject;
+            channelId = mo.getChannelId();
+            messageId = mo.getRealId();
+        } else if (parentObject instanceof TLRPC.Message) {
+            final TLRPC.Message m = (TLRPC.Message) parentObject;
+            channelId = m.peer_id != null ? m.peer_id.channel_id : 0;
+            messageId = m.id;
+        }
+        if (channelId == 0 || messageId == 0) {
+            return null;
+        }
+        return pages.get(channelId + ":" + messageId);
+    }
+
+    private static synchronized void remember(long channelId, int messageId, TLRPC.WebPage page) {
+        if (page != null && channelId != 0 && messageId != 0) {
+            pages.put(channelId + ":" + messageId, page);
+        }
+    }
+
     /** t.me link for a public post — the only input this path needs. */
     public static String postUrl(String username, int messageId) {
         return "https://t.me/" + username + "/" + messageId;
@@ -73,6 +118,21 @@ public final class SvipeWebRef {
      */
     public static void fetch(final int account, final String username, final int messageId,
                              final long channelId, final Callback cb) {
+        fetch(account, username, messageId, channelId, cb, 0);
+    }
+
+    /**
+     * A page Telegram has never rendered comes back EMPTY the first time and complete a moment later
+     * — it fetches the preview asynchronously. Measured on prod: a cold batch answered 13 of 30 on
+     * the first pass and 19 of 20 once warm, and three cold music links all went empty -> full on the
+     * retry. So one retry is the difference between this path carrying most posts and carrying half
+     * of them, and every miss below it costs a resolveUsername instead.
+     */
+    private static final long RETRY_MS = 1_500;
+    private static final int MAX_ATTEMPTS = 2;
+
+    private static void fetch(final int account, final String username, final int messageId,
+                              final long channelId, final Callback cb, final int attempt) {
         if (username == null || username.isEmpty() || messageId <= 0) {
             cb.run(null, null);
             return;
@@ -97,12 +157,21 @@ public final class SvipeWebRef {
             }
             final MessageObject mo = build(account, page, username, messageId, channelId);
             final TLRPC.WebPage parent = page;
+            if (mo == null && attempt + 1 < MAX_ATTEMPTS) {
+                AndroidUtilities.runOnUIThread(
+                        () -> fetch(account, username, messageId, channelId, cb, attempt + 1),
+                        RETRY_MS);
+                return;
+            }
+            if (mo != null) {
+                remember(channelId, messageId, parent);
+            }
             AndroidUtilities.runOnUIThread(() -> cb.run(mo, mo == null ? null : parent));
         }, FAIL_FAST);
         AndroidUtilities.runOnUIThread(() -> {
             if (!answered.compareAndSet(false, true)) return;
             FileLog.d("svipe: webpage @" + username + "/" + messageId + " timed out");
-            cb.run(null, null);
+            cb.run(null, null);   // a timeout is not a cold page: fall through, do not retry
         }, STEP_TIMEOUT_MS);
     }
 
@@ -117,7 +186,8 @@ public final class SvipeWebRef {
     private static MessageObject build(int account, TLRPC.WebPage page, String username,
                                        int messageId, long channelId) {
         final TLRPC.Document doc = page == null ? null : page.document;
-        if (doc == null || !MessageObject.isVideoDocument(doc)) {
+        if (doc == null
+                || !(MessageObject.isVideoDocument(doc) || MessageObject.isMusicDocument(doc))) {
             return null;
         }
         final TLRPC.TL_message msg = new TLRPC.TL_message();
