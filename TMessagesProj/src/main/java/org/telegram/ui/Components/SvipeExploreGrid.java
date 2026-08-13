@@ -738,6 +738,11 @@ public class SvipeExploreGrid extends RecyclerListView {
             longsOffset = s.longsOffset;
             composeBrowse();
         }
+        // A shelf that was PREFETCHED has references and no messages behind them — nothing has ever
+        // asked Telegram about it. Without this its cards would come up as blank rectangles, which is
+        // a worse first impression than the shimmer the prefetch exists to avoid. Already-resolved
+        // items are skipped inside, so a shelf the user really visited costs nothing here.
+        resolveThumbnails(items);
         return !items.isEmpty();
     }
 
@@ -2193,25 +2198,22 @@ public class SvipeExploreGrid extends RecyclerListView {
             }
             final GridItem gi = currentGrid().get(position - headerRows());
             if (type == TYPE_PHOTO_WIDE) {
-                // A film row is the same card, told what to write on its two lines: the film's title
-                // and "year · ★ rating" instead of the caption and "channel · views · age".
-                final SvipeMovies.Movie movie = gi.movie();
-                // The continue card is the same card, saying what it is instead of a genre: the show's
-                // name on the first line, "carry on" on the second.
+                // EVERY card on this tab is the same card, whichever chip it was found under: channel
+                // avatar, channel name, views, age, and two lines of the post's own caption.
+                //
+                // Film shelves used to override both text lines with the catalog's title and
+                // "year · ★ rating". It read as a different screen from the tab it was opened from —
+                // no channel, no view count, no "a day ago" — and that difference is exactly what the
+                // chip strip must NOT have: a chip filters the feed, it does not change what a row is.
+                // The film's own title and rating still exist where they belong: on its page.
                 final SvipeMovies.Series show = gi.series();
+                // "Where you stopped" is drawn ON the picture as a progress bar, so the text lines
+                // stay what they are everywhere else.
                 final boolean carryOn = (show != null && show.resumeIndex >= 0)
                         || (continueKey != null && gi.ref != null
                             && continueKey.equals(gi.ref.channelId + ":" + gi.ref.messageId));
-                // A SHOW is filled from the episode the card stands for — its caption, its channel,
-                // its views, its age — exactly like any other card. Only a FILM keeps the catalog's
-                // own title and "year · rating"; a film is a work we know about, a show is a video.
-                final boolean film = show == null && movie != null;
-                // "Where you stopped" is drawn ON the picture as a progress bar, so the second line
-                // stays what it is everywhere else: channel · views · age.
                 ((SvipeWideVideoCell) holder.itemView).bind(gi.ref, gi.mo, chatHintFor(gi),
-                        film ? movie.title : null,
-                        film ? SvipeMovies.cardMeta(movie) : null,
-                        carryOn ? continueProgress : 0f);
+                        null, null, carryOn ? continueProgress : 0f);
                 return;
             }
             PortraitImageView iv = (PortraitImageView) holder.itemView;
