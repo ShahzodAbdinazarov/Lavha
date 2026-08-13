@@ -1896,6 +1896,14 @@ public class SvipeExploreGrid extends RecyclerListView {
             if (gi.resolved || gi.resolving || gi.ref.username == null || gi.ref.username.isEmpty()) {
                 continue;
             }
+            // A 3-up tile is a picture and nothing else, and the backend now sends the picture. So
+            // there is nothing left to ask Telegram for until the user actually taps one — which is
+            // the point: a page of 60 tiles used to buy a dozen channels the moment it arrived,
+            // entirely on behalf of videos nobody had chosen to play. The full-width cards still
+            // resolve, because their title and view count come off the message itself.
+            if (!gi.wide && gi.ref.posterUrl != null && !gi.ref.posterUrl.isEmpty()) {
+                continue;
+            }
             final String u = gi.ref.username.toLowerCase();
             ArrayList<GridItem> group = byUser.get(u);
             if (group == null) {
@@ -1965,7 +1973,7 @@ public class SvipeExploreGrid extends RecyclerListView {
                 }
                 item.mo = mo;
                 item.resolved = true;
-                org.telegram.svipe.SvipeObserved.note(account, channelId, item.ref.messageId, mo);
+                org.telegram.svipe.SvipeObserved.note(account, item.ref, mo);
                 final int pos = adapterPositionOf(item);
                 if (pos >= 0) {
                     adapter.notifyItemChanged(pos);

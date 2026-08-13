@@ -1121,7 +1121,7 @@ public class SvipeWatchActivity extends BaseFragment {
                 if (mo != null) {
                     r.mo = mo;
                     r.resolving = false;
-                    org.telegram.svipe.SvipeObserved.note(currentAccount, channelId, r.ref.messageId, mo);
+                    org.telegram.svipe.SvipeObserved.note(currentAccount, r.ref, mo);
                 } else {
                     missed.add(r);
                 }

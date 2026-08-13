@@ -228,19 +228,29 @@ public class SvipeWideVideoCell extends LinearLayout {
     }
 
     /**
-     * @param ref the backend reference this cell was built from, if any. It carries Telegram's own
-     *            inline blur, so a card that has not resolved yet is a blurred frame instead of an
-     *            empty rectangle — and a card that never resolves at least shows what it is. Nothing
-     *            is downloaded for it: the bytes came with the list JSON (SvipeThumb).
+     * @param ref the backend reference this cell was built from, if any. It carries two pictures
+     *            that cost no Telegram session at all: Telegram's own inline blur (a couple of
+     *            hundred bytes that came with the list JSON — SvipeThumb) and, when the backend has
+     *            one, a URL to a real frame of the video. Between them a card is a picture from the
+     *            moment the JSON lands, whether or not it ever resolves.
      */
     public static void bindThumb(BackupImageView iv, MessageObject mo, boolean wide,
                                  SvipeDiscover.Item ref) {
+        final android.graphics.drawable.Drawable blur = org.telegram.svipe.SvipeThumb.of(ref);
+        final String poster = ref == null ? null : ref.posterUrl;
+        if (poster != null && !poster.isEmpty()) {
+            // Preferred over the resolved message's own thumbnail, not just used as a stand-in for
+            // it: this one is an ordinary HTTPS image, so the card draws with no channel resolve, no
+            // getMessages and nothing spent from the flood budget. The blur sits underneath as the
+            // placeholder, exactly as it does while nothing is resolved.
+            iv.setImage(ImageLocation.getForPath(poster), wide ? "720_720" : "240_240", blur, null);
+            return;
+        }
         if (mo == null || mo.getDocument() == null) {
             // Clear FIRST. A recycled cell still holds the last card's picture, and a blur that fails
             // to decode (or an item with none) used to leave that stranger's thumbnail on screen —
             // which is how a show ended up advertising somebody else's video.
             iv.getImageReceiver().clearImage();
-            final android.graphics.drawable.Drawable blur = org.telegram.svipe.SvipeThumb.of(ref);
             if (blur != null) {
                 iv.getImageReceiver().setImageBitmap(blur);
             }

@@ -74,6 +74,21 @@ public final class SvipeObserved {
      * @param mo the real message from the channel, or the one built from a link preview — both are
      *           worth reporting, they just carry different fields
      */
+    /**
+     * The reference-aware entry point: an observation is queued only when the SERVER asked for one.
+     *
+     * <p>Everything the public web can read is read there, for the whole catalog. What is left is the
+     * exact byte size and the document id, and one device answering that is enough for everybody —
+     * so the server marks the references it still needs ({@code obs} on the feed item) and every
+     * other device stays quiet. Before this, the thousandth device to open a post reported it too.
+     */
+    public static void note(int account, SvipeDiscover.Item ref, MessageObject mo) {
+        if (ref == null || !ref.needsObserve) {
+            return;
+        }
+        note(account, ref.channelId, ref.messageId, mo);
+    }
+
     public static void note(int account, long channelId, int messageId, MessageObject mo) {
         note(account, channelId, messageId, mo, "video");
     }
@@ -87,6 +102,9 @@ public final class SvipeObserved {
         if (mo == null || channelId == 0 || messageId <= 0) {
             return;
         }
+        // Music has no public web page to read from — an audio post renders as a card with no file
+        // and no counters — so a music observation still carries everything it always did.
+        final boolean music = "music".equals(kind);
         try {
             final JSONObject o = new JSONObject();
             o.put("kind", kind);
@@ -97,15 +115,20 @@ public final class SvipeObserved {
                 o.put("doc_id", doc.id);
                 if (doc.size > 0) o.put("size", doc.size);
                 if (doc.mime_type != null && !doc.mime_type.isEmpty()) o.put("mime_type", doc.mime_type);
-                // Telegram's inline placeholder — it came with the message, so reporting it costs
-                // nothing and saves everybody else the wait for a picture (see SvipeThumb).
-                for (int i = 0; doc.thumbs != null && i < doc.thumbs.size(); i++) {
-                    final TLRPC.PhotoSize ps = doc.thumbs.get(i);
-                    if (ps instanceof TLRPC.TL_photoStrippedSize && ps.bytes != null
-                            && ps.bytes.length > 0 && ps.bytes.length <= 2048) {
-                        o.put("thumb_b64", android.util.Base64.encodeToString(
-                                ps.bytes, android.util.Base64.NO_WRAP));
-                        break;
+                // The inline placeholder is reported for MUSIC only. For video the server reads it
+                // off the channel's public web page for the whole catalog, continuously, instead of
+                // waiting for somebody to watch something — and it was the largest thing in this
+                // payload as well as the only part that cost the device any real work (base64 of
+                // every post it saw).
+                if (music) {
+                    for (int i = 0; doc.thumbs != null && i < doc.thumbs.size(); i++) {
+                        final TLRPC.PhotoSize ps = doc.thumbs.get(i);
+                        if (ps instanceof TLRPC.TL_photoStrippedSize && ps.bytes != null
+                                && ps.bytes.length > 0 && ps.bytes.length <= 2048) {
+                            o.put("thumb_b64", android.util.Base64.encodeToString(
+                                    ps.bytes, android.util.Base64.NO_WRAP));
+                            break;
+                        }
                     }
                 }
                 for (int i = 0; i < doc.attributes.size(); i++) {
@@ -129,17 +152,23 @@ public final class SvipeObserved {
             }
             final TLRPC.Message m = mo.messageOwner;
             if (m != null) {
-                if (m.views > 0) o.put("views", m.views);
+                // Views, reactions, the caption and the publish time are read off the channel's own
+                // public page now — for every post, several times an hour, whether anyone watched it
+                // or not. A device repeating them can only be older than what the server already has,
+                // so it stops sending them. Forwards is the one counter the web does not show.
                 if (m.forwards > 0) o.put("forwards", m.forwards);
                 if (m.edit_date > 0) o.put("edit_date", m.edit_date);
-                if (m.date > 0) o.put("posted_at", m.date);
-                if (m.message != null && !m.message.isEmpty()) o.put("caption", m.message);
-                if (m.reactions != null && m.reactions.results != null) {
-                    int total = 0;
-                    for (int i = 0; i < m.reactions.results.size(); i++) {
-                        total += m.reactions.results.get(i).count;
+                if (music) {
+                    if (m.views > 0) o.put("views", m.views);
+                    if (m.date > 0) o.put("posted_at", m.date);
+                    if (m.message != null && !m.message.isEmpty()) o.put("caption", m.message);
+                    if (m.reactions != null && m.reactions.results != null) {
+                        int total = 0;
+                        for (int i = 0; i < m.reactions.results.size(); i++) {
+                            total += m.reactions.results.get(i).count;
+                        }
+                        if (total > 0) o.put("reactions", total);
                     }
-                    if (total > 0) o.put("reactions", total);
                 }
             }
             enqueue(account, channelId + ":" + messageId, o);

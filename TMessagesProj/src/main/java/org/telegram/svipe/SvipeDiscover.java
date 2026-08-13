@@ -56,6 +56,29 @@ public class SvipeDiscover {
         // share sheet prefers it over the raw t.me link because it carries the install loop.
         public String shareUrl;
         /**
+         * The server still wants ONE client observation for this reference — the exact byte size and
+         * the media's document id, the only two things it cannot read off the public web itself
+         * (see the backend's FeedItem.obs).
+         *
+         * <p>False for almost every reference almost all the time, and that is the point: every
+         * device that opened a post used to report it, so the thousandth report of the same post
+         * cost a thousand devices something and taught the server nothing.
+         */
+        public boolean needsObserve;
+        /**
+         * A real frame of this video, on a plain HTTPS URL we can draw immediately.
+         *
+         * <p>The backend keeps its own copy of the poster the channel's public page shows, so this
+         * needs no channel resolve, no message fetch and no Telegram session — it is an ordinary
+         * image load. That is the whole point: drawing a grid page used to cost one
+         * contacts.resolveUsername per channel purely to fetch pictures for videos nobody had asked
+         * to play, and that is the budget whose exhaustion takes reels and music down with it.
+         *
+         * <p>Null for a reference the backend has not fetched one for yet (it fetches lazily, for
+         * what a feed actually served), in which case the blur below is still the placeholder.
+         */
+        public String posterUrl;
+        /**
          * Telegram's own inline placeholder for this media (photoStrippedSize), base64, served by
          * the backend. A couple of hundred bytes that draw a blurred card the moment the JSON lands
          * — before any MTProto and without a single byte of the video being fetched.
@@ -508,6 +531,8 @@ public class SvipeDiscover {
             it.height = o.optInt("height", 0);
             it.durationMs = o.optInt("duration_ms", 0);
             it.shareUrl = o.isNull("share_url") ? null : o.optString("share_url", null);
+            it.needsObserve = o.optBoolean("obs", false);
+            it.posterUrl = o.isNull("poster_url") ? null : o.optString("poster_url", null);
             it.thumbB64 = o.isNull("thumb_b64") ? null : o.optString("thumb_b64", null);
             it.recId = recId;
             out.add(it);
