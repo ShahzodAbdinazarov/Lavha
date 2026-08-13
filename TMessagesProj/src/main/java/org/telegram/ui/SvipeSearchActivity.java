@@ -93,28 +93,31 @@ public class SvipeSearchActivity extends DialogsActivity {
             return;
         }
         seriesLoading = true;
-        org.telegram.svipe.SvipeMovies.seriesDetail(currentAccount, series.id, (page, error) -> {
+        // The page opens NOW, on the show's own poster post, and the episode list catches up. Waiting
+        // for the list first is what made a tap on a show do nothing at all on a slow connection.
+        final SvipeWatchActivity page = new SvipeWatchActivity(
+                org.telegram.svipe.SvipeMovies.SeriesRef.of(series));
+        final android.graphics.Rect from = new android.graphics.Rect();
+        if (exploreGrid != null && exploreGrid.getLastTapRect(from)) {
+            page.setOpenFromRect(from);
+        }
+        presentFragment(page);
+        org.telegram.svipe.SvipeMovies.seriesDetail(currentAccount, series.id, (detail, error) -> {
             org.telegram.messenger.AndroidUtilities.runOnUIThread(() -> {
                 seriesLoading = false;
-                if (page == null || page.isEmpty() || getParentActivity() == null) {
-                    // Nothing to play: a show whose episodes all failed their reference check. Saying
-                    // so beats a screen that opens onto a black player.
-                    if (getParentActivity() != null) {
-                        org.telegram.ui.Components.BulletinFactory.of(SvipeSearchActivity.this)
-                                .createErrorBulletin(org.telegram.messenger.LocaleController.getString(
-                                        org.telegram.messenger.R.string.SvipeSeriesEmpty))
-                                .show();
-                    }
-                    return;
+                if (detail == null || detail.isEmpty()) {
+                    return;   // the page is already playing the poster post; nothing to correct
                 }
-                // A "continue watching" card names BOTH the episode and the second to open it at —
-                // that is the whole point of it, and it beats the local mark, which knows only this
-                // device. An ordinary shelf card falls back to what this phone remembers.
                 final int at = series.resumeIndex >= 0
-                        ? Math.min(series.resumeIndex, page.episodes.size() - 1)
-                        : Math.min(org.telegram.svipe.SvipeSeriesProgress.lastEpisode(page.series.id),
-                                   page.episodes.size() - 1);
-                presentFragment(SvipeWatchActivity.ofSeries(page, at, series.resumeMs));
+                        ? Math.min(series.resumeIndex, detail.episodes.size() - 1)
+                        : Math.min(org.telegram.svipe.SvipeSeriesProgress.lastEpisode(detail.series.id),
+                                   detail.episodes.size() - 1);
+                if (series.resumeMs > 0) {
+                    final org.telegram.svipe.SvipeMovies.Episode e = detail.episodes.get(Math.max(0, at));
+                    org.telegram.svipe.video.SvipeVideoPlayerController.requestStartAt(
+                            e.channelId, e.messageId, series.resumeMs);
+                }
+                page.attachSeries(detail, Math.max(0, at));
             });
         });
     }

@@ -288,6 +288,32 @@ public class SvipeWatchActivity extends BaseFragment {
         return fragment;
     }
 
+    /**
+     * Attach a show to a page that is ALREADY on screen, and move it to the right episode.
+     *
+     * <p>Opening a show used to fetch its episode list first and present the page only when the list
+     * arrived — so on a slow connection tapping a show did nothing at all, for seconds, which reads
+     * as a frozen phone rather than as loading. The page now opens on the show's own poster post
+     * (a real video from the same show) and this fills the rest in when it lands.
+     */
+    public void attachSeries(SvipeMovies.SeriesPage page, int index) {
+        if (page == null || page.isEmpty()) {
+            return;
+        }
+        attachPlaylist(page, index);
+        final int at = playlistIndex >= 0 ? playlistIndex : 0;
+        final Row target = playlistRows.get(at);
+        playlistIndex = at;
+        playlistParkedFor = Integer.MIN_VALUE;
+        if (watched.ref != null && target.ref != null
+                && watched.ref.channelId == target.ref.channelId
+                && watched.ref.messageId == target.ref.messageId) {
+            rebuildRows();   // already on the right episode: only the panel is new
+            return;
+        }
+        openRow(target);
+    }
+
     /** Hang a run order on this page without touching what it is playing. */
     private void attachPlaylist(SvipeMovies.SeriesPage page, int index) {
         if (page == null || page.isEmpty()) {

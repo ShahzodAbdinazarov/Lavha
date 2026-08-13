@@ -1328,7 +1328,9 @@ public class SvipeExploreGrid extends RecyclerListView {
     private void refreshBothPipes() {
         final int seq = contentSeq;
         continueSlotSpin++;
-        loadContinue(seq);
+        if (selectedCategory == null) {
+            loadContinue(seq);
+        }
         final RefreshBatch batch = new RefreshBatch();
         loadingShorts = true;    // both flags also block scroll-pagination until the swap completes
         loadingLongs = true;
@@ -1552,8 +1554,11 @@ public class SvipeExploreGrid extends RecyclerListView {
     private void loadBothPipes() {
         final int seq = contentSeq;   // pin these requests to the current browse content
         final boolean wasIdle = !isLoading();
-        if (continueCard == null && shorts.isEmpty() && longs.isEmpty()) {
-            loadContinue(seq);        // first browse load: ask what is unfinished, once
+        if (continueCard == null && shorts.isEmpty() && longs.isEmpty() && selectedCategory == null) {
+            // Only on the unfiltered feed: "carry on where you stopped" answers a question the user
+            // did not ask on a filtered shelf, and an anime episode at the top of Cooking is exactly
+            // the kind of thing that makes a chip look broken.
+            loadContinue(seq);
         }
         // First browse load of the session: the app-start warm-up may already hold both page-0s.
         // They go through the ordinary page path, so composition, cursors and failure handling are
