@@ -489,6 +489,7 @@
     <string name="SvipeUpdateChecking">Проверка обновлений…</string>
     <string name="SvipeVideoCategoryAll">Все</string>
     <string name="SvipeVideoCategoryEmpty">Здесь пока ничего нет</string>
+    <string name="SvipeVideoOffline">Нет соединения. Нажмите, чтобы повторить</string>
     <string name="SvipeVideoCategoryComedy">Комедии</string>
     <string name="SvipeVideoCategoryAction">Боевики</string>
     <string name="SvipeVideoCategoryDrama">Драмы</string>

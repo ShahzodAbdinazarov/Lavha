@@ -41,6 +41,8 @@ import org.telegram.ui.Cells.SvipeWideVideoCell;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -161,6 +163,8 @@ public class SvipeExploreGrid extends RecyclerListView {
 
     private boolean loadingSingle;   // the single-stream path: search results / injected page loader
     private boolean startedFirstLoad;
+    /** True once any page has been asked for, so a grid that has not started yet is not "empty". */
+    private boolean loadAttempted;
     private Integer nextOffset = 0;  // single-stream cursor; null when that stream is exhausted
     private OnReelTapListener tapListener;
     /** Where the last tapped cell's picture is, in window coordinates — the open animation starts there. */
@@ -246,6 +250,50 @@ public class SvipeExploreGrid extends RecyclerListView {
     private final ArrayList<SvipeMovies.Category> categories = new ArrayList<>();
     private SvipeMovies.Category selectedCategory;   // null = "Hammasi" (the unfiltered dual-pipe feed)
     private boolean categoriesRequested;
+
+    /**
+     * What a shelf had on it, kept so coming BACK to a chip costs nothing.
+     *
+     * <p>Switching used to throw the old shelf away and re-fetch it, which made a chip strip unusable
+     * on a bad connection: tapping "Comedy" and then "All" put the user back on a shimmer they had
+     * already waited through once, and if the request never landed the grid stayed blank. A shelf
+     * already seen is data the device is holding — it must render instantly and with no network at
+     * all, and a fetch on top of it is a refresh, not a prerequisite.
+     */
+    private static class Shelf {
+        final ArrayList<GridItem> shorts = new ArrayList<>();
+        final ArrayList<GridItem> longs = new ArrayList<>();
+        final ArrayList<GridItem> singles = new ArrayList<>();   // film / serial shelves: one stream
+        Integer shortsOffset = 0;
+        Integer longsOffset = 0;
+        Integer nextOffset = 0;
+        boolean single;
+
+        boolean isEmpty() {
+            return shorts.isEmpty() && longs.isEmpty() && singles.isEmpty();
+        }
+    }
+
+    /** Shelves kept, least-recently-used first out. Access-ordered, so the LRU is the real LRU. */
+    private static final int MAX_CACHED_SHELVES = 6;
+    /** What is kept of a deep shelf. A returning user gets the top of it, not their scroll position. */
+    private static final int CACHED_SHORTS = 60;
+    private static final int CACHED_LONGS = 20;
+    private static final int CACHED_SINGLES = 60;
+    /** Shelves warmed in the background per grid, on top of whatever the user actually opens. */
+    private static final int MAX_PREFETCHED_SHELVES = 2;
+
+    private final LinkedHashMap<String, Shelf> shelves =
+            new LinkedHashMap<String, Shelf>(8, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Shelf> eldest) {
+                    return size() > MAX_CACHED_SHELVES;
+                }
+            };
+    private final HashSet<String> prefetching = new HashSet<>();
+    private int prefetchBudget = MAX_PREFETCHED_SHELVES;
+    /** Consecutive single-stream failures, the film/serial twin of {@link #shortFailures}. */
+    private int singleFailures;
     private MovieDelegate movieDelegate;
 
     private PageLoader pageLoader;          // null -> the dual-pipe browse feed
@@ -385,6 +433,15 @@ public class SvipeExploreGrid extends RecyclerListView {
         chipPaint.setShadowLayer(AndroidUtilities.dp(4), 0, AndroidUtilities.dp(1), 0x40000000);
 
         setOnItemClickListener((view, position) -> {
+            // The failure notice IS the retry button, so it has to come before everything else — it is
+            // the one row that means something with no content behind it.
+            if (position >= 0 && position < adapter.getItemCount()
+                    && adapter.getItemViewType(position) == TYPE_EMPTY) {
+                if (loadFailed()) {
+                    retryShelf();
+                }
+                return;
+            }
             if (tapListener == null) {
                 return;
             }
@@ -497,6 +554,10 @@ public class SvipeExploreGrid extends RecyclerListView {
      * no second composer to keep in sync.
      */
     private void selectCategory(SvipeMovies.Category category) {
+        // Everything the shelf being left is holding, kept in memory. This is what makes coming back
+        // free — and it has to happen BEFORE the state below is cleared.
+        saveShelf(shelfKey(selectedCategory));
+        org.telegram.svipe.SvipeCategoryStats.noteClick(account, category == null ? null : category.slug);
         selectedCategory = category;
         stopScroll();
         contentSeq++;              // orphan every in-flight page from the previous shelf
@@ -509,6 +570,7 @@ public class SvipeExploreGrid extends RecyclerListView {
         composedLongs = 0;
         shortFailures = 0;
         longFailures = 0;
+        singleFailures = 0;
         loadingShorts = false;
         loadingLongs = false;
         loadingSingle = false;
@@ -516,12 +578,31 @@ public class SvipeExploreGrid extends RecyclerListView {
         // One span count for every shelf: film cards are full-row now, so there is nothing left for a
         // second grid shape to do.
         layoutManager.setSpanCount(SPAN_COUNT);
+        pageLoader = pageLoaderFor(category);
+        final Shelf cached = shelves.get(shelfKey(category));
+        final boolean restored = cached != null && restoreShelf(cached);
+        if (!restored) {
+            // Asked for BEFORE the rebind, so the very first frame of the new shelf is the shimmer and
+            // not a flash of the empty notice. The switch itself never waits for the answer: the chip
+            // is selected, the grid is the new shelf, and the network fills it in behind that.
+            loadPage();
+        }
+        adapter.notifyDataSetChanged();
+        scrollToPosition(0);
+        if (restored && items.size() < MIN_COMPOSED_CELLS) {
+            loadPage();   // held, but too shallow to scroll: top it up without blanking what is there
+        }
+        schedulePrefetch();
+    }
+
+    /** The stream behind a chip, or null for the two-pipe browse feed (which every plain chip uses). */
+    private PageLoader pageLoaderFor(SvipeMovies.Category category) {
         if (category == null) {
-            pageLoader = null;
+            return null;
         } else if ("serial".equals(category.slug)) {
             // The serial shelf lists SHOWS, not loose episodes: an episode is only useful next to its
             // siblings, and the server has already grouped them (app/movies/series.py).
-            pageLoader = (offset, limit, refresh, cb) -> SvipeMovies.series(
+            return (offset, limit, refresh, cb) -> SvipeMovies.series(
                     account, offset, Math.min(limit, MOVIE_PAGE_SIZE),
                     (series, next, error) -> {
                         if (series == null) {
@@ -536,7 +617,7 @@ public class SvipeExploreGrid extends RecyclerListView {
                     });
         } else if (category.film) {
             final String slug = category.slug;
-            pageLoader = (offset, limit, refresh, cb) -> SvipeMovies.movies(
+            return (offset, limit, refresh, cb) -> SvipeMovies.movies(
                     account, slug, null, offset, Math.min(limit, MOVIE_PAGE_SIZE),
                     (movies, next, error) -> {
                         if (movies == null) {
@@ -554,11 +635,172 @@ public class SvipeExploreGrid extends RecyclerListView {
             // same two pipes, the same 3-up-plus-wide-card rhythm, with the chip applied to BOTH.
             // Swapping to a single long-video list here made a shelf look like a different screen,
             // and made every short video invisible under every chip.
-            pageLoader = null;
+            return null;
         }
-        adapter.notifyDataSetChanged();
-        scrollToPosition(0);
-        loadPage();
+    }
+
+    // ---- shelf memory ---------------------------------------------------------------------------
+
+    private static String shelfKey(SvipeMovies.Category category) {
+        return category == null ? org.telegram.svipe.SvipeCategoryStats.ALL : category.slug;
+    }
+
+    private SvipeMovies.Category categoryBySlug(String slug) {
+        if (slug == null || slug.isEmpty()) {
+            return null;
+        }
+        for (SvipeMovies.Category c : categories) {
+            if (slug.equals(c.slug)) {
+                return c;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Put the shelf on screen into memory.
+     *
+     * <p>Only the top of it: a shelf scrolled fifty rows deep comes back at its top, which is what
+     * every app does with a tab you left. The cursors are pulled back to the trim point with it, so
+     * the next page continues where the kept content ends instead of leaving a hole in the middle of
+     * a catalog.
+     */
+    private void saveShelf(String key) {
+        if (key == null || searchActive) {
+            return;
+        }
+        final Shelf s = new Shelf();
+        s.single = pageLoader != null;
+        if (s.single) {
+            final int keep = Math.min(items.size(), CACHED_SINGLES);
+            s.singles.addAll(items.subList(0, keep));
+            s.nextOffset = keep < items.size() ? keep : nextOffset;
+        } else {
+            final int keepShorts = Math.min(shorts.size(), CACHED_SHORTS);
+            final int keepLongs = Math.min(longs.size(), CACHED_LONGS);
+            s.shorts.addAll(shorts.subList(0, keepShorts));
+            s.longs.addAll(longs.subList(0, keepLongs));
+            s.shortsOffset = keepShorts < shorts.size() ? keepShorts : shortsOffset;
+            s.longsOffset = keepLongs < longs.size() ? keepLongs : longsOffset;
+        }
+        if (s.isEmpty()) {
+            return;   // nothing worth remembering — and caching an empty shelf would suppress its retry
+        }
+        shelves.put(key, s);
+    }
+
+    /** Put a remembered shelf back on screen. Returns false when it turned out to hold nothing. */
+    private boolean restoreShelf(Shelf s) {
+        if (s.single) {
+            items.addAll(s.singles);
+            nextOffset = s.nextOffset;
+        } else {
+            shorts.addAll(s.shorts);
+            longs.addAll(s.longs);
+            shortsOffset = s.shortsOffset;
+            longsOffset = s.longsOffset;
+            composeBrowse();
+        }
+        return !items.isEmpty();
+    }
+
+    // ---- prefetch: have the next shelf before it is asked for ------------------------------------
+
+    /**
+     * Warm the shelves this user actually opens, in the order they open them.
+     *
+     * <p>A chip strip has one obvious next tap and it is not the same tap for everybody — somebody who
+     * watches serials opens that shelf every session and never touches Sport. {@link
+     * org.telegram.svipe.SvipeCategoryStats} counts the taps locally; this spends two page-0 fetches a
+     * session on the top two, so the second shelf of a session opens with content already in it rather
+     * than with a shimmer and a round-trip.
+     *
+     * <p>Deferred rather than immediate: the shelf the user is LOOKING at owns the connection until it
+     * has something to show, and a prefetch that competes with it makes the visible thing slower.
+     */
+    private void schedulePrefetch() {
+        AndroidUtilities.cancelRunOnUIThread(prefetchRunnable);
+        if (prefetchBudget <= 0 || categories.isEmpty()) {
+            return;
+        }
+        AndroidUtilities.runOnUIThread(prefetchRunnable, 2500);
+    }
+
+    private final Runnable prefetchRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (prefetchBudget <= 0 || searchActive || isLoading() || items.isEmpty()) {
+                return;   // nothing to spare: the visible shelf comes first, always
+            }
+            for (String slug : org.telegram.svipe.SvipeCategoryStats.topSlugs(
+                    account, MAX_PREFETCHED_SHELVES, shelfKey(selectedCategory))) {
+                if (prefetchBudget <= 0) {
+                    return;
+                }
+                if (shelves.containsKey(slug) || prefetching.contains(slug)) {
+                    continue;
+                }
+                if (!slug.isEmpty() && categoryBySlug(slug) == null) {
+                    continue;   // a slug the server has since dropped
+                }
+                prefetchBudget--;
+                prefetchShelf(slug);
+            }
+        }
+    };
+
+    /** Fetch one shelf's first page into the cache, off screen. Failure is silent: it is a bonus. */
+    private void prefetchShelf(final String slug) {
+        prefetching.add(slug);
+        final SvipeMovies.Category category = categoryBySlug(slug);
+        final PageLoader loader = pageLoaderFor(category);
+        final Shelf shelf = new Shelf();
+        if (loader != null) {
+            shelf.single = true;
+            loader.load(0, PAGE_SIZE, false, (result, next, error) -> AndroidUtilities.runOnUIThread(() -> {
+                prefetching.remove(slug);
+                if (result == null || result.isEmpty()) {
+                    return;
+                }
+                for (SvipeDiscover.Item ref : result) {
+                    shelf.singles.add(new GridItem(ref));
+                }
+                shelf.nextOffset = next;
+                shelves.put(slug, shelf);
+            }));
+            return;
+        }
+        final String cat = slug.isEmpty() ? null : slug;
+        final int[] pending = {2};
+        final Runnable settle = () -> {
+            if (--pending[0] != 0) {
+                return;
+            }
+            prefetching.remove(slug);
+            if (!shelf.isEmpty()) {
+                shelves.put(slug, shelf);
+            }
+        };
+        SvipeDiscover.load(account, null, cat, 0, PAGE_SIZE, false,
+                (result, next, error) -> AndroidUtilities.runOnUIThread(() -> {
+                    if (result != null) {
+                        for (SvipeDiscover.Item ref : result) {
+                            shelf.shorts.add(new GridItem(ref, false));
+                        }
+                        shelf.shortsOffset = next;
+                    }
+                    settle.run();
+                }));
+        SvipeDiscover.videos(account, null, cat, 0, LONG_PAGE_SIZE, false,
+                (result, next, error) -> AndroidUtilities.runOnUIThread(() -> {
+                    if (result != null) {
+                        for (SvipeDiscover.Item ref : result) {
+                            shelf.longs.add(new GridItem(ref, true));
+                        }
+                        shelf.longsOffset = next;
+                    }
+                    settle.run();
+                }));
     }
 
     public void setOnReelTapListener(OnReelTapListener listener) {
@@ -694,11 +936,19 @@ public class SvipeExploreGrid extends RecyclerListView {
 
     /** Trigger the first page load once (called by the host when the grid first becomes visible). */
     public void ensureLoaded() {
-        if (startedFirstLoad || searchActive) {
+        if (searchActive) {
             return;
         }
-        startedFirstLoad = true;
-        loadPage();
+        if (!startedFirstLoad) {
+            startedFirstLoad = true;
+            loadPage();
+            return;
+        }
+        // Coming BACK to a shelf that died while the connection was down: try it again, without
+        // making the user find the notice and tap it. Whatever killed it is usually over by now.
+        if (loadFailed()) {
+            retryShelf();
+        }
     }
 
     /** Reload the browse grid if it is currently empty and nothing is in flight (used after a search). */
@@ -843,8 +1093,37 @@ public class SvipeExploreGrid extends RecyclerListView {
      * top of bare window background, and not one pixel of content under it).
      */
     private boolean searchEmpty() {
-        return (searchActive || selectedCategory != null)
-                && !hasRecents() && items.isEmpty() && !isLoading() && !refreshing;
+        return !hasRecents() && items.isEmpty() && !isLoading() && !refreshing && loadAttempted;
+    }
+
+    /**
+     * The empty screen is a FAILURE, not an answer — the pipes gave up without ever delivering.
+     *
+     * <p>This is the state the unfiltered feed used to render as nothing at all: chips on top of bare
+     * window background, no notice, no spinner and no way to ask again short of killing the app. On a
+     * bad connection that is where every shelf ended up.
+     */
+    private boolean loadFailed() {
+        return searchEmpty() && !searchActive
+                && (shortFailures > 0 || longFailures > 0 || singleFailures > 0);
+    }
+
+    /** The empty-state tap: forget the failures, un-retire the pipes, ask again. */
+    private void retryShelf() {
+        shortFailures = 0;
+        longFailures = 0;
+        singleFailures = 0;
+        if (shortsOffset == null) {
+            shortsOffset = 0;
+        }
+        if (longsOffset == null) {
+            longsOffset = 0;
+        }
+        if (nextOffset == null) {
+            nextOffset = 0;
+        }
+        adapter.notifyDataSetChanged();   // swap the notice for the shimmer straight away
+        loadPage();
     }
 
     /**
@@ -1000,7 +1279,7 @@ public class SvipeExploreGrid extends RecyclerListView {
         final RefreshBatch batch = new RefreshBatch();
         loadingShorts = true;    // both flags also block scroll-pagination until the swap completes
         loadingLongs = true;
-        SvipeDiscover.load(account, null, 0, PAGE_SIZE, true, (result, next, error) -> {
+        SvipeDiscover.load(account, null, catSlug(), 0, PAGE_SIZE, true, (result, next, error) -> {
             loadingShorts = false;
             batch.shorts = result;
             batch.shortsNext = next;
@@ -1008,7 +1287,7 @@ public class SvipeExploreGrid extends RecyclerListView {
                 applyRefresh(seq, batch);
             }
         });
-        SvipeDiscover.videos(account, null, 0, LONG_PAGE_SIZE, true, (result, next, error) -> {
+        SvipeDiscover.videos(account, null, catSlug(), 0, LONG_PAGE_SIZE, true, (result, next, error) -> {
             loadingLongs = false;
             batch.longs = result;
             batch.longsNext = next;
@@ -1192,6 +1471,7 @@ public class SvipeExploreGrid extends RecyclerListView {
 
     /** Ask for more content: both browse pipes, or the single stream behind search / a page loader. */
     private void loadPage() {
+        loadAttempted = true;
         // Every content path funnels through here — ensureLoaded() does NOT, because the Search
         // section it lives in is permanently in search mode and returns early from it. loadCategories()
         // self-guards, so calling it on every page is free after the first.
@@ -1354,6 +1634,8 @@ public class SvipeExploreGrid extends RecyclerListView {
             return;
         }
         adapter.notifyDataSetChanged();
+        // The visible shelf has content: now there is room to have the next one ready.
+        schedulePrefetch();
     }
 
     /**
@@ -1483,10 +1765,13 @@ public class SvipeExploreGrid extends RecyclerListView {
                 finishRefresh();
             }
             if (result == null) {
-                // Failed load: drop the skeleton placeholders (or reveal the empty-search notice).
+                // Failed load: drop the skeleton placeholders and put up the notice, which on a
+                // network failure is also the retry.
+                singleFailures++;
                 adapter.notifyDataSetChanged();
                 return;
             }
+            singleFailures = 0;
             nextOffset = next;
             final int before = items.size();
             final ArrayList<GridItem> fresh = fillPipe(items, result, null);
@@ -1776,7 +2061,7 @@ public class SvipeExploreGrid extends RecyclerListView {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             final int type = holder.getItemViewType();
-            return type == TYPE_PHOTO || type == TYPE_PHOTO_WIDE;
+            return type == TYPE_PHOTO || type == TYPE_PHOTO_WIDE || type == TYPE_EMPTY;
         }
 
         @Override
@@ -1838,7 +2123,8 @@ public class SvipeExploreGrid extends RecyclerListView {
             if (type == TYPE_EMPTY) {
                 // Two different nothings: a search that found nothing vs a shelf with no content yet.
                 ((TextView) holder.itemView).setText(LocaleController.getString(
-                        searchActive ? R.string.NoResult : R.string.SvipeVideoCategoryEmpty));
+                        loadFailed() ? R.string.SvipeVideoOffline
+                                : (searchActive ? R.string.NoResult : R.string.SvipeVideoCategoryEmpty)));
                 return;
             }
             if (type != TYPE_PHOTO && type != TYPE_PHOTO_WIDE) {
@@ -1946,6 +2232,13 @@ public class SvipeExploreGrid extends RecyclerListView {
         tv.setPadding(AndroidUtilities.dp(20), AndroidUtilities.dp(48), AndroidUtilities.dp(20), AndroidUtilities.dp(20));
         tv.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
         tv.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+        // Tappable on purpose: when the reason is the network, the notice IS the retry button. A dead
+        // end with no way back is what this whole state exists to replace.
+        tv.setOnClickListener(v -> {
+            if (loadFailed()) {
+                retryShelf();
+            }
+        });
         return tv;
     }
 

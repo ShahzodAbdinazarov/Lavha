@@ -11388,6 +11388,7 @@
     <string name="ArticleAIAddToPage">Add to Page</string>
     <string name="SvipeVideoCategoryAll">All</string>
     <string name="SvipeVideoCategoryEmpty">Nothing here yet</string>
+    <string name="SvipeVideoOffline">No connection. Tap to try again</string>
     <string name="SvipeVideoCategoryComedy">Comedy</string>
     <string name="SvipeVideoCategoryAction">Action</string>
     <string name="SvipeVideoCategoryDrama">Drama</string>

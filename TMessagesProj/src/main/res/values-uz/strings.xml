@@ -224,6 +224,7 @@
     <string name="SvipeUpdateChecking">Yangilanish tekshirilmoqda…</string>
     <string name="SvipeVideoCategoryAll">Hammasi</string>
     <string name="SvipeVideoCategoryEmpty">Bu yerda hozircha hech nima yo\'q</string>
+    <string name="SvipeVideoOffline">Aloqa yo\'q. Qayta urinish uchun bosing</string>
     <string name="SvipeVideoCategoryComedy">Komediya</string>
     <string name="SvipeVideoCategoryAction">Jangari</string>
     <string name="SvipeVideoCategoryDrama">Drama</string>
