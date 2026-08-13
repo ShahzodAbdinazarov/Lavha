@@ -102,9 +102,6 @@ public final class SvipeObserved {
         if (mo == null || channelId == 0 || messageId <= 0) {
             return;
         }
-        // Music has no public web page to read from — an audio post renders as a card with no file
-        // and no counters — so a music observation still carries everything it always did.
-        final boolean music = "music".equals(kind);
         try {
             final JSONObject o = new JSONObject();
             o.put("kind", kind);
@@ -115,20 +112,15 @@ public final class SvipeObserved {
                 o.put("doc_id", doc.id);
                 if (doc.size > 0) o.put("size", doc.size);
                 if (doc.mime_type != null && !doc.mime_type.isEmpty()) o.put("mime_type", doc.mime_type);
-                // The inline placeholder is reported for MUSIC only. For video the server reads it
-                // off the channel's public web page for the whole catalog, continuously, instead of
-                // waiting for somebody to watch something — and it was the largest thing in this
-                // payload as well as the only part that cost the device any real work (base64 of
-                // every post it saw).
-                if (music) {
-                    for (int i = 0; doc.thumbs != null && i < doc.thumbs.size(); i++) {
-                        final TLRPC.PhotoSize ps = doc.thumbs.get(i);
-                        if (ps instanceof TLRPC.TL_photoStrippedSize && ps.bytes != null
-                                && ps.bytes.length > 0 && ps.bytes.length <= 2048) {
-                            o.put("thumb_b64", android.util.Base64.encodeToString(
-                                    ps.bytes, android.util.Base64.NO_WRAP));
-                            break;
-                        }
+                // Telegram's inline placeholder — it came with the message, so reporting it costs
+                // nothing and saves everybody else the wait for a picture (see SvipeThumb).
+                for (int i = 0; doc.thumbs != null && i < doc.thumbs.size(); i++) {
+                    final TLRPC.PhotoSize ps = doc.thumbs.get(i);
+                    if (ps instanceof TLRPC.TL_photoStrippedSize && ps.bytes != null
+                            && ps.bytes.length > 0 && ps.bytes.length <= 2048) {
+                        o.put("thumb_b64", android.util.Base64.encodeToString(
+                                ps.bytes, android.util.Base64.NO_WRAP));
+                        break;
                     }
                 }
                 for (int i = 0; i < doc.attributes.size(); i++) {
@@ -152,23 +144,22 @@ public final class SvipeObserved {
             }
             final TLRPC.Message m = mo.messageOwner;
             if (m != null) {
-                // Views, reactions, the caption and the publish time are read off the channel's own
-                // public page now — for every post, several times an hour, whether anyone watched it
-                // or not. A device repeating them can only be older than what the server already has,
-                // so it stops sending them. Forwards is the one counter the web does not show.
+                // EVERYTHING the message already carries. One getMessages returned all of it in the
+                // same call, so a field left out is not a saving of any kind — the flood budget is
+                // spent per CALL, never per field, and the call has already happened. What this class
+                // economises is how OFTEN a report is sent (see the reference-aware note() above),
+                // not how much it says when it does.
+                if (m.views > 0) o.put("views", m.views);
                 if (m.forwards > 0) o.put("forwards", m.forwards);
                 if (m.edit_date > 0) o.put("edit_date", m.edit_date);
-                if (music) {
-                    if (m.views > 0) o.put("views", m.views);
-                    if (m.date > 0) o.put("posted_at", m.date);
-                    if (m.message != null && !m.message.isEmpty()) o.put("caption", m.message);
-                    if (m.reactions != null && m.reactions.results != null) {
-                        int total = 0;
-                        for (int i = 0; i < m.reactions.results.size(); i++) {
-                            total += m.reactions.results.get(i).count;
-                        }
-                        if (total > 0) o.put("reactions", total);
+                if (m.date > 0) o.put("posted_at", m.date);
+                if (m.message != null && !m.message.isEmpty()) o.put("caption", m.message);
+                if (m.reactions != null && m.reactions.results != null) {
+                    int total = 0;
+                    for (int i = 0; i < m.reactions.results.size(); i++) {
+                        total += m.reactions.results.get(i).count;
                     }
+                    if (total > 0) o.put("reactions", total);
                 }
             }
             enqueue(account, channelId + ":" + messageId, o);
