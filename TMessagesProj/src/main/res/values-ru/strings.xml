@@ -504,6 +504,15 @@
     <string name="SvipeVideoCategoryNews">Новости</string>
     <string name="SvipeVideoCategoryDocumentary">Документальные</string>
     <string name="SvipeVideoCategoryMovies">Фильмы</string>
+    <string name="SvipeVideoCategoryCooking">Кухня</string>
+    <string name="SvipeVideoCategoryCars">Авто</string>
+    <string name="SvipeVideoCategoryReligion">Религия</string>
+    <string name="SvipeVideoCategoryTips">Советы</string>
+    <string name="SvipeVideoCategoryTech">Технологии</string>
+    <string name="SvipeVideoCategoryAnimals">Животные</string>
+    <string name="SvipeVideoCategoryTravel">Путешествия</string>
+    <string name="SvipeVideoCategoryMusic">Музыка</string>
+    <string name="SvipeVideoCategoryHealth">Здоровье</string>
     <string name="SvipeMovieVersions">Версии</string>
     <string name="SvipeMovieActors">Актёры</string>
     <string name="SvipeMovieCast">В ролях</string>

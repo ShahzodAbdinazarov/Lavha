@@ -333,6 +333,10 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
             stage.setInlineRect(inlineRect);
             stage.showCover(ref.mo);
             stage.getControls().setVideo(ref.mo, ref.chat);
+            // Working, from the first frame of the OPEN — not from the first frame of the video. On a
+            // slow connection the resolve alone can take seconds, and a black rectangle for those
+            // seconds is what reads as a frozen phone.
+            stage.setBuffering(true);
         }
         for (int i = 0; i < observers.size(); i++) observers.get(i).onVideoChanged(ref);
         if (ref.mo != null) {
@@ -457,6 +461,7 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
      * the position, and releasing the player takes both away.
      */
     private void releaseCurrentVideo() {
+        if (stage != null) stage.setBuffering(false);
         final SvipeRefResolver.VideoRef closed = current;
         telemetry.flush();
         releasePlayer();
@@ -886,8 +891,10 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
      */
     private void showPlaybackError() {
         if (stage == null) return;
+        stage.setBuffering(false);
         stage.showError(() -> {
             stage.showError(null);
+            stage.setBuffering(true);   // the retry is a new wait, and it says so
             final SvipeWatchActivity page = watchPage;
             if (current != null && current.mo == null && page != null) {
                 page.retryResolve();   // the MTProto resolve is what failed — run it again
@@ -940,6 +947,9 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
                     // Buffering time separates "watched four seconds and left" from "waited for a
                     // frame and gave up" — the leave classifier must not read the second as a rejection.
                     telemetry.onBuffering(playbackState == Player.STATE_BUFFERING);
+                    if (stage != null) {
+                        stage.setBuffering(playbackState == Player.STATE_BUFFERING);
+                    }
                     if (playbackState == Player.STATE_ENDED) {
                         // STATE_ENDED is new plumbing here on purpose: reels never reaches it because
                         // reels loop, and a long-form video the user turned looping ON for does not
@@ -1058,7 +1068,10 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
         if (firstFrameSeen || from != player) return;
         firstFrameSeen = true;
         AndroidUtilities.runOnUIThread(() -> {
-            if (stage != null && from == player) stage.onFirstFrame();
+            if (stage != null && from == player) {
+                stage.onFirstFrame();
+                stage.setBuffering(false);
+            }
             if (from == player) telemetry.onFirstFrame();
         });
     }

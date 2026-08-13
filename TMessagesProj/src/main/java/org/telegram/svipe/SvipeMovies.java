@@ -93,6 +93,16 @@ public final class SvipeMovies {
             case "yangiliklar": return R.string.SvipeVideoCategoryNews;
             case "hujjatli":    return R.string.SvipeVideoCategoryDocumentary;
             case "kino":        return R.string.SvipeVideoCategoryMovies;
+            // The topic shelves — what the corpus actually is (see app/movies/categories.py).
+            case "oshxona":     return R.string.SvipeVideoCategoryCooking;
+            case "avto":        return R.string.SvipeVideoCategoryCars;
+            case "diniy":       return R.string.SvipeVideoCategoryReligion;
+            case "maslahat":    return R.string.SvipeVideoCategoryTips;
+            case "texnologiya": return R.string.SvipeVideoCategoryTech;
+            case "hayvonlar":   return R.string.SvipeVideoCategoryAnimals;
+            case "sayohat":     return R.string.SvipeVideoCategoryTravel;
+            case "musiqa":      return R.string.SvipeVideoCategoryMusic;
+            case "salomatlik":  return R.string.SvipeVideoCategoryHealth;
             default:            return 0;
         }
     }

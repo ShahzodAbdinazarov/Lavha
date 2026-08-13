@@ -33,6 +33,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.RadialProgressView;
 import org.telegram.ui.DialogsActivity;
 import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.MainTabsActivity;
@@ -78,6 +79,7 @@ public class SvipeVideoStage extends FrameLayout {
     private final FrameLayout content;
     private final AspectRatioFrameLayout aspect;
     private final TextureView textureView;
+    private final RadialProgressView buffering;
     private final BackupImageView cover; // video thumbnail shown until the first frame renders
     /** Failure + retry over the picture. Without it a playback failure is an indefinite black frame. */
     private final LinearLayout errorView;
@@ -156,6 +158,16 @@ public class SvipeVideoStage extends FrameLayout {
         errorView.addView(retryButton, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT,
                 LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
         content.addView(errorView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
+
+        // The spinner Telegram's own video player shows: the picture opens IMMEDIATELY and says it is
+        // working, instead of a black rectangle that reads as a frozen phone. It covers both waits —
+        // the MTProto resolve before there is anything to play, and every stall in the stream after.
+        buffering = new RadialProgressView(context);
+        buffering.setSize(AndroidUtilities.dp(44));
+        buffering.setStrokeWidth(2.6f);
+        buffering.setProgressColor(0xFFFFFFFF);
+        buffering.setVisibility(GONE);
+        content.addView(buffering, LayoutHelper.createFrame(48, 48, Gravity.CENTER));
 
         addView(content, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
@@ -282,6 +294,23 @@ public class SvipeVideoStage extends FrameLayout {
      * did before — is a black rectangle with no message, no spinner and no way to try again, which is
      * indistinguishable from "the video does not play at all".
      */
+    /**
+     * Show or hide the "working on it" spinner.
+     *
+     * <p>Deliberately independent of whether a player exists yet: the wait that hurts most is the one
+     * BEFORE it does — the reference resolving over MTProto on a slow connection, where the page was
+     * already open and the picture was simply black.
+     */
+    public void setBuffering(boolean on) {
+        if (on && errorView.getVisibility() == VISIBLE) {
+            on = false;   // an error is a final state; a spinner on top of it says the opposite
+        }
+        if ((buffering.getVisibility() == VISIBLE) == on) {
+            return;
+        }
+        buffering.setVisibility(on ? VISIBLE : GONE);
+    }
+
     public void showError(Runnable retry) {
         retryAction = retry;
         errorView.setVisibility(retry != null ? VISIBLE : GONE);

@@ -11,7 +11,10 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Outline;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Shader;
 import android.os.Handler;
 import android.os.Looper;
 import android.graphics.PorterDuff;
@@ -3206,7 +3209,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         final AspectRatioFrameLayout aspect;
         final TextureView textureView;
         final BackupImageView cover; // video thumbnail shown until the first frame renders
-        final ProgressBar loading;
+        final View loading;
         final ImageView pausedIcon;
         final ImageView likeIcon;
         final TextView likeCount;
@@ -3225,7 +3228,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         ImageView saveIcon;             // "Saqlash" -> the user's private Saved Reels channel
         TextView saveLabel;
 
-        ReelsHolder(FrameLayout root, AspectRatioFrameLayout aspect, TextureView tv, BackupImageView cover, ProgressBar pb,
+        ReelsHolder(FrameLayout root, AspectRatioFrameLayout aspect, TextureView tv, BackupImageView cover, View pb,
                     ImageView paused, ImageView likeIcon, TextView likeCount, ImageView commentIcon,
                     TextView commentCount, TextView shareCount, BackupImageView avatar, TextView channelName,
                     ImageView verifiedBadge, TextView followBtn, TextView title) {
@@ -3294,6 +3297,62 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         }
     }
 
+    /**
+     * The loading state of a reel: a light sweep travelling across the frame, the way a Telegram
+     * story shimmers while its media arrives.
+     *
+     * <p>Drawn OVER the cover rather than instead of it, so a reel that already has its blurred
+     * placeholder shows that placeholder breathing instead of a black rectangle with a wheel on it.
+     * Alpha is low on purpose — it has to be visible over a bright frame and invisible enough over a
+     * dark one not to look like a defect.
+     */
+    private static class StoryShimmerView extends View {
+        private static final long SWEEP_MS = 1150L;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Matrix matrix = new Matrix();
+        private LinearGradient gradient;
+        private int gradientWidth;
+        private long startedAt;
+
+        StoryShimmerView(Context context) {
+            super(context);
+        }
+
+        @Override
+        protected void onVisibilityChanged(View changedView, int visibility) {
+            super.onVisibilityChanged(changedView, visibility);
+            startedAt = 0;   // every appearance starts its own sweep, mid-animation looks like a glitch
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            final int w = getWidth();
+            final int h = getHeight();
+            if (w <= 0 || h <= 0) {
+                return;
+            }
+            final int band = Math.max(AndroidUtilities.dp(120), w / 2);
+            if (gradient == null || gradientWidth != band) {
+                gradientWidth = band;
+                gradient = new LinearGradient(0, 0, band, band,
+                        new int[]{0x00FFFFFF, 0x1FFFFFFF, 0x00FFFFFF},
+                        new float[]{0f, 0.5f, 1f}, Shader.TileMode.CLAMP);
+                paint.setShader(gradient);
+            }
+            final long now = System.currentTimeMillis();
+            if (startedAt == 0) {
+                startedAt = now;
+            }
+            final float t = ((now - startedAt) % SWEEP_MS) / (float) SWEEP_MS;
+            final float x = (w + band * 2f) * t - band;
+            matrix.reset();
+            matrix.setTranslate(x, 0);
+            gradient.setLocalMatrix(matrix);
+            canvas.drawRect(0, 0, w, h, paint);
+            invalidate();
+        }
+    }
+
     private class ReelsAdapter extends RecyclerListView.SelectionAdapter {
         private final Context ctx;
 
@@ -3327,8 +3386,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             gradientLp.height = bottomInset + AndroidUtilities.dp(240);
             page.addView(gradient, gradientLp);
 
-            ProgressBar pb = new ProgressBar(ctx);
-            page.addView(pb, LayoutHelper.createFrame(46, 46, Gravity.CENTER));
+            // NOT a spinner. Instagram has none, and on a reel it is the wrong shape of feedback:
+            // a spinning wheel over somebody's face says "broken", where a sweep across the frame
+            // says "arriving" — which is what Telegram's own stories do while their media loads. The
+            // owner asked for exactly that, and the progress ring is gone from here for good.
+            View pb = new StoryShimmerView(ctx);
+            page.addView(pb, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
             // Center pause indicator = Telegram's own video-player play button, 1:1: the exact
             // PlayPauseDrawable (Theme.playPauseAnimator morph) inside circle_big — identical to

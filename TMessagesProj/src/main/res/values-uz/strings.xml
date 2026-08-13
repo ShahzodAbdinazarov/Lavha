@@ -239,6 +239,15 @@
     <string name="SvipeVideoCategoryNews">Yangiliklar</string>
     <string name="SvipeVideoCategoryDocumentary">Hujjatli</string>
     <string name="SvipeVideoCategoryMovies">Kino</string>
+    <string name="SvipeVideoCategoryCooking">Oshxona</string>
+    <string name="SvipeVideoCategoryCars">Avto</string>
+    <string name="SvipeVideoCategoryReligion">Diniy</string>
+    <string name="SvipeVideoCategoryTips">Maslahatlar</string>
+    <string name="SvipeVideoCategoryTech">Texnologiya</string>
+    <string name="SvipeVideoCategoryAnimals">Hayvonlar</string>
+    <string name="SvipeVideoCategoryTravel">Sayohat</string>
+    <string name="SvipeVideoCategoryMusic">Musiqa</string>
+    <string name="SvipeVideoCategoryHealth">Salomatlik</string>
     <string name="SvipeMovieVersions">Variantlar</string>
     <string name="SvipeMovieActors">Aktyorlar</string>
     <string name="SvipeMovieCast">Rollarda</string>

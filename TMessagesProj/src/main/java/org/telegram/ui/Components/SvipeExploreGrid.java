@@ -308,6 +308,16 @@ public class SvipeExploreGrid extends RecyclerListView {
     private MovieDelegate movieDelegate;
 
     private PageLoader pageLoader;          // null -> the dual-pipe browse feed
+    /**
+     * The endpoint the LONG pipe reads on this shelf, or null for the ordinary {@code /v1/videos}.
+     *
+     * <p>Film and show shelves used to replace the whole grid with a single stream of their own, and
+     * that is why they had no reels in them: one pipe, one kind of row, no rhythm. They are now the
+     * long half of the SAME two-pipe grid every other chip uses — posters where the wide card goes,
+     * three shorts under it — so "Kino" mixes trailers and clips into the films the way the owner
+     * asked, and an empty shorts answer simply leaves the cards, which is the normal case.
+     */
+    private PageLoader longLoader;
     private final boolean pullEnabled;      // pull-to-refresh only makes sense for the live explore feed
 
     // --- pull-to-refresh: native, drawn in dispatchDraw. The grid must stay a RecyclerListView
@@ -615,7 +625,7 @@ public class SvipeExploreGrid extends RecyclerListView {
         // One span count for every shelf: film cards are full-row now, so there is nothing left for a
         // second grid shape to do.
         layoutManager.setSpanCount(SPAN_COUNT);
-        pageLoader = pageLoaderFor(category);
+        longLoader = longLoaderFor(category);
         final Shelf cached = shelves.get(shelfKey(category));
         final boolean restored = cached != null && restoreShelf(cached);
         if (!restored) {
@@ -632,8 +642,8 @@ public class SvipeExploreGrid extends RecyclerListView {
         schedulePrefetch();
     }
 
-    /** The stream behind a chip, or null for the two-pipe browse feed (which every plain chip uses). */
-    private PageLoader pageLoaderFor(SvipeMovies.Category category) {
+    /** What feeds the LONG pipe on this shelf, or null for the ordinary long-video endpoint. */
+    private PageLoader longLoaderFor(SvipeMovies.Category category) {
         if (category == null) {
             return null;
         } else if ("serial".equals(category.slug)) {
@@ -795,23 +805,8 @@ public class SvipeExploreGrid extends RecyclerListView {
     private void prefetchShelf(final String slug) {
         prefetching.add(slug);
         final SvipeMovies.Category category = categoryBySlug(slug);
-        final PageLoader loader = pageLoaderFor(category);
+        final PageLoader longs = longLoaderFor(category);
         final Shelf shelf = new Shelf();
-        if (loader != null) {
-            shelf.single = true;
-            loader.load(0, PAGE_SIZE, false, (result, next, error) -> AndroidUtilities.runOnUIThread(() -> {
-                prefetching.remove(slug);
-                if (result == null || result.isEmpty()) {
-                    return;
-                }
-                for (SvipeDiscover.Item ref : result) {
-                    shelf.singles.add(new GridItem(ref));
-                }
-                shelf.nextOffset = next;
-                shelves.put(slug, shelf);
-            }));
-            return;
-        }
         final String cat = slug.isEmpty() ? null : slug;
         final int[] pending = {2};
         final Runnable settle = () -> {
@@ -833,16 +828,20 @@ public class SvipeExploreGrid extends RecyclerListView {
                     }
                     settle.run();
                 }));
-        SvipeDiscover.videos(account, null, cat, 0, LONG_PAGE_SIZE, false,
-                (result, next, error) -> AndroidUtilities.runOnUIThread(() -> {
-                    if (result != null) {
-                        for (SvipeDiscover.Item ref : result) {
-                            shelf.longs.add(new GridItem(ref, true));
-                        }
-                        shelf.longsOffset = next;
-                    }
-                    settle.run();
-                }));
+        final SvipeDiscover.Callback ontoLongs = (result, next, error) -> AndroidUtilities.runOnUIThread(() -> {
+            if (result != null) {
+                for (SvipeDiscover.Item ref : result) {
+                    shelf.longs.add(new GridItem(ref, true));
+                }
+                shelf.longsOffset = next;
+            }
+            settle.run();
+        });
+        if (longs != null) {
+            longs.load(0, LONG_PAGE_SIZE, false, ontoLongs);
+        } else {
+            SvipeDiscover.videos(account, null, cat, 0, LONG_PAGE_SIZE, false, ontoLongs);
+        }
     }
 
     public void setOnReelTapListener(OnReelTapListener listener) {
@@ -1341,14 +1340,19 @@ public class SvipeExploreGrid extends RecyclerListView {
                 applyRefresh(seq, batch);
             }
         });
-        SvipeDiscover.videos(account, null, catSlug(), 0, LONG_PAGE_SIZE, true, (result, next, error) -> {
+        final SvipeDiscover.Callback onLongs = (result, next, error) -> {
             loadingLongs = false;
             batch.longs = result;
             batch.longsNext = next;
             if (--batch.pending == 0) {
                 applyRefresh(seq, batch);
             }
-        });
+        };
+        if (longLoader != null) {
+            longLoader.load(0, LONG_PAGE_SIZE, true, onLongs);
+        } else {
+            SvipeDiscover.videos(account, null, catSlug(), 0, LONG_PAGE_SIZE, true, onLongs);
+        }
     }
 
     /** The two refreshed page-0s, held until both have answered so the swap happens exactly once. */
@@ -1585,6 +1589,9 @@ public class SvipeExploreGrid extends RecyclerListView {
             // endpoint — /v1/discover/search physically cannot return a landscape video.
             if (searchActive) {
                 SvipeDiscover.videosSearch(account, activeQuery, offset, LONG_PAGE_SIZE,
+                        (result, next, error) -> onPipePage(seq, true, result, next));
+            } else if (longLoader != null) {
+                longLoader.load(offset, LONG_PAGE_SIZE, false,
                         (result, next, error) -> onPipePage(seq, true, result, next));
             } else {
                 SvipeDiscover.videos(account, null, catSlug(), offset, LONG_PAGE_SIZE, false,

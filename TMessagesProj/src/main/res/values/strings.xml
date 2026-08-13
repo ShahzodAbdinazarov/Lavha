@@ -11403,6 +11403,15 @@
     <string name="SvipeVideoCategoryNews">News</string>
     <string name="SvipeVideoCategoryDocumentary">Documentary</string>
     <string name="SvipeVideoCategoryMovies">Movies</string>
+    <string name="SvipeVideoCategoryCooking">Cooking</string>
+    <string name="SvipeVideoCategoryCars">Cars</string>
+    <string name="SvipeVideoCategoryReligion">Religion</string>
+    <string name="SvipeVideoCategoryTips">Tips</string>
+    <string name="SvipeVideoCategoryTech">Tech</string>
+    <string name="SvipeVideoCategoryAnimals">Animals</string>
+    <string name="SvipeVideoCategoryTravel">Travel</string>
+    <string name="SvipeVideoCategoryMusic">Music</string>
+    <string name="SvipeVideoCategoryHealth">Health</string>
     <string name="SvipeMovieVersions">Versions</string>
     <string name="SvipeMovieActors">Actors</string>
     <string name="SvipeMovieCast">Cast</string>
