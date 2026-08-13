@@ -238,15 +238,16 @@ public class SvipeWideVideoCell extends LinearLayout {
                                  SvipeDiscover.Item ref) {
         final android.graphics.drawable.Drawable blur = org.telegram.svipe.SvipeThumb.of(ref);
         final String poster = ref == null ? null : ref.posterUrl;
-        if (poster != null && !poster.isEmpty()) {
-            // Preferred over the resolved message's own thumbnail, not just used as a stand-in for
-            // it: this one is an ordinary HTTPS image, so the card draws with no channel resolve, no
-            // getMessages and nothing spent from the flood budget. The blur sits underneath as the
-            // placeholder, exactly as it does while nothing is resolved.
+        final boolean unresolved = mo == null || mo.getDocument() == null;
+        // A tile takes the poster and keeps it: a 3-up cell is ~360 px of screen, the poster is 320,
+        // and taking it means the tile never has to resolve a channel at all. A full-width card
+        // takes it only until the message lands, because that card is three times the width and
+        // Telegram's own thumbnail is 1000 px — and it is resolving anyway, for its title.
+        if (poster != null && !poster.isEmpty() && (!wide || unresolved)) {
             iv.setImage(ImageLocation.getForPath(poster), wide ? "720_720" : "240_240", blur, null);
             return;
         }
-        if (mo == null || mo.getDocument() == null) {
+        if (unresolved) {
             // Clear FIRST. A recycled cell still holds the last card's picture, and a blur that fails
             // to decode (or an item with none) used to leave that stranger's thumbnail on screen —
             // which is how a show ended up advertising somebody else's video.
