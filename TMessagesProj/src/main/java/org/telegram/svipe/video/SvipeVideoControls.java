@@ -162,16 +162,16 @@ public class SvipeVideoControls extends FrameLayout {
         playButton.setOnClickListener(v -> togglePlayPause());
         mainChrome.addView(playButton, LayoutHelper.createFrame(60, 60, Gravity.CENTER));
 
-        prevButton = iconButton(context, R.drawable.ic_action_previous, R.string.AccDescrPrevious, v -> {
+        prevButton = circleButton(context, R.drawable.ic_action_previous, R.string.AccDescrPrevious, v -> {
             SvipeVideoPlayerController.getInstance().playPrevious();
             scheduleHide();
         });
-        mainChrome.addView(prevButton, LayoutHelper.createFrame(44, 44, Gravity.CENTER, 0, 0, 140, 0));
-        nextButton = iconButton(context, R.drawable.ic_action_next, R.string.Next, v -> {
+        mainChrome.addView(prevButton, LayoutHelper.createFrame(60, 60, Gravity.CENTER, 0, 0, 108, 0));
+        nextButton = circleButton(context, R.drawable.ic_action_next, R.string.Next, v -> {
             SvipeVideoPlayerController.getInstance().playNext();
             scheduleHide();
         });
-        mainChrome.addView(nextButton, LayoutHelper.createFrame(44, 44, Gravity.CENTER, 140, 0, 0, 0));
+        mainChrome.addView(nextButton, LayoutHelper.createFrame(60, 60, Gravity.CENTER, 108, 0, 0, 0));
 
         timeText = new SimpleTextView(context);
         timeText.setTextColor(Color.WHITE);
@@ -266,6 +266,25 @@ public class SvipeVideoControls extends FrameLayout {
         v.setImageResource(icon);
         v.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
         v.setBackground(Theme.createSelectorDrawable(0x30ffffff, Theme.RIPPLE_MASK_CIRCLE_20DP));
+        v.setContentDescription(LocaleController.getString(contentDescription));
+        v.setOnClickListener(onClick);
+        return v;
+    }
+
+    /**
+     * A step button wears the same coin as play/pause: the three of them are one row of controls, and
+     * a bare glyph beside two circles reads as a different kind of thing. Padded rather than resized —
+     * the icon is a 36dp vector and the play triangle is 28, so it is the PADDING that makes them the
+     * same size on screen.
+     */
+    private ImageView circleButton(Context context, int icon, int contentDescription, OnClickListener onClick) {
+        final ImageView v = new ImageView(context);
+        v.setBackground(Theme.createCircleDrawable(AndroidUtilities.dp(60), 0x66000000));
+        v.setImageResource(icon);
+        v.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
+        v.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        final int pad = AndroidUtilities.dp(17);
+        v.setPadding(pad, pad, pad, pad);
         v.setContentDescription(LocaleController.getString(contentDescription));
         v.setOnClickListener(onClick);
         return v;
