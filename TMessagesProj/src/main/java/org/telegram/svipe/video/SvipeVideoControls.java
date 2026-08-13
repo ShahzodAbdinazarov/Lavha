@@ -481,6 +481,17 @@ public class SvipeVideoControls extends FrameLayout {
     }
 
     /**
+     * Hide the centre play/pause while the picture is loading.
+     *
+     * <p>The spinner sits where that button sits — one is "waiting", the other is "press me", and
+     * drawn on top of each other they are neither. Telegram's own player swaps them the same way.
+     * The step buttons stay: skipping past something that will not load is a reasonable thing to do.
+     */
+    public void setLoading(boolean loading) {
+        playButton.setVisibility(loading ? INVISIBLE : VISIBLE);
+    }
+
+    /**
      * Whether stepping back is possible right now — the head of a run has nothing behind it, and a
      * button that looks pressable and does nothing is worse than one that says it cannot.
      */

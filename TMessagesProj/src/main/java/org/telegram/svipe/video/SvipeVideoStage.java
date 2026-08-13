@@ -309,6 +309,7 @@ public class SvipeVideoStage extends FrameLayout {
             return;
         }
         buffering.setVisibility(on ? VISIBLE : GONE);
+        controls.setLoading(on);
     }
 
     public void showError(Runnable retry) {
