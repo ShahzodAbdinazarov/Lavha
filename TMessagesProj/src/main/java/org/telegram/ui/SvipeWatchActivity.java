@@ -1780,19 +1780,17 @@ public class SvipeWatchActivity extends BaseFragment {
         private final TextView position;
         private final ImageView chevron;
         private final ImageView shareIcon;
+        private final LinearLayout block;
 
         PlaylistBarView(Context context) {
             super(context);
             setPadding(dp(12), dp(6), dp(12), dp(6));
 
-            LinearLayout block = new LinearLayout(context);
+            block = new LinearLayout(context);
             block.setOrientation(LinearLayout.HORIZONTAL);
             block.setGravity(Gravity.CENTER_VERTICAL);
             block.setPadding(dp(14), dp(10), dp(6), dp(10));
-            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-            bg.setColor(Theme.getColor(Theme.key_windowBackgroundGray));
-            bg.setCornerRadius(dp(12));
-            block.setBackground(bg);
+            block.setBackground(panelBackground(true, false));
             addView(block, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
             LinearLayout texts = new LinearLayout(context);
@@ -1840,10 +1838,30 @@ public class SvipeWatchActivity extends BaseFragment {
             title.setText(playlist.series.title);
             position.setText(LocaleController.formatString(R.string.SvipePlaylistPosition,
                     Math.max(playlistIndex, 0) + 1, playlistRows.size()));
+            // Open, the header is the TOP of one block that the episodes sit inside: square bottom
+            // corners, no gap underneath. Closed, it is a card on its own again. The episodes used to
+            // float on the page background below a rounded header, which read as two unrelated things.
+            block.setBackground(panelBackground(true, !playlistExpanded));
+            setPadding(dp(12), dp(6), dp(12), playlistExpanded ? 0 : dp(6));
             chevron.setRotation(playlistExpanded ? 180f : 0f);
             shareIcon.setVisibility(
                     playlist.shareUrl != null && !playlist.shareUrl.isEmpty() ? VISIBLE : GONE);
         }
+    }
+
+    /**
+     * The playlist block's background: the bar and the episode list are ONE tinted card, so the
+     * rounding lives on the outside of the pair — top corners on the header, bottom corners on the
+     * list, and nothing in the seam between them.
+     */
+    private android.graphics.drawable.Drawable panelBackground(boolean top, boolean bottom) {
+        final float r = dp(12);
+        final float t = top ? r : 0f;
+        final float b = bottom ? r : 0f;
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(Theme.getColor(Theme.key_windowBackgroundGray));
+        bg.setCornerRadii(new float[]{t, t, t, t, b, b, b, b});
+        return bg;
     }
 
     private void togglePlaylist() {
@@ -1895,12 +1913,23 @@ public class SvipeWatchActivity extends BaseFragment {
 
         PlaylistPanelView(Context context) {
             super(context);
+            // The same 12dp inset the bar uses, so the two are one card and not two.
+            setPadding(dp(12), 0, dp(12), dp(6));
             list = new RecyclerListView(context);
             manager = new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false);
             list.setLayoutManager(manager);
             episodeAdapter = new EpisodeAdapter();
             list.setAdapter(episodeAdapter);
             list.setOnItemClickListener((view, position) -> playEpisode(position));
+            list.setBackground(panelBackground(false, true));
+            // Rounded corners are only rounded if what is inside them is clipped to the shape.
+            list.setClipToOutline(true);
+            list.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, android.graphics.Outline outline) {
+                    outline.setRoundRect(0, -dp(12), view.getWidth(), view.getHeight(), dp(12));
+                }
+            });
             addView(list, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         }
 
@@ -1938,7 +1967,7 @@ public class SvipeWatchActivity extends BaseFragment {
             final int rows = Math.max(1, playlistRows.size());
             final float shown = Math.min(rows, VISIBLE_ROWS);
             super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(
-                    Math.round(dp(ROW_HEIGHT_DP) * shown), MeasureSpec.EXACTLY));
+                    Math.round(dp(ROW_HEIGHT_DP) * shown) + getPaddingBottom(), MeasureSpec.EXACTLY));
         }
 
         void bind() {
@@ -2000,7 +2029,7 @@ public class SvipeWatchActivity extends BaseFragment {
 
         EpisodeCell(Context context) {
             super(context);
-            setPadding(dp(12), dp(4), dp(12), dp(4));
+            setPadding(dp(8), dp(4), dp(8), dp(4));
 
             index = new TextView(context);
             index.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
