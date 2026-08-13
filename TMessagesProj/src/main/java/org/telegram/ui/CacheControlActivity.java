@@ -151,7 +151,9 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
     private LinearLayoutManager layoutManager;
     AlertDialog progressDialog;
 
-    private boolean[] selected = new boolean[] { true, true, true, true, true, true, true, true, true, true, true };
+    // One flag per section, plus one for the collapsed "Other" group. Index 10 is Svipe's own
+    // storage (SvipeStorage) and 11 is that group — grown from 11 to 12 when Svipe's row was added.
+    private boolean[] selected = new boolean[] { true, true, true, true, true, true, true, true, true, true, true, true };
     private long databaseSize = -1;
     private long cacheSize = -1, cacheEmojiSize = -1, cacheTempSize = -1;
     private long documentsSize = -1;
@@ -162,6 +164,9 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
     private long videoSize = -1;
     private long logsSize = -1;
     private long stickersCacheSize = -1;
+    // Svipe's own directories — the ones outside ImageLoader's media paths, which nothing on this
+    // screen could see before (SvipeStorage explains which, and which one is deliberately not here).
+    private long svipeSize = -1;
     private long totalSize = -1;
     private long totalDeviceSize = -1;
     private long totalDeviceFreeSize = -1;
@@ -253,7 +258,9 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
             if (!BuildVars.DEBUG_VERSION && logsSize < 1024 * 1024 * 256) {
                 logsSize = 0;
             }
-            final long totalSize = lastTotalSizeCalculated = cacheSize + cacheTempSize + videoSize + audioSize + photoSize + documentsSize + musicSize + stickersCacheSize + storiesSize + logsSize;
+            // Same set as the screen itself, Svipe's directories included — the summary row and the
+            // screen it opens must not disagree about how much is on the disk.
+            final long totalSize = lastTotalSizeCalculated = cacheSize + cacheTempSize + videoSize + audioSize + photoSize + documentsSize + musicSize + stickersCacheSize + storiesSize + logsSize + org.telegram.svipe.SvipeStorage.size();
             lastTotalSizeCalculatedTime = System.currentTimeMillis();
             if (!canceled) {
                 AndroidUtilities.runOnUIThread(() -> {
@@ -366,7 +373,8 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
             if (canceled) {
                 return;
             }
-            totalSize = lastTotalSizeCalculated = cacheSize + cacheTempSize + videoSize + logsSize + audioSize + photoSize + documentsSize + musicSize + storiesSize + stickersCacheSize;
+            svipeSize = org.telegram.svipe.SvipeStorage.size();
+            totalSize = lastTotalSizeCalculated = cacheSize + cacheTempSize + videoSize + logsSize + audioSize + photoSize + documentsSize + musicSize + storiesSize + stickersCacheSize + svipeSize;
             lastTotalSizeCalculatedTime = System.currentTimeMillis();
 
             File path;
@@ -413,13 +421,13 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
     private void updateChart() {
         if (cacheChart != null) {
             if (!calculating && totalSize > 0) {
-                CacheChart.SegmentSize[] segments = new CacheChart.SegmentSize[11];
+                CacheChart.SegmentSize[] segments = new CacheChart.SegmentSize[12];
                 for (int i = 0; i < itemInners.size(); ++i) {
                     ItemInner item = itemInners.get(i);
                     if (item.viewType == VIEW_TYPE_SECTION) {
                         if (item.index < 0) {
                             if (collapsed) {
-                                segments[10] = CacheChart.SegmentSize.of(item.size, selected[10]);
+                                segments[11] = CacheChart.SegmentSize.of(item.size, selected[11]);
                             }
                         } else {
                             segments[item.index] = CacheChart.SegmentSize.of(item.size, selected[item.index]);
@@ -708,19 +716,22 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
             if (logsSize > 0) {
                 sections.add(ItemInner.asCheckBox(LocaleController.getString(R.string.LocalLogsCache), 9, logsSize, Theme.key_statisticChartLine_golden));
             }
+            if (svipeSize > 0) {
+                sections.add(ItemInner.asCheckBox(LocaleController.getString(R.string.SvipeLocalCache), 10, svipeSize, Theme.key_statisticChartLine_indigo));
+            }
             if (!sections.isEmpty()) {
                 Collections.sort(sections, (a, b) -> Long.compare(b.size, a.size));
                 sections.get(sections.size() - 1).last = true;
                 hasCache = true;
 
                 if (tempSizes == null) {
-                    tempSizes = new float[11];
+                    tempSizes = new float[12];
                 }
                 for (int i = 0; i < tempSizes.length; ++i) {
                     tempSizes[i] = (float) size(i);
                 }
                 if (percents == null) {
-                    percents = new int[11];
+                    percents = new int[12];
                 }
                 AndroidUtilities.roundPercents(tempSizes, percents);
 
@@ -734,7 +745,7 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
                         sum += sections.get(i).size;
                         sumPercents += percents[sections.get(i).index];
                     }
-                    percents[10] = sumPercents;
+                    percents[11] = sumPercents;
                     itemInners.add(ItemInner.asCheckBox(LocaleController.getString(R.string.LocalOther), -1, sum, Theme.key_statisticChartLine_golden));
                     if (!collapsed) {
                         itemInners.addAll(sections.subList(MAX_NOT_COLLAPSED, sections.size()));
@@ -942,7 +953,7 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
         long clearedSize = 0;
         boolean allItemsClear = true;
         final int[] clearDirI = new int[] { 0 };
-        int clearDirCount = (selected[0] ? 2 : 0) + (selected[1] ? 2 : 0) + (selected[2] ? 2 : 0) + (selected[3] ? 2 : 0) + (selected[4] ? 1 : 0) + (selected[5] ? 2 : 0) + (selected[6] ? 1 : 0) + (selected[7] ? 1 : 0) + (selected[8] ? 1 : 0) + (selected[9] ? 1 : 0);
+        int clearDirCount = (selected[0] ? 2 : 0) + (selected[1] ? 2 : 0) + (selected[2] ? 2 : 0) + (selected[3] ? 2 : 0) + (selected[4] ? 1 : 0) + (selected[5] ? 2 : 0) + (selected[6] ? 1 : 0) + (selected[7] ? 1 : 0) + (selected[8] ? 1 : 0) + (selected[9] ? 1 : 0) + (selected[10] ? 1 : 0);
         long time = System.currentTimeMillis();
         Utilities.Callback<Float> updateProgress = t -> {
             onProgress.run(clearDirI[0] / (float) clearDirCount + (1f / clearDirCount) * MathUtils.clamp(t, 0, 1), false);
@@ -951,9 +962,19 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
             final long now = System.currentTimeMillis();
             onProgress.run(clearDirI[0] / (float) clearDirCount, now - time > 250);
         };
-        for (int a = 0; a < 10; a++) {
+        for (int a = 0; a < 11; a++) {
             if (!selected[a]) {
                 allItemsClear = false;
+                continue;
+            }
+            if (a == 10) {
+                // Svipe's own directories. Not addressed by a FileLoader MEDIA_DIR_* type, because
+                // FileLoader does not know about them — that is the whole reason this row exists.
+                clearedSize += svipeSize;
+                org.telegram.svipe.SvipeStorage.clear();
+                svipeSize = org.telegram.svipe.SvipeStorage.size();
+                clearDirI[0]++;
+                next.run();
                 continue;
             }
             int type = -1;
@@ -1082,7 +1103,7 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
             }
         }
         final boolean imagesClearedFinal = imagesCleared;
-        totalSize = lastTotalSizeCalculated = cacheSize + cacheTempSize + logsSize + videoSize + audioSize + photoSize + documentsSize + musicSize + stickersCacheSize + storiesSize;
+        totalSize = lastTotalSizeCalculated = cacheSize + cacheTempSize + logsSize + videoSize + audioSize + photoSize + documentsSize + musicSize + stickersCacheSize + storiesSize + svipeSize;
         lastTotalSizeCalculatedTime = System.currentTimeMillis();
         Arrays.fill(selected, true);
 
@@ -1161,13 +1182,14 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
             case 7: return cacheSize;
             case 8: return cacheTempSize;
             case 9: return logsSize;
+            case 10: return svipeSize;
             default: return 0;
         }
     }
 
     private int sectionsSelected() {
         int count = 0;
-        for (int i = 0; i < 10; ++i) {
+        for (int i = 0; i < 11; ++i) {
             if (selected[i] && size(i) > 0) {
                 count++;
             }
@@ -2018,7 +2040,8 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
                 (selected[6] ? stickersCacheSize : 0) +
                 (selected[7] ? cacheSize : 0) +
                 (selected[8] ? cacheTempSize : 0) +
-                (selected[9] ? logsSize : 0)
+                (selected[9] ? logsSize : 0) +
+                (selected[10] ? svipeSize : 0)
             );
             setSize(
                 isAllSectionsSelected(),
@@ -2541,7 +2564,7 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
                     } else {
                         selected = CacheControlActivity.this.selected[item.index];
                     }
-                    cell.setText(getCheckBoxTitle(item.headerName, percents[item.index < 0 ? 9 : item.index], item.index < 0), AndroidUtilities.formatFileSize(item.size), selected, item.index < 0 ? !collapsed : !item.last);
+                    cell.setText(getCheckBoxTitle(item.headerName, percents[item.index < 0 ? 11 : item.index], item.index < 0), AndroidUtilities.formatFileSize(item.size), selected, item.index < 0 ? !collapsed : !item.last);
                     cell.setCheckBoxColor(item.colorKey, Theme.key_windowBackgroundWhiteGrayIcon, Theme.key_checkboxCheck);
                     cell.setCollapsed(item.index < 0 ? collapsed : null);
                     if (item.index == -1) {

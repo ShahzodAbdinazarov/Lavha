@@ -139,6 +139,11 @@ public class AutoDeleteMediaTask {
                 }
             //}
 
+            // Svipe keeps bytes in directories FileLoader never created, so they are not in `paths`
+            // and nothing above has looked at them. They obey the same age limit as everything else
+            // — see SvipeStorage, which owns the list and explains what it deliberately leaves out.
+            org.telegram.svipe.SvipeStorage.enforceKeepMedia(time);
+
             int maxCacheGb = SharedConfig.getPreferences().getInt("cache_limit", Integer.MAX_VALUE);
             if (maxCacheGb != Integer.MAX_VALUE) {
                 long maxCacheSize;
@@ -151,10 +156,16 @@ public class AutoDeleteMediaTask {
                 for (int a = 0; a < paths.size(); a++) {
                     totalSize += Utilities.getDirSize(paths.valueAt(a).getAbsolutePath(), 0, true);
                 }
+                // Counted toward the same budget: a cache limit that ignored half of what the app
+                // stores would be a number the user cannot act on.
+                totalSize += org.telegram.svipe.SvipeStorage.size();
                 if (totalSize > maxCacheSize) {
                     ArrayList<FileInfoInternal> allFiles = new ArrayList<>();
                     for (int a = 0; a < paths.size(); a++) {
                         File dir = paths.valueAt(a);
+                        fillFilesRecursive(dir, allFiles);
+                    }
+                    for (File dir : org.telegram.svipe.SvipeStorage.dirs()) {
                         fillFilesRecursive(dir, allFiles);
                     }
                     for (int i = 0; i < cacheByChatsControllers.size(); i++) {

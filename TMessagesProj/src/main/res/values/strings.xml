@@ -11454,4 +11454,5 @@
     <string name="SvipeSeriesEpisodesCount_other">%1$d episodes</string>
     <string name="SvipeSeriesSeasonsCount_one">%1$d season</string>
     <string name="SvipeSeriesSeasonsCount_other">%1$d seasons</string>
+    <string name="SvipeLocalCache">Svipe cache</string>
 </resources>

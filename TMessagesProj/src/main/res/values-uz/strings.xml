@@ -290,4 +290,5 @@
     <string name="SvipeSeriesEpisodesCount_other">%1$d ta qism</string>
     <string name="SvipeSeriesSeasonsCount_one">%1$d ta fasl</string>
     <string name="SvipeSeriesSeasonsCount_other">%1$d ta fasl</string>
+    <string name="SvipeLocalCache">Svipe keshi</string>
 </resources>

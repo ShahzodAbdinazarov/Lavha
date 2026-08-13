@@ -563,4 +563,5 @@
     <string name="SvipeSeriesSeasonsCount_few">%1$d сезона</string>
     <string name="SvipeSeriesSeasonsCount_many">%1$d сезонов</string>
     <string name="SvipeSeriesSeasonsCount_other">%1$d сезонов</string>
+    <string name="SvipeLocalCache">Кеш Svipe</string>
 </resources>

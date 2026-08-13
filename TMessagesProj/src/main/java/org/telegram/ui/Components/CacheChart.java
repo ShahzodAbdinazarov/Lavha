@@ -45,7 +45,10 @@ public class CacheChart extends View {
     private RectF chartBounds = new RectF();
     private RectF chartInnerBounds = new RectF();
 
-    private static final int DEFAULT_SECTIONS_COUNT = 11;
+    // 10 Telegram categories, then Svipe's own storage, then the collapsed "Other" group. The
+    // count and both tables below are indexed by CacheControlActivity's section index, so all three
+    // grow together — a short table here is an ArrayIndexOutOfBounds on the chart, not a missing slice.
+    private static final int DEFAULT_SECTIONS_COUNT = 12;
     private static final int[] DEFAULT_COLORS = new int[] {
         Theme.key_statisticChartLine_lightblue,
         Theme.key_statisticChartLine_blue,
@@ -57,6 +60,7 @@ public class CacheChart extends View {
         Theme.key_statisticChartLine_cyan,
         Theme.key_statisticChartLine_purple,
         Theme.key_statisticChartLine_golden,
+        Theme.key_statisticChartLine_indigo,
         Theme.key_statisticChartLine_golden
     };
 
@@ -71,6 +75,7 @@ public class CacheChart extends View {
         R.raw.cache_profile_photos,
         R.raw.cache_other,
         R.raw.cache_other,
+        R.raw.cache_videos,
         R.raw.cache_documents
     };
 

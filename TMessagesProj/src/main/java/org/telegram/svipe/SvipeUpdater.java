@@ -439,10 +439,8 @@ public class SvipeUpdater {
             String error = null;
             HttpURLConnection conn = null;
             try {
-                Context appCtx = ApplicationLoader.applicationContext;
-                File base = appCtx.getExternalFilesDir(null);
-                if (base == null) base = appCtx.getFilesDir(); // external storage unavailable -> internal
-                File dir = new File(base, "updates");
+                File dir = updatesDir();
+                if (dir == null) throw new Exception("no storage for updates");
                 if (!dir.exists()) dir.mkdirs();
                 out = new File(dir, SvipeUpdateFiles.fileName(u.versionCode)); // same name beginDownload published
                 if (out.exists()) out.delete();
@@ -784,19 +782,45 @@ public class SvipeUpdater {
         }
     }
 
+    /**
+     * Where downloaded APKs live. One resolution, used by the download, the sweep and the Storage
+     * Usage screen — three copies of this fallback is how a "cleared" directory keeps its files.
+     */
+    public static File updatesDir() {
+        Context ctx = ApplicationLoader.applicationContext;
+        if (ctx == null) return null;
+        try {
+            File base = ctx.getExternalFilesDir(null);
+            if (base == null) base = ctx.getFilesDir(); // external storage unavailable -> internal
+            return base == null ? null : new File(base, "updates");
+        } catch (SecurityException e) {
+            FileLog.e(e); // storage revoked/unavailable: nothing we can do, and nothing breaks
+            return null;
+        }
+    }
+
+    /**
+     * Empty the update cache on the user's word — Storage Usage's Clear All (see SvipeStorage).
+     *
+     * <p>Retiring the pending APK first is what makes this safe AND complete: clearPending() forgets
+     * the persisted file (so the app never offers to install something that is no longer there) and
+     * deletes it, and the sweep it triggers drains everything else the directory still holds. A
+     * download in flight is protected by that sweep's own lock, not by anything here.
+     */
+    public static void clearDownloadedApks() {
+        try {
+            clearPending();
+            cleanupOldApks();
+        } catch (Throwable t) {
+            FileLog.e(t);
+        }
+    }
+
     /** Blocking sweep of the updates directory. Call off the UI thread. */
     private static void cleanupOldApks() {
         Context ctx = ApplicationLoader.applicationContext;
         if (ctx == null) return;
-        File dir = null;
-        try {
-            File base = ctx.getExternalFilesDir(null);
-            if (base == null) base = ctx.getFilesDir(); // mirrors startDownload's fallback
-            if (base != null) dir = new File(base, "updates");
-        } catch (SecurityException e) {
-            FileLog.e(e); // storage revoked/unavailable: nothing we can do, and nothing breaks
-            return;
-        }
+        File dir = updatesDir();
         if (dir == null || !dir.isDirectory()) return;
 
         String[] names;
