@@ -21,6 +21,7 @@ import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
 import org.telegram.svipe.SvipeConfig;
 import org.telegram.svipe.SvipeDiscover;
+import org.telegram.svipe.SvipeMovies;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.Components.VideoPlayer;
 import org.telegram.ui.LaunchActivity;
@@ -137,6 +138,15 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
     }
     /** What to re-present when the mini bar is dragged back up. Outlives the page. */
     private SvipeDiscover.Item restoreItem;
+    /**
+     * The show the minimised page was inside, and where in it — restored WITH the video.
+     *
+     * <p>Without these the restore built a bare watch page: the playlist panel vanished, the position
+     * counter went with it, and autoplay fell off the running order onto the related pipe. The page
+     * looked like the same video and behaved like a different one.
+     */
+    private SvipeMovies.SeriesPage restoreSeries;
+    private int restoreSeriesIndex = -1;
 
     /**
      * The activity's orientation request before we asked for landscape, and
@@ -413,6 +423,8 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
         final SvipeWatchActivity page = watchPage;
         watchPage = null;
         restoreItem = null;
+        restoreSeries = null;
+        restoreSeriesIndex = -1;
         if (page != null && stage != null && mode != MODE_CLOSED && mode != MODE_MINI) {
             // Leave the way the page leaves: the picture slides out to the right with it. Releasing
             // the player first would blink the video away and then slide an empty page, which is the
@@ -486,8 +498,16 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
         // page would resolve nothing, put up the error and seed the related endpoint with ids that
         // must never leave the device. We are still holding its message, so the page is re-seeded.
         final SvipeRefResolver.VideoRef playing = current;
-        activity.presentFragment(item.local && playing != null && playing.mo != null
-                ? SvipeWatchActivity.seeded(item, playing.mo, playing.chat, true)
+        final MessageObject mo = playing != null ? playing.mo : null;
+        if (restoreSeries != null) {
+            // Inside a show: the run order comes back with the picture, panel and all.
+            activity.presentFragment(SvipeWatchActivity.restored(
+                    item, mo, playing != null ? playing.chat : null, item.local,
+                    restoreSeries, restoreSeriesIndex));
+            return;
+        }
+        activity.presentFragment(item.local && mo != null
+                ? SvipeWatchActivity.seeded(item, mo, playing.chat, true)
                 : new SvipeWatchActivity(item));
     }
 
@@ -1172,6 +1192,67 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
         return watchPage != null && upNext != null ? watchPage.relatedMessage(upNext) : null;
     }
 
+    /**
+     * The chrome's ⏭. Unlike autoplay this is a decision the user just made, so it never waits and it
+     * never gives up: the show's next episode, else the first related video that has not been played,
+     * else the first related video at all. YouTube's next button is never dead, and neither is this.
+     */
+    public void playNext() {
+        cancelUpNext();
+        if (watchPage != null && watchPage.playPlaylistStep(1)) {
+            return;
+        }
+        SvipeDiscover.Item next = pickUpNext();
+        if (next == null) {
+            next = firstRelated();
+        }
+        if (next == null) {
+            return;
+        }
+        autoplayedKeys.add(keyOf(next));
+        if (watchPage != null) {
+            watchPage.openItem(next);
+        } else {
+            final SvipeRefResolver.VideoRef ref = SvipeRefResolver.VideoRef.of(next);
+            ref.recId = next.recId;
+            open(ref, null);
+        }
+    }
+
+    /**
+     * The chrome's ⏮ — the previous episode of the show, and nothing else.
+     *
+     * <p>Outside a run order there is no "previous video": the related pipe is a forward-only
+     * recommendation, and the video the user came from is what BACK is for. So the button is simply
+     * disabled there, exactly as it is on the first episode ({@link #canPlayPrevious()}).
+     */
+    public void playPrevious() {
+        if (watchPage == null) {
+            return;
+        }
+        cancelUpNext();
+        watchPage.playPlaylistStep(-1);
+    }
+
+    public boolean canPlayPrevious() {
+        return watchPage != null && watchPage.canPlayPlaylistStep(-1);
+    }
+
+    /** The first related reference that is not the video playing, ignoring what autoplay has used. */
+    private SvipeDiscover.Item firstRelated() {
+        syncRelatedSnapshot();
+        for (int i = 0; i < relatedSnapshot.size(); i++) {
+            final SvipeDiscover.Item item = relatedSnapshot.get(i);
+            if (item == null) continue;
+            if (current != null && item.channelId == current.channelId
+                    && item.messageId == current.messageId) {
+                continue;
+            }
+            return item;
+        }
+        return null;
+    }
+
     /** Skip the rest of the countdown. Also the panel's tap target. */
     public void playUpNextNow() {
         final SvipeDiscover.Item next = upNext;
@@ -1234,6 +1315,8 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
             handingOverToNewPage = false;
             watchPage = page;
             restoreItem = page.getWatchItem();
+            restoreSeries = page.getPlaylist();
+            restoreSeriesIndex = page.getPlaylistIndex();
             final SvipeRefResolver.VideoRef ref = SvipeRefResolver.VideoRef.of(page.getWatchItem());
             ref.mo = page.getWatchMessage();
             ref.chat = page.getWatchChat();
@@ -1509,6 +1592,8 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
         if (destroyedStage != null && stage != destroyedStage) return;
         watchPage = null;   // the fragment stack is being torn down; finishing a fragment here is not
         restoreItem = null;
+        restoreSeries = null;
+        restoreSeriesIndex = -1;
         closePlayback();
         stage = null;
     }

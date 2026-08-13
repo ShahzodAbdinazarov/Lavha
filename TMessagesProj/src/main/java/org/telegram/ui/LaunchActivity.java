@@ -1896,6 +1896,13 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                 } else if (Intent.ACTION_VIEW.equals(intent.getAction())) {
                     Uri data = intent.getData();
 
+                    // A svipe.uz link belongs to US before it belongs to any Telegram parser: it is our
+                    // own domain, and on a device with Svipe installed the video it names should play
+                    // here rather than in a web page whose whole purpose is offering the app.
+                    if (org.telegram.svipe.SvipeShareLink.handle(intentAccount[0], data)) {
+                        return true;
+                    }
+
                     final LinkManager linkManager = new LinkManager(this, intentAccount[0], progress, openedTelegram);
                     if (linkManager.handle(data)) {
                         if (intent.hasExtra(EXTRA_ACTION_TOKEN)) {

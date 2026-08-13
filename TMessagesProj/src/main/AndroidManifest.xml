@@ -267,6 +267,21 @@
                 <data android:host="t.me" android:scheme="http" />
                 <data android:host="t.me" android:scheme="https" />
             </intent-filter>
+            <!--
+              Svipe's own domain. Every share we send out is a svipe.uz/<code> page that exists to sell
+              the app to somebody who does not have it; on a device that already does, the tap has to
+              land in the app instead. autoVerify pairs with /.well-known/assetlinks.json, which the
+              backend serves (app/api/share.py) — without a verified statement there Android 12+ hides
+              the app as a handler entirely, so the two must be deployed together.
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:host="svipe.uz" android:scheme="https" />
+                <data android:host="www.svipe.uz" android:scheme="https" />
+                <data android:host="lavha-dev.abdinazarov.uz" android:scheme="https" />
+            </intent-filter>
             <intent-filter android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:priority="1">
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT" />

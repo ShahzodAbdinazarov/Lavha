@@ -78,6 +78,13 @@ public class SvipeVideoControls extends FrameLayout {
 
     private final ImageView playButton;
     private final PlayPauseDrawable playDrawable = new PlayPauseDrawable(28);
+    /**
+     * The step buttons flanking play, YouTube's way round: previous is DISABLED at the head of a run
+     * (there is nothing behind the first episode), next never is — at the end of a show it hands over
+     * to the first related video, so the evening keeps going.
+     */
+    private final ImageView prevButton;
+    private final ImageView nextButton;
     private final ImageView fullscreenButton;
     private final ImageView menuButton;
     private final AutoplaySwitch autoplaySwitch;
@@ -154,6 +161,17 @@ public class SvipeVideoControls extends FrameLayout {
         playButton.setContentDescription(LocaleController.getString(R.string.AccActionPlay));
         playButton.setOnClickListener(v -> togglePlayPause());
         mainChrome.addView(playButton, LayoutHelper.createFrame(60, 60, Gravity.CENTER));
+
+        prevButton = iconButton(context, R.drawable.ic_action_previous, R.string.AccDescrPrevious, v -> {
+            SvipeVideoPlayerController.getInstance().playPrevious();
+            scheduleHide();
+        });
+        mainChrome.addView(prevButton, LayoutHelper.createFrame(44, 44, Gravity.CENTER, 0, 0, 140, 0));
+        nextButton = iconButton(context, R.drawable.ic_action_next, R.string.Next, v -> {
+            SvipeVideoPlayerController.getInstance().playNext();
+            scheduleHide();
+        });
+        mainChrome.addView(nextButton, LayoutHelper.createFrame(44, 44, Gravity.CENTER, 140, 0, 0, 0));
 
         timeText = new SimpleTextView(context);
         timeText.setTextColor(Color.WHITE);
@@ -420,6 +438,7 @@ public class SvipeVideoControls extends FrameLayout {
         } else {
             startTicking();
             scheduleHide();
+            updateSkipButtons();
         }
     }
 
@@ -442,11 +461,22 @@ public class SvipeVideoControls extends FrameLayout {
         }
     }
 
+    /**
+     * Whether stepping back is possible right now — the head of a run has nothing behind it, and a
+     * button that looks pressable and does nothing is worse than one that says it cannot.
+     */
+    public void updateSkipButtons() {
+        final boolean canPrev = SvipeVideoPlayerController.getInstance().canPlayPrevious();
+        prevButton.setEnabled(canPrev);
+        prevButton.setAlpha(canPrev ? 1f : 0.35f);
+    }
+
     /** The video changed (open, or an in-place swap to a related one) — reset the progress line. */
     public void setVideo(MessageObject mo, TLRPC.Chat chat) {
         seekBar.setProgress(0f);
         seekBar.setBufferedProgress(0f);
         updateProgress();
+        updateSkipButtons();
         if (mode != SvipeVideoPlayerController.MODE_MINI) {
             // A related tap or an autoplay advance swaps the video without changing the mode, so nothing
             // else re-arms the chrome: show it briefly for the new video (and restart the progress tick

@@ -317,6 +317,8 @@ public final class SvipeMovies {
         public int episode;       // 0 when the caption never said
         public int durationMs;
         public String title;
+        /** {@code svipe.uz/<code>} for THIS episode — see {@link SeriesPage#shareUrl} for the show's. */
+        public String shareUrl;
 
         /** The list position as a human reads it: "S2 · 7-qism", or a plain index when unnumbered. */
         public String label(int index) {
@@ -342,6 +344,7 @@ public final class SvipeMovies {
             r.width = 16;
             r.height = 9;
             r.durationMs = durationMs;
+            r.shareUrl = shareUrl;
             return r;
         }
     }
@@ -588,6 +591,7 @@ public final class SvipeMovies {
                 e.episode = o.isNull("episode") ? 0 : o.optInt("episode");
                 e.durationMs = o.optInt("duration_ms");
                 e.title = o.isNull("title") ? null : o.optString("title", null);
+                e.shareUrl = o.isNull("share_url") ? null : o.optString("share_url", null);
                 if (e.messageId != 0) page.episodes.add(e);
             }
             cb.onResult(page, null);

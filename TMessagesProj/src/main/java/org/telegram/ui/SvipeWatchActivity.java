@@ -138,9 +138,17 @@ public class SvipeWatchActivity extends BaseFragment {
     private static final int TYPE_VERSION = 10;
     /** A selected tab with nothing in it — a film whose cast never matched, most often. */
     private static final int TYPE_TAB_EMPTY = 11;
-    /** The playlist panel: a header that folds, then one row per episode. */
+    /**
+     * The playlist panel: a header that folds, then ONE row holding a bounded, self-scrolling list of
+     * episodes.
+     *
+     * <p>The episodes used to be rows of this page — ninety of them for a long show — so the episode
+     * playing sat wherever it happened to sit and finding it meant scrolling the whole page. A bounded
+     * panel is what YouTube shows and what the owner asked for: the episode playing is always under
+     * the thumb, with the one before it above and as many as fit below.
+     */
     private static final int TYPE_PLAYLIST_BAR = 12;
-    private static final int TYPE_PLAYLIST_ITEM = 13;
+    private static final int TYPE_PLAYLIST_PANEL = 13;
 
     private static final int TAB_RELATED = 0;
     private static final int TAB_ACTORS = 1;
@@ -209,7 +217,8 @@ public class SvipeWatchActivity extends BaseFragment {
     private int playlistIndex = -1;
     /** Open on arrival, the way YouTube shows the playlist you came in through. */
     private boolean playlistExpanded = true;
-    private int firstPlaylistRow = -1;
+    /** Which episode the panel is currently parked on, so a rebind cannot yank a browsing user back. */
+    private int playlistParkedFor = Integer.MIN_VALUE;
     /** channelId:messageId of everything already on this page, so a related page cannot repeat it. */
     private final HashSet<String> shownKeys = new HashSet<>();
     // username (lowercase) -> resolved chat, so a channel is resolved once across related pages.
@@ -259,6 +268,47 @@ public class SvipeWatchActivity extends BaseFragment {
             ref.local = local;   // on the REFERENCE, so a mini-bar restore cannot lose it
         }
         return new SvipeWatchActivity(ref, mo, chat);
+    }
+
+    /**
+     * The same page, rebuilt after the mini bar was dragged back up.
+     *
+     * <p>Everything the mini bar remembers has to come back with it, and the playlist is part of that:
+     * a restore that dropped it left the user inside a show with no show around them — the panel gone,
+     * autoplay off the running order, and the next episode replaced by whatever the related pipe
+     * happened to like. {@code index} may be -1: the user tapped a related video while inside a show,
+     * and the panel is still theirs to go back to even though nothing in it is playing.
+     */
+    public static SvipeWatchActivity restored(SvipeDiscover.Item ref, MessageObject mo, TLRPC.Chat chat,
+                                              boolean local, SvipeMovies.SeriesPage page, int index) {
+        SvipeWatchActivity fragment = local || mo != null
+                ? seeded(ref, mo, chat, local)
+                : new SvipeWatchActivity(ref);
+        fragment.attachPlaylist(page, index);
+        return fragment;
+    }
+
+    /** Hang a run order on this page without touching what it is playing. */
+    private void attachPlaylist(SvipeMovies.SeriesPage page, int index) {
+        if (page == null || page.isEmpty()) {
+            return;
+        }
+        playlist = page;
+        playlistIndex = index >= 0 && index < page.episodes.size() ? index : -1;
+        playlistRows.clear();
+        for (SvipeMovies.Episode e : page.episodes) {
+            playlistRows.add(new Row(e.asItem()));
+        }
+    }
+
+    /** The show this page is inside, or null. Read by the player so a restore can put it back. */
+    public SvipeMovies.SeriesPage getPlaylist() {
+        return playlist;
+    }
+
+    /** Where in the run order the page is, or -1 when it has wandered off it. */
+    public int getPlaylistIndex() {
+        return playlistIndex;
     }
 
     /**
@@ -550,10 +600,6 @@ public class SvipeWatchActivity extends BaseFragment {
                 }
                 return;
             }
-            if (type == TYPE_PLAYLIST_ITEM) {
-                playEpisode(position - firstPlaylistRow);
-                return;
-            }
             final Row row = relatedRowAt(position);
             if (row != null) {
                 // A related video opens ON TOP of this one. Stacking rather than swapping is what
@@ -700,14 +746,10 @@ public class SvipeWatchActivity extends BaseFragment {
             rows.add(TYPE_CHANNEL);
         }
         rows.add(TYPE_ACTIONS);
-        firstPlaylistRow = -1;
         if (playlist != null && !playlist.isEmpty()) {
             rows.add(TYPE_PLAYLIST_BAR);
             if (playlistExpanded) {
-                firstPlaylistRow = rows.size();
-                for (int i = 0; i < playlistRows.size(); i++) {
-                    rows.add(TYPE_PLAYLIST_ITEM);
-                }
+                rows.add(TYPE_PLAYLIST_PANEL);
             }
         }
         if (hasCaptionBody()) {
@@ -763,6 +805,24 @@ public class SvipeWatchActivity extends BaseFragment {
         // openRow, not openItem: the playlist row may already hold its resolved message, and reusing
         // it paints the new episode's title and actions immediately instead of blanking for a round-trip.
         openRow(playlistRows.get(index));
+    }
+
+    /** Whether the run order has an episode {@code delta} steps from the one playing. */
+    public boolean canPlayPlaylistStep(int delta) {
+        final int to = playlistIndex + delta;
+        return playlist != null && playlistIndex >= 0 && to >= 0 && to < playlistRows.size();
+    }
+
+    /**
+     * Step along the run order — the player's ⏮ / ⏭ buttons. Returns false when there is nothing
+     * that way, which is how the player knows to fall through to the related pipe instead.
+     */
+    public boolean playPlaylistStep(int delta) {
+        if (!canPlayPlaylistStep(delta)) {
+            return false;
+        }
+        playEpisode(playlistIndex + delta);
+        return true;
     }
 
     /**
@@ -1432,13 +1492,67 @@ public class SvipeWatchActivity extends BaseFragment {
      */
     private void share() {
         final SvipeDiscover.Item ref = watched.ref;
+        if (getParentActivity() == null || ref == null || sharePending) {
+            return;
+        }
+        // A reference can reach this button without a share url — an episode served by an older
+        // backend, a film version, a video restored from a cold queue — and the fallback below is a
+        // t.me link, the one share that ends somewhere other than Svipe. Mint the owned link first.
+        if ((ref.shareUrl == null || ref.shareUrl.isEmpty()) && !isLocal()
+                && ref.username != null && !ref.username.isEmpty()) {
+            sharePending = true;
+            org.telegram.svipe.SvipeShareLink.mint(currentAccount, ref.channelId, ref.messageId, url -> {
+                sharePending = false;
+                if (url != null) {
+                    ref.shareUrl = url;
+                }
+                if (getParentActivity() != null) {
+                    shareNow();
+                }
+            });
+            return;
+        }
+        shareNow();
+    }
+
+    /** True while a share is waiting on a minted link, so a second tap cannot start a second one. */
+    private boolean sharePending;
+
+    /**
+     * The link this video is shared BY.
+     *
+     * <p>Inside a show it carries the show's code as {@code ?p=<code>}: the recipient then opens the
+     * episode WITH the playlist around it — panel, position, running order — instead of a loose video
+     * that happens to be episode seven of something. The context is a query parameter and not a code
+     * of its own on purpose: a video is one video with one stable link, and the same episode shared
+     * from three lists must not mint three pages.
+     *
+     * <p>A show with no share url of its own is one the server does not publish. Its episodes are then
+     * shared alone, which is what "unless the playlist is private" means in practice.
+     */
+    private String shareLink() {
+        final SvipeDiscover.Item ref = watched.ref;
+        if (ref == null) {
+            return null;
+        }
+        if (ref.shareUrl == null || ref.shareUrl.isEmpty()) {
+            return ref.username != null && !ref.username.isEmpty()
+                    ? "https://t.me/" + ref.username + "/" + ref.messageId : null;
+        }
+        final String list = playlistIndex >= 0 && playlist != null
+                ? org.telegram.svipe.SvipeShareLink.codeOf(playlist.shareUrl) : null;
+        if (list == null) {
+            return ref.shareUrl;
+        }
+        return ref.shareUrl + (ref.shareUrl.indexOf('?') >= 0 ? "&" : "?") + "p=" + list;
+    }
+
+    private void shareNow() {
+        final SvipeDiscover.Item ref = watched.ref;
         if (getParentActivity() == null || ref == null) {
             return;
         }
-        final String link = (ref.shareUrl != null && !ref.shareUrl.isEmpty())
-                ? ref.shareUrl
-                : (ref.username != null && !ref.username.isEmpty()
-                        ? "https://t.me/" + ref.username + "/" + ref.messageId : null);
+        final String link = shareLink();
         // A video opened out of the user's own chats has no public link, and the promo caption would
         // advertise a page nobody else can open. Forward the document by itself instead — refusing to
         // share was this chip silently doing nothing, which reads as a broken button. Except when the
@@ -1538,8 +1652,7 @@ public class SvipeWatchActivity extends BaseFragment {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             final int type = holder.getItemViewType();
-            return type == TYPE_RELATED || type == TYPE_ACTOR || type == TYPE_VERSION
-                    || type == TYPE_PLAYLIST_ITEM;
+            return type == TYPE_RELATED || type == TYPE_ACTOR || type == TYPE_VERSION;
         }
 
         @Override
@@ -1598,8 +1711,8 @@ public class SvipeWatchActivity extends BaseFragment {
                 case TYPE_PLAYLIST_BAR:
                     view = new PlaylistBarView(ctx);
                     break;
-                case TYPE_PLAYLIST_ITEM:
-                    view = new EpisodeCell(ctx);
+                case TYPE_PLAYLIST_PANEL:
+                    view = new PlaylistPanelView(ctx);
                     break;
                 default:
                     SvipeWideVideoCell cell = new SvipeWideVideoCell(ctx, currentAccount);
@@ -1644,14 +1757,9 @@ public class SvipeWatchActivity extends BaseFragment {
                 case TYPE_PLAYLIST_BAR:
                     ((PlaylistBarView) holder.itemView).bind();
                     break;
-                case TYPE_PLAYLIST_ITEM: {
-                    final int index = position - firstPlaylistRow;
-                    ((EpisodeCell) holder.itemView).bind(index);
-                    // Resolve what is on screen and nothing else: a show can be ninety episodes, and
-                    // resolving all of them up front is ninety getMessages nobody asked for.
-                    resolveAround(index);
+                case TYPE_PLAYLIST_PANEL:
+                    ((PlaylistPanelView) holder.itemView).bind();
                     break;
-                }
                 default:
                     break;   // spacer / header / skeleton render themselves
             }
@@ -1762,6 +1870,118 @@ public class SvipeWatchActivity extends BaseFragment {
         final String caption = getString(R.string.SvipeSharePromo) + "\n\n"
                 + link.replaceFirst("^https?://", "");
         showDialog(new ShareAlert(getParentActivity(), null, caption, false, link, false));
+    }
+
+    /**
+     * The bounded episode list — the panel itself.
+     *
+     * <p>Four and a half rows tall, scrolling INSIDE the page rather than as part of it, and parked so
+     * the episode playing sits second from the top: the previous one above it, the next ones below.
+     * That is the whole fix for "I have to scroll to find where I am" — the answer is always in the
+     * same place, one thumb-width under the player, however long the show is.
+     *
+     * <p>The half row is deliberate. A panel cut off mid-row says it scrolls; a panel that ends on a
+     * clean edge reads as the complete list, and the user never drags it.
+     */
+    private class PlaylistPanelView extends FrameLayout {
+        /** EpisodeCell: 54dp of thumbnail plus its 4dp padding, top and bottom. */
+        private static final int ROW_HEIGHT_DP = 62;
+        private static final float VISIBLE_ROWS = 4.5f;
+
+        private final RecyclerListView list;
+        private final LinearLayoutManager manager;
+        private final EpisodeAdapter episodeAdapter;
+        private float downY;
+
+        PlaylistPanelView(Context context) {
+            super(context);
+            list = new RecyclerListView(context);
+            manager = new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false);
+            list.setLayoutManager(manager);
+            episodeAdapter = new EpisodeAdapter();
+            list.setAdapter(episodeAdapter);
+            list.setOnItemClickListener((view, position) -> playEpisode(position));
+            addView(list, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        }
+
+        /**
+         * Keep the drag: a vertical gesture inside the panel belongs to the panel while it still has
+         * somewhere to go, and to the page the moment it does not. Without this the outer list steals
+         * every drag at the touch slop and the panel is a picture of a list.
+         */
+        @Override
+        public boolean dispatchTouchEvent(MotionEvent ev) {
+            final ViewGroup parent = (ViewGroup) getParent();
+            switch (ev.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downY = ev.getY();
+                    if (parent != null) parent.requestDisallowInterceptTouchEvent(true);
+                    break;
+                case MotionEvent.ACTION_MOVE: {
+                    final float dy = ev.getY() - downY;
+                    final boolean mine = dy < 0 ? list.canScrollVertically(1) : list.canScrollVertically(-1);
+                    if (parent != null) parent.requestDisallowInterceptTouchEvent(mine);
+                    break;
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    if (parent != null) parent.requestDisallowInterceptTouchEvent(false);
+                    break;
+                default:
+                    break;
+            }
+            return super.dispatchTouchEvent(ev);
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            final int rows = Math.max(1, playlistRows.size());
+            final float shown = Math.min(rows, VISIBLE_ROWS);
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(
+                    Math.round(dp(ROW_HEIGHT_DP) * shown), MeasureSpec.EXACTLY));
+        }
+
+        void bind() {
+            episodeAdapter.notifyDataSetChanged();
+            if (playlistParkedFor == playlistIndex) {
+                // Already parked for this episode. Re-parking on every rebind would yank the panel
+                // back under the user's thumb every time a thumbnail resolved, which is the opposite
+                // of a list you can browse.
+                return;
+            }
+            playlistParkedFor = playlistIndex;
+            // One above the one playing: the previous episode is the second thing a viewer reaches for
+            // (the first is the next one, which is already below the fold of the thumb).
+            manager.scrollToPositionWithOffset(Math.max(0, playlistIndex - 1), 0);
+        }
+    }
+
+    private class EpisodeAdapter extends RecyclerListView.SelectionAdapter {
+        @Override
+        public boolean isEnabled(RecyclerView.ViewHolder holder) {
+            return true;
+        }
+
+        @Override
+        public int getItemCount() {
+            return playlistRows.size();
+        }
+
+        @Override
+        public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            final View view = new EpisodeCell(parent.getContext());
+            view.setLayoutParams(new RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            return new RecyclerListView.Holder(view);
+        }
+
+        @Override
+        public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
+            ((EpisodeCell) holder.itemView).bind(position);
+            // Resolve what is on screen and nothing else: a show can be ninety episodes, and resolving
+            // all of them up front is ninety getMessages nobody asked for.
+            resolveAround(position);
+        }
     }
 
     /**
