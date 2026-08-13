@@ -248,6 +248,17 @@ public class SvipeExploreGrid extends RecyclerListView {
     // ---- pluggable pager (standalone history screens) ----
     // ---- category chips + film catalog ----
     private final ArrayList<SvipeMovies.Category> categories = new ArrayList<>();
+    /**
+     * The strip as it is RENDERED: the shelves this user opens most, first.
+     *
+     * <p>Separate from {@link #categories} (the server's taxonomy order) because the two answer
+     * different questions — the server says what exists, this says what this person reaches for. "All"
+     * is not in here at all; it is synthetic and always the first chip.
+     *
+     * <p>Recomputed only when the tab is entered ({@link #rebuildChipOrder}). Re-sorting while the
+     * strip is on screen would move chips under the finger that is tapping them.
+     */
+    private final ArrayList<SvipeMovies.Category> chipOrder = new ArrayList<>();
     private SvipeMovies.Category selectedCategory;   // null = "Hammasi" (the unfiltered dual-pipe feed)
     private boolean categoriesRequested;
 
@@ -537,9 +548,35 @@ public class SvipeExploreGrid extends RecyclerListView {
                 return;
             }
             categories.clear();
-            categories.addAll(list);   // SERVER order: "Kino" is last on purpose, never re-sort
+            categories.addAll(list);   // the server's taxonomy order — the strip's order is chipOrder
+            rebuildChipOrder();
             adapter.notifyDataSetChanged();
         }));
+    }
+
+    /**
+     * Order the strip by how often this user opens each shelf, most first.
+     *
+     * <p>A chip strip is a row of a dozen names of which one is always the next tap, and which one is
+     * personal: somebody who watches serials opens that shelf every session and scrolls past Sport
+     * every time. The counts are the same local, decaying table the prefetch reads
+     * ({@link org.telegram.svipe.SvipeCategoryStats}), so the shelf that gets warmed in the background
+     * is also the one that moves to the front — one signal, two uses.
+     *
+     * <p>A stable sort, so shelves the user has never opened keep the server's own order among
+     * themselves rather than being shuffled by a tie-break nobody chose.
+     */
+    private void rebuildChipOrder() {
+        final java.util.Map<String, Integer> counts =
+                org.telegram.svipe.SvipeCategoryStats.counts(account);
+        final ArrayList<SvipeMovies.Category> ordered = new ArrayList<>(categories);
+        java.util.Collections.sort(ordered, (a, b) -> {
+            final int ca = counts.containsKey(a.slug) ? counts.get(a.slug) : 0;
+            final int cb = counts.containsKey(b.slug) ? counts.get(b.slug) : 0;
+            return cb - ca;
+        });
+        chipOrder.clear();
+        chipOrder.addAll(ordered);
     }
 
     /**
@@ -938,6 +975,18 @@ public class SvipeExploreGrid extends RecyclerListView {
     public void ensureLoaded() {
         if (searchActive) {
             return;
+        }
+        // Entering the tab is the one moment the strip may be re-ordered: nothing is being tapped and
+        // the row is about to be laid out anyway.
+        if (!categories.isEmpty()) {
+            rebuildChipOrder();
+            // The host may call this from inside a layout pass; RecyclerView refuses to be notified
+            // there, so the rebind waits a frame rather than crashing the tab it is decorating.
+            if (isComputingLayout()) {
+                AndroidUtilities.runOnUIThread(adapter::notifyDataSetChanged);
+            } else {
+                adapter.notifyDataSetChanged();
+            }
         }
         if (!startedFirstLoad) {
             startedFirstLoad = true;
@@ -2094,7 +2143,7 @@ public class SvipeExploreGrid extends RecyclerListView {
                     break;
                 case TYPE_CATEGORY_CHIPS: {
                     SvipeCategoryChips chips = new SvipeCategoryChips(ctx);
-                    chips.setCategories(categories,
+                    chips.setCategories(chipOrder,
                             selectedCategory == null ? null : selectedCategory.slug);
                     chips.setDelegate(SvipeExploreGrid.this::selectCategory);
                     view = chips;
@@ -2119,6 +2168,18 @@ public class SvipeExploreGrid extends RecyclerListView {
 
         @Override
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
+            if (holder.getItemViewType() == TYPE_CATEGORY_CHIPS) {
+                final SvipeCategoryChips chips = (SvipeCategoryChips) holder.itemView;
+                final String selected = selectedCategory == null ? null : selectedCategory.slug;
+                // Rebuild ONLY when the order actually changed; otherwise move the highlight and leave
+                // the strip's scroll position alone.
+                if (chips.shows(chipOrder)) {
+                    chips.setSelectedSlug(selected);
+                } else {
+                    chips.setCategories(chipOrder, selected);
+                }
+                return;
+            }
             final int type = holder.getItemViewType();
             if (type == TYPE_EMPTY) {
                 // Two different nothings: a search that found nothing vs a shelf with no content yet.

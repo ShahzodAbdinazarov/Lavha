@@ -22,10 +22,12 @@ import java.util.List;
 /**
  * The YouTube-style category chip strip above the Video tab.
  *
- * <p>Server-ordered and never re-sorted: {@code GET /v1/videos/categories} returns the taxonomy in
- * render order, and "Kino" is deliberately LAST so it is off-screen until the strip is scrolled. A
- * client-side sort (alphabetical, by count, by "relevance") would silently break that product rule,
- * which is why the order is not a decision this view is allowed to make.
+ * <p>The order is decided by the CALLER and this view renders it as given — see
+ * {@code SvipeExploreGrid.rebuildChipOrder}, which puts the shelves this user actually opens at the
+ * front. (It used to be the server's order, untouched, with "Kino" deliberately last; the owner
+ * asked for most-opened-first instead, and a strip whose second chip is the one you always tap beats
+ * a taxonomy nobody scrolls.) The order is recomputed only when the tab is entered, never while the
+ * strip is on screen — chips that move under a finger are worse than chips in the wrong order.
  *
  * <p>The leading "All" chip is synthetic — it is the absence of a filter, so the server never sends
  * it.
@@ -48,6 +50,8 @@ public class SvipeCategoryChips extends HorizontalScrollView {
     private final List<SvipeMovies.Category> categories = new ArrayList<>();
     private Delegate delegate;
     private String selectedSlug;   // null = "Hammasi"
+    /** The slug list this strip was last built from, so a bind can tell "same order" from "new order". */
+    private String signature = "";
 
     public SvipeCategoryChips(Context context) {
         super(context);
@@ -76,11 +80,51 @@ public class SvipeCategoryChips extends HorizontalScrollView {
             categories.addAll(list);
         }
         selectedSlug = selected;
+        signature = signatureOf(categories);
         row.removeAllViews();
         row.addView(chip(null, LocaleController.getString(R.string.SvipeVideoCategoryAll)));
         for (SvipeMovies.Category c : categories) {
             row.addView(chip(c, c.label()));
         }
+    }
+
+    /**
+     * True when the strip already shows exactly this list, in this order.
+     *
+     * <p>The point is what it prevents: rebuilding the row on every adapter bind would throw away the
+     * strip's horizontal scroll position several times a second, so a user who scrolled to "Kino"
+     * would be yanked back to "All" the moment a thumbnail resolved.
+     */
+    public boolean shows(List<SvipeMovies.Category> list) {
+        return signature.equals(signatureOf(list));
+    }
+
+    /** Move the highlight without rebuilding — the cheap half of a bind. */
+    public void setSelectedSlug(String slug) {
+        if (slug == null ? selectedSlug == null : slug.equals(selectedSlug)) {
+            return;
+        }
+        selectedSlug = slug;
+        for (int i = 0; i < row.getChildCount(); i++) {
+            final View child = row.getChildAt(i);
+            if (!(child instanceof ChipView)) {
+                continue;
+            }
+            final String childSlug = i == 0 ? null : categories.get(i - 1).slug;
+            ((ChipView) child).setSelectedChip(
+                    childSlug == null ? slug == null : childSlug.equals(slug));
+        }
+    }
+
+    private static String signatureOf(List<SvipeMovies.Category> list) {
+        if (list == null || list.isEmpty()) {
+            return "";
+        }
+        final StringBuilder sb = new StringBuilder(list.size() * 8);
+        for (SvipeMovies.Category c : list) {
+            sb.append(c.slug).append(',');
+        }
+        return sb.toString();
     }
 
     private View chip(SvipeMovies.Category category, String label) {

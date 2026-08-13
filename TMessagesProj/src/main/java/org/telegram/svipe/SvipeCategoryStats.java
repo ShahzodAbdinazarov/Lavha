@@ -87,6 +87,22 @@ public final class SvipeCategoryStats {
         return out;
     }
 
+    /** Every count this device has, slug -> taps. {@link #ALL} is the "All" chip. */
+    public static java.util.Map<String, Integer> counts(int account) {
+        final java.util.HashMap<String, Integer> out = new java.util.HashMap<>();
+        try {
+            final JSONObject table = read(account);
+            final Iterator<String> it = table.keys();
+            while (it.hasNext()) {
+                final String k = it.next();
+                out.put(k, table.optInt(k));
+            }
+        } catch (Exception ignore) {
+            // best-effort
+        }
+        return out;
+    }
+
     private static JSONObject read(int account) {
         try {
             final String raw = MessagesController.getMainSettings(account).getString(PREF, null);

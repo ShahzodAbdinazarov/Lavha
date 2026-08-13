@@ -129,6 +129,20 @@ public class SvipeSearchActivity extends DialogsActivity {
     }
 
     /**
+     * Coming back to the tab. {@code svipeOnExploreGridVisible} fires when the grid is BUILT, which is
+     * once per process — the tab bar keeps this fragment alive — so without this the grid would never
+     * hear about a return: it is what re-orders the chip strip by what the user opens and retries a
+     * shelf that died while the connection was down.
+     */
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (exploreGrid != null) {
+            exploreGrid.ensureLoaded();
+        }
+    }
+
+    /**
      * The parent {@link DialogsActivity#canParentTabsSlide} blocks horizontal bottom-tab swipes
      * whenever search mode is showing — and this section is permanently in search mode. While the
      * Explore grid (empty query) is up, re-enable the swipe so the Search tab slides to the
