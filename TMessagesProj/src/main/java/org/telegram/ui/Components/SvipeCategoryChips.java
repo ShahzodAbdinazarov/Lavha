@@ -1,6 +1,7 @@
 package org.telegram.ui.Components;
 
 import android.content.Context;
+import android.view.MotionEvent;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -45,6 +46,8 @@ public class SvipeCategoryChips extends HorizontalScrollView {
 
     private static final int H_PADDING = 12;
     private static final int CHIP_H = 32;
+    /** How far a finger may travel and still have meant a tap. A scroll does not stop at 16dp. */
+    private static final int TAP_SLOP_DP = 16;
 
     private final LinearLayout row;
     private final List<SvipeMovies.Category> categories = new ArrayList<>();
@@ -52,6 +55,10 @@ public class SvipeCategoryChips extends HorizontalScrollView {
     private String selectedSlug;   // null = "Hammasi"
     /** The slug list this strip was last built from, so a bind can tell "same order" from "new order". */
     private String signature = "";
+    private View pressed;
+    private float downX;
+    private float downY;
+    private boolean travelled;
 
     public SvipeCategoryChips(Context context) {
         super(context);
@@ -116,6 +123,102 @@ public class SvipeCategoryChips extends HorizontalScrollView {
         }
     }
 
+    /** Take the tap. Idempotent: re-tapping the active chip is a no-op, not a reload. */
+    private void select(View view, SvipeMovies.Category category) {
+        final String slug = category == null ? null : category.slug;
+        if ((slug == null && selectedSlug == null)
+                || (slug != null && slug.equals(selectedSlug))) {
+            return;
+        }
+        selectedSlug = slug;
+        for (int i = 0; i < row.getChildCount(); i++) {
+            final View child = row.getChildAt(i);
+            if (child instanceof ChipView) {
+                ((ChipView) child).setSelectedChip(child == view);
+            }
+        }
+        if (delegate != null) {
+            delegate.onCategorySelected(category);
+        }
+    }
+
+    /**
+     * Take the tap OURSELVES, because a real finger never taps a chip cleanly.
+     *
+     * <p>The strip is a horizontal scroller inside a vertical list, and both ancestors claim a gesture
+     * the moment it drifts past their touch slop — which every human tap does, by a few pixels. The
+     * chip then gets ACTION_CANCEL and its click listener never runs: the owner tapped "All" and
+     * nothing happened, over and over, while a synthetic zero-drift tap worked perfectly and hid the
+     * bug. So the DOWN blocks the ancestors from stealing, and an UP that never travelled more than
+     * {@link #TAP_SLOP_DP} is treated as what it plainly was — a tap on that chip.
+     *
+     * <p>A gesture that DOES travel is handed straight back: past the slop, a mostly-vertical drag
+     * belongs to the list underneath (it is scrolling the page, not choosing a shelf) and a horizontal
+     * one stays here and scrolls the strip.
+     */
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        final ViewGroup parent = getParent() instanceof ViewGroup ? (ViewGroup) getParent() : null;
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                downX = ev.getX();
+                downY = ev.getY();
+                travelled = false;
+                pressed = chipAt(ev.getX());
+                if (parent != null) {
+                    parent.requestDisallowInterceptTouchEvent(true);
+                }
+                break;
+            case MotionEvent.ACTION_MOVE: {
+                final float dx = Math.abs(ev.getX() - downX);
+                final float dy = Math.abs(ev.getY() - downY);
+                if (!travelled && Math.max(dx, dy) > AndroidUtilities.dp(TAP_SLOP_DP)) {
+                    travelled = true;
+                    if (dy > dx && parent != null) {
+                        parent.requestDisallowInterceptTouchEvent(false);   // it is the page scrolling
+                    }
+                }
+                break;
+            }
+            case MotionEvent.ACTION_UP:
+                if (!travelled && pressed != null) {
+                    select(pressed, categoryOf(pressed));
+                }
+                pressed = null;
+                if (parent != null) {
+                    parent.requestDisallowInterceptTouchEvent(false);
+                }
+                break;
+            case MotionEvent.ACTION_CANCEL:
+                pressed = null;
+                if (parent != null) {
+                    parent.requestDisallowInterceptTouchEvent(false);
+                }
+                break;
+            default:
+                break;
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+
+    /** The chip under a touch x (view coordinates), or null between/outside them. */
+    private View chipAt(float x) {
+        final float contentX = x + getScrollX() - row.getLeft();
+        for (int i = 0; i < row.getChildCount(); i++) {
+            final View child = row.getChildAt(i);
+            if (contentX >= child.getLeft() && contentX <= child.getRight()) {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    /** The category a chip stands for — the first one is the synthetic "All", which has none. */
+    private SvipeMovies.Category categoryOf(View chip) {
+        final int index = row.indexOfChild(chip);
+        return index <= 0 || index - 1 >= categories.size() ? null : categories.get(index - 1);
+    }
+
     private static String signatureOf(List<SvipeMovies.Category> list) {
         if (list == null || list.isEmpty()) {
             return "";
@@ -132,23 +235,7 @@ public class SvipeCategoryChips extends HorizontalScrollView {
         view.setText(label);
         view.setSelectedChip(category == null ? selectedSlug == null
                 : category.slug.equals(selectedSlug));
-        view.setOnClickListener(v -> {
-            final String slug = category == null ? null : category.slug;
-            if ((slug == null && selectedSlug == null)
-                    || (slug != null && slug.equals(selectedSlug))) {
-                return;   // re-tapping the active chip is a no-op, not a reload
-            }
-            selectedSlug = slug;
-            for (int i = 0; i < row.getChildCount(); i++) {
-                View child = row.getChildAt(i);
-                if (child instanceof ChipView) {
-                    ((ChipView) child).setSelectedChip(child == view);
-                }
-            }
-            if (delegate != null) {
-                delegate.onCategorySelected(category);
-            }
-        });
+        view.setOnClickListener(v -> select(view, category));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, AndroidUtilities.dp(CHIP_H));
         lp.rightMargin = AndroidUtilities.dp(8);
