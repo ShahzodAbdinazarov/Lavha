@@ -9,3 +9,8 @@
    - 2026-08-10 da aynan shu buzilgan: demo akkauntda `resetAuthorizations` yugurtirilib, egasining telefoni ham chiqib ketgan.
 
 4. **Play uchun AAB faqat `bundleAfat` flavoridan quriladi.** To'g'ri buyruq: `./gradlew :TMessagesProj_App:bundleBundleAfatRelease`. **Hech qachon `bundleAfatRelease` ni ishlatma** — u `afatRelease` varianti, ya'ni to'g'ridan-to'g'ri yuklab olinadigan build, va u `READ_CALL_LOG` / `CALL_PHONE` ruxsatlarini olib yuradi; Play bunday AAB'ni rad etadi. Ikkala task nomi bir-biriga juda o'xshash (`bundle**Bundle**AfatRelease` vs `bundleAfatRelease`) — shuning uchun **build tugagach har doim AAB ichidagi birlashtirilgan manifestni tekshir**: `READ_CALL_LOG` yo'qligini va `targetSdk >= 36` ekanini. Manba kodiga qarab xulosa qilma — faqat qurilgan artefakt haqiqatni aytadi.
+
+5. **PRODGA TEGMA — men aniq so'ramagunimcha.** Ilova Play Store'da, foydalanuvchilar bor: prod endi tirik xizmat, sinov maydoni emas. Prod serverida hech qanday o'zgarish qilma — na deploy, na konteyner ko'tarish/o'chirish, na indeks qurish, na `.env` tahriri, na worker qayta ishga tushirish, na baza yozuvi. **O'qish mumkin** (log, `df`, `docker ps`, `EXPLAIN`, so'rov vaqtini o'lchash) — chunki tashxis uchun kerak; **yozish yo'q**.
+   - Barcha ish **devda** bajariladi va devda o'lchanadi. Prodga chiqarish alohida qaror va u faqat mendan keladi.
+   - Prodda biror narsa qilish kerak deb hisoblasang: nima qilish kerakligini, nega kerakligini va xavfini ayt — keyin **to'xta va kut**.
+   - Bu qoida "ruxsat berilgan rejim"da ham, shoshilinch holatda ham kuchda: prod tushib qolsa ham avval menga ayt.

@@ -30,14 +30,18 @@ public final class SvipeWarmup {
         void run(int account, Runnable done);
     }
 
-    /** How long the app is left alone to finish opening before any of this starts. */
+    /** How long the app is left alone to finish opening before any of this starts.
+     *
+     * <p>This buys the cold start four seconds of quiet, and it is worth having for work the user
+     * did not ask for. It is NOT what gates the tab they DID open: a screen fetches its own data the
+     * moment it is created, and since {@link org.telegram.svipe.SvipeApi} got its own threads that
+     * fetch no longer queues behind these. */
     private static final long SETTLE_MS = 4000;
     /** A task that has not reported back by now is presumed stuck; the queue moves on without it. */
     private static final long TASK_DEADLINE_MS = 45_000;
 
     private static final ArrayDeque<Named> queue = new ArrayDeque<>();
     private static final java.util.HashSet<String> everEnqueued = new java.util.HashSet<>();
-    private static boolean running;
     private static boolean started;
 
     private static final class Named {
@@ -65,16 +69,33 @@ public final class SvipeWarmup {
     public static void start(final int account) {
         if (started) return;
         started = true;
-        AndroidUtilities.runOnUIThread(() -> next(account), SETTLE_MS);
+        AndroidUtilities.runOnUIThread(() -> {
+            // Fill the window rather than hand out one task and wait for it to come back.
+            for (int i = 0; i < MAX_IN_FLIGHT; i++) next(account);
+        }, SETTLE_MS);
     }
+
+    /** How many warm-ups may be in flight at once.
+     *
+     * <p>They were strictly serial, which made the LAST one — music — wait for the two before it:
+     * measured on a cold start, reels finished at 8.8 s, video at 10.8 s and music at 14.0 s, and
+     * music's own work took 3.2 s of that. They do not depend on one another, so the only thing the
+     * ordering bought was a queue.
+     *
+     * <p>Three, not unbounded: this is the number of media warm-ups there are, and each is already
+     * internally bounded. `settings` still runs first because it is enqueued first and finishes in
+     * a millisecond. */
+    private static final int MAX_IN_FLIGHT = 3;
+
+    private static int inFlight;
 
     private static void next(final int account) {
         final Named entry;
         synchronized (queue) {
-            if (running) return;
+            if (inFlight >= MAX_IN_FLIGHT) return;
             entry = queue.poll();
             if (entry == null) return;
-            running = true;
+            inFlight++;
         }
         final AtomicBoolean finished = new AtomicBoolean();
         final long startedAt = System.currentTimeMillis();
@@ -82,7 +103,7 @@ public final class SvipeWarmup {
             if (!finished.compareAndSet(false, true)) return;
             FileLog.d("svipe: warm-up '" + entry.name + "' done in " + (System.currentTimeMillis() - startedAt) + "ms");
             synchronized (queue) {
-                running = false;
+                inFlight--;
             }
             next(account);
         };

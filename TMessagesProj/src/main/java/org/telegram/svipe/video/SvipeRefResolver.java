@@ -318,6 +318,13 @@ public class SvipeRefResolver {
         if (ref.isResolving()) return;
         ref.setResolving(true);
         final String username = ref.username().toLowerCase();
+        // Time the whole resolve — this is the "fetch the video's own metadata" leg of a cold start,
+        // and it is Telegram's side of the chain rather than ours. Logged so the two can be told
+        // apart instead of estimated from the gap between other lines.
+        final long resolveT0 = System.currentTimeMillis();
+        ref.resolveCallbacks().add(() -> FileLog.d("svipe-t: resolve @" + username + "/" + ref.messageId()
+                + " took " + (System.currentTimeMillis() - resolveT0) + "ms"
+                + (prefetch ? " (prefetch)" : "")));
         // Order matters, and it is not the obvious one.
         //
         //  1. a channel we can ALREADY address costs nothing and returns the real message (views,
