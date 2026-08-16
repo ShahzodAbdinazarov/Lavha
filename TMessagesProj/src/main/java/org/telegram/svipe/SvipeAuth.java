@@ -277,6 +277,70 @@ public class SvipeAuth {
         // an error instead of being re-queued behind the wait, and a timeout for silence. While a
         // known flood window is open we don't ask at all — the answer is already known, and hammering
         // a flood-limited method is how a short wait becomes a long one.
+        // 3. Search for the bot by name. contacts.search answers with whole user objects —
+        // access_hash included, which is the only thing the resolve was ever for — and it draws on a
+        // different budget from contacts.resolveUsername. This matters most for exactly the user we
+        // care about: an account with an empty chat list has nothing in the username cache, so step 1
+        // always misses and a fresh install spends its one resolve here. Measured on the test
+        // account: the resolve answered FLOOD_WAIT_5711 and every Svipe tab then said "No
+        // connection", because no token means no request at all. (A t.me/<bot> link was tried first
+        // and is not an option — messages.getWebPage returns a profile page with no users on it.)
+        searchBot(account, id -> {
+            if (id != 0) {
+                rememberBotId(account, id);
+                cb.run(id);
+                return;
+            }
+            resolveBotOverContacts(account, cb);
+        });
+    }
+
+    /**
+     * Look the bot up by name and read its user out of the results. 0 when nothing matches.
+     *
+     * <p>Only an exact username match counts. Search is a fuzzy method — it will happily return
+     * whatever else is called something similar — and sending a user's auth handshake to the wrong
+     * bot is worse than not authenticating at all.
+     */
+    private static void searchBot(int account, BotCallback cb) {
+        final String username = SvipeConfig.botUsername();
+        final TLRPC.TL_contacts_search req = new TLRPC.TL_contacts_search();
+        req.q = username;
+        req.limit = 5;
+        final AtomicBoolean answered = new AtomicBoolean();
+        ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
+            if (!answered.compareAndSet(false, true)) return;
+            long botId = 0;
+            if (error == null && response instanceof TLRPC.TL_contacts_found) {
+                TLRPC.TL_contacts_found res = (TLRPC.TL_contacts_found) response;
+                MessagesController.getInstance(account).putUsers(res.users, false);
+                MessagesController.getInstance(account).putChats(res.chats, false);
+                if (res.users != null) {
+                    for (TLRPC.User u : res.users) {
+                        if (u != null && u.username != null
+                                && u.username.equalsIgnoreCase(username)) {
+                            botId = u.id;
+                            break;
+                        }
+                    }
+                }
+            }
+            FileLog.d("svipe: auth bot via search -> " + botId
+                    + (error != null ? " (" + error.text + ")" : ""));
+            cb.run(botId);
+        }, ConnectionsManager.RequestFlagFailOnServerErrors);
+        AndroidUtilities.runOnUIThread(() -> {
+            if (answered.compareAndSet(false, true)) {
+                FileLog.d("svipe: auth bot search timed out");
+                cb.run(0);
+            }
+        }, MTPROTO_STEP_MS);
+    }
+
+    /** Last resort: the rationed method, and only while no flood window is open. */
+    private static void resolveBotOverContacts(int account, BotCallback cb) {
+        final MessagesController mc = MessagesController.getInstance(account);
+        final String username = SvipeConfig.botUsername();
         long floodUntil = MessagesController.getMainSettings(account).getLong(SvipeConfig.PREF_AUTH_BOT_FLOOD_UNTIL, 0);
         if (floodUntil > System.currentTimeMillis()) {
             cb.run(0);

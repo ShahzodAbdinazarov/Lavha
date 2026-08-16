@@ -1327,6 +1327,12 @@ public class SvipeWatchActivity extends BaseFragment {
         if (watched == null || watched.ref == null || isLocal()) {
             return;   // asking "is this post a film" would put a private post's ids on the wire
         }
+        // An episode of a series is not a film, and the server has no row to return: measured on a
+        // series playthrough, every episode opened produced its own 404 — three of them in the first
+        // minute. The playlist we are already inside is the answer, so do not ask.
+        if (getPlaylist() != null && !getPlaylist().isEmpty()) {
+            return;
+        }
         SvipeMovies.movieByPost(currentAccount, watched.ref.channelId, watched.ref.messageId,
                 (detail, error) -> AndroidUtilities.runOnUIThread(() -> {
                     // Kept even with an empty cast: the copies alone are worth a Variants tab, and a

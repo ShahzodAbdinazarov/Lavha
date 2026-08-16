@@ -53,6 +53,12 @@ public final class SvipeMovies {
          */
         public boolean film;
         public int count;
+        /**
+         * How many of {@link #count} the SHORTS grid can actually serve. Zero means the shelf is
+         * long-form only and asking {@code /v1/discover?cat=} for it returns an empty page —
+         * measured at 3.8 s on "Seriallar" every time that chip was tapped, for nothing.
+         */
+        public int shorts;
 
         /**
          * The chip label in the USER's language.
@@ -441,6 +447,7 @@ public final class SvipeMovies {
                 c.title = o.optString("title", c.slug);
                 c.film = o.optBoolean("film");
                 c.count = o.optInt("count");
+                c.shorts = o.optInt("shorts", -1);   // -1 = an older server that does not say
                 if (!c.slug.isEmpty()) out.add(c);
             }
             cb.onResult(out, null);

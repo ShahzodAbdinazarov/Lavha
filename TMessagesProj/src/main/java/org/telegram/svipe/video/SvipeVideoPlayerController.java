@@ -102,6 +102,9 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
     private SvipeRefResolver.VideoRef current;
     private VideoPlayer player;
     private boolean firstFrameSeen;
+    /** Wall-clock of the last open() and the last startPlayback(), so a first frame can say which
+     *  half of the wait was ours (resolve, metadata) and which was Telegram's (the bytes). */
+    private long openAtMs, prepareAtMs;
 
     private final ArrayList<Observer> observers = new ArrayList<>();
 
@@ -319,6 +322,10 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
         releaseCurrentVideo();
         account = UserConfig.selectedAccount;
         current = ref;
+        openAtMs = android.os.SystemClock.elapsedRealtime();
+        prepareAtMs = 0;
+        FileLog.d("svipe-t: video open @" + ref.username + "/" + ref.messageId
+                + (ref.mo != null ? " (already resolved)" : " (needs resolve)"));
         // A paused return carries the position it is returning TO; every other open starts from
         // wherever this video was last left — in this player OR in Telegram's own.
         if (!startPaused) {
@@ -906,6 +913,8 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
 
     private void startPlayback() {
         if (stage == null || current == null || current.mo == null) return;
+        prepareAtMs = android.os.SystemClock.elapsedRealtime();
+        FileLog.d("svipe-t: video prepare +" + (openAtMs > 0 ? prepareAtMs - openAtMs : -1) + "ms after open");
         final MessageObject mo = current.mo;
         final TLRPC.Document doc = mo.getDocument();
         if (doc == null) return;
@@ -1067,6 +1076,9 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
     private void handleFirstFrame(VideoPlayer from) {
         if (firstFrameSeen || from != player) return;
         firstFrameSeen = true;
+        final long now = android.os.SystemClock.elapsedRealtime();
+        FileLog.d("svipe-t: video first-frame +" + (openAtMs > 0 ? now - openAtMs : -1)
+                + "ms after open, +" + (prepareAtMs > 0 ? now - prepareAtMs : -1) + "ms after prepare");
         AndroidUtilities.runOnUIThread(() -> {
             if (stage != null && from == player) {
                 stage.onFirstFrame();

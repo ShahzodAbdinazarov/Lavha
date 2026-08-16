@@ -1325,6 +1325,14 @@ public class SvipeExploreGrid extends RecyclerListView {
      * items and cursor: mixing fresh shorts with the long cards we already have beats throwing content
      * away.
      */
+    /** False when the selected shelf holds no shorts at all — see the call site in refreshBothPipes.
+     *  Unknown (an older server that does not send the field, or "All") counts as yes, so the only
+     *  behaviour that changes is the one we measured. */
+    private boolean categoryHasShorts() {
+        if (selectedCategory == null) return true;
+        return selectedCategory.shorts != 0;
+    }
+
     private void refreshBothPipes() {
         final int seq = contentSeq;
         continueSlotSpin++;
@@ -1334,14 +1342,27 @@ public class SvipeExploreGrid extends RecyclerListView {
         final RefreshBatch batch = new RefreshBatch();
         loadingShorts = true;    // both flags also block scroll-pagination until the swap completes
         loadingLongs = true;
-        SvipeDiscover.load(account, null, catSlug(), 0, PAGE_SIZE, true, (result, next, error) -> {
+        if (!categoryHasShorts()) {
+            // A long-form-only shelf. Asking the shorts pipe for it returns an empty page and takes
+            // as long as a full one to say so: measured 3.8 s on "Seriallar", which holds 613 videos
+            // and not one under the reels cap. The server now says how many shorts a shelf has, so
+            // the question is simply not asked.
             loadingShorts = false;
-            batch.shorts = result;
-            batch.shortsNext = next;
+            batch.shorts = null;
+            batch.shortsNext = null;
             if (--batch.pending == 0) {
                 applyRefresh(seq, batch);
             }
-        });
+        } else {
+            SvipeDiscover.load(account, null, catSlug(), 0, PAGE_SIZE, true, (result, next, error) -> {
+                loadingShorts = false;
+                batch.shorts = result;
+                batch.shortsNext = next;
+                if (--batch.pending == 0) {
+                    applyRefresh(seq, batch);
+                }
+            });
+        }
         final SvipeDiscover.Callback onLongs = (result, next, error) -> {
             loadingLongs = false;
             batch.longs = result;
