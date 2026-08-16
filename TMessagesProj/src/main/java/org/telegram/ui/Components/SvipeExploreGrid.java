@@ -1594,6 +1594,14 @@ public class SvipeExploreGrid extends RecyclerListView {
                 return;
             }
         }
+        // A long-form-only shelf retires its shorts pipe instead of asking for it. The server says how
+        // many shorts a shelf holds, and on "Seriallar" that is zero: the request comes back empty and
+        // takes as long as a full page to say so — measured 4.4 s for 47 bytes on the chip tap that
+        // also fetched the shows. Retiring the cursor (rather than skipping the call) is what stops the
+        // composer holding a slot open for a card that is never coming.
+        if (!loadingShorts && shortsOffset != null && !categoryHasShorts()) {
+            shortsOffset = null;
+        }
         if (!loadingShorts && shortsOffset != null
                 && shorts.size() - composedShorts < SPAN_COUNT * SHORTS_ROWS_PER_LONG * PREFETCH_UNITS) {
             loadingShorts = true;

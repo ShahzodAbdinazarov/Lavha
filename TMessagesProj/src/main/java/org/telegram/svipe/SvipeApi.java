@@ -206,17 +206,29 @@ public class SvipeApi {
      * the token, and the two or three warm-ups behind it. Beyond that they would only compete for the
      * same radio. Daemon threads at background priority, so this pool can never hold the process open
      * and can never outrank the UI.
+     *
+     * <p>All four are CORE threads on purpose. A ThreadPoolExecutor grows past its core size only
+     * when the queue REFUSES a task, and an unbounded LinkedBlockingQueue never refuses — so a
+     * (2, 4) pool behind one is a two-thread pool wearing a four-thread label. Measured on the Video
+     * tab's cold open: three calls left together, two ran, and /v1/videos sat in the queue until one
+     * of them finished 16 s later — then answered in 345 ms. Core threads time out like the others,
+     * so an idle app still holds none of them.
      */
-    private static final java.util.concurrent.ExecutorService NET =
-            new java.util.concurrent.ThreadPoolExecutor(
-                    2, 4, 30L, java.util.concurrent.TimeUnit.SECONDS,
-                    new java.util.concurrent.LinkedBlockingQueue<>(),
-                    r -> {
-                        Thread t = new Thread(r, "svipe-net");
-                        t.setDaemon(true);
-                        t.setPriority(Thread.MIN_PRIORITY + 2);
-                        return t;
-                    });
+    private static final java.util.concurrent.ExecutorService NET = buildPool();
+
+    private static java.util.concurrent.ExecutorService buildPool() {
+        java.util.concurrent.ThreadPoolExecutor pool = new java.util.concurrent.ThreadPoolExecutor(
+                4, 4, 30L, java.util.concurrent.TimeUnit.SECONDS,
+                new java.util.concurrent.LinkedBlockingQueue<>(),
+                r -> {
+                    Thread t = new Thread(r, "svipe-net");
+                    t.setDaemon(true);
+                    t.setPriority(Thread.MIN_PRIORITY + 2);
+                    return t;
+                });
+        pool.allowCoreThreadTimeOut(true);
+        return pool;
+    }
 
     private static void submit(Runnable work) {
         try {
@@ -236,6 +248,7 @@ public class SvipeApi {
             // — because MTProto logs itself and our HTTP did not, so the two legs of the chain could
             // not be told apart.
             final long t0 = System.currentTimeMillis();
+            boolean failed = false;
             try {
                 URL url = new URL(SvipeConfig.baseUrl() + path);
                 conn = (HttpURLConnection) url.openConnection();
@@ -270,13 +283,19 @@ public class SvipeApi {
                         + (resp != null ? " " + resp.length() + "B" : ""));
                 AndroidUtilities.runOnUIThread(() -> cb.run(fjson, fcode, null));
             } catch (Exception e) {
+                failed = true;
                 FileLog.d("svipe-net: " + method + " " + path + " -> FAILED in "
                         + (System.currentTimeMillis() - t0) + "ms: " + e);
                 FileLog.e(e);
                 final String err = e.getMessage();
                 AndroidUtilities.runOnUIThread(() -> cb.run(null, 0, err));
             } finally {
-                if (conn != null) {
+                // NOT disconnect() on the happy path. HttpURLConnection keeps the socket alive for
+                // the next call to the same host, and disconnect() throws it away — so every request
+                // to our backend paid a fresh TCP + TLS handshake to Cloudflare. Reading the body to
+                // the end (readStream does) is what hands the connection back to the pool. A
+                // connection that failed mid-flight is a different matter: that one is not reusable.
+                if (conn != null && failed) {
                     try { conn.disconnect(); } catch (Exception ignore) {}
                 }
             }

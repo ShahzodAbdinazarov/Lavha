@@ -320,6 +320,7 @@ public class SvipeWatchActivity extends BaseFragment {
             return;
         }
         playlist = page;
+        insideShow = true;   // a restored page arrives with its playlist and no SeriesRef
         playlistIndex = index >= 0 && index < page.episodes.size() ? index : -1;
         playlistRows.clear();
         for (SvipeMovies.Episode e : page.episodes) {
@@ -376,10 +377,18 @@ public class SvipeWatchActivity extends BaseFragment {
         this.watched.chat = chat;
         this.liked = isLiked(mo);
         this.likeCount = totalReactions(mo);
+        // Known from the reference, not from the playlist. A show page opens on the poster post and
+        // the episode list catches up seconds later, so asking getPlaylist() at open time still says
+        // "not a show" and the film lookup goes out anyway — measured 2.6 s for a 404 while the first
+        // frame was still being fetched.
+        this.insideShow = ref instanceof SvipeMovies.SeriesRef;
         if (ref != null) {
             shownKeys.add(keyOf(ref));
         }
     }
+
+    /** True once this page is known to be a show — from the reference it opened on, or its playlist. */
+    private boolean insideShow;
 
     /**
      * True when the video on screen is not a public channel post. Then this page is a PLAYER and
@@ -1329,8 +1338,8 @@ public class SvipeWatchActivity extends BaseFragment {
         }
         // An episode of a series is not a film, and the server has no row to return: measured on a
         // series playthrough, every episode opened produced its own 404 — three of them in the first
-        // minute. The playlist we are already inside is the answer, so do not ask.
-        if (getPlaylist() != null && !getPlaylist().isEmpty()) {
+        // minute. The show we are already inside is the answer, so do not ask.
+        if (insideShow || (getPlaylist() != null && !getPlaylist().isEmpty())) {
             return;
         }
         SvipeMovies.movieByPost(currentAccount, watched.ref.channelId, watched.ref.messageId,
