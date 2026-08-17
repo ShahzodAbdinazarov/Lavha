@@ -64,6 +64,9 @@ public class SvipeGuestReelsActivity extends BaseFragment {
 
     @Override
     public View createView(Context context) {
+        // Full bleed, the way every reel surface in the app is: the action bar keeps its back
+        // gesture and its slot in the fragment stack, it just stops taking a strip of the video.
+        actionBar.setAddToContainer(false);
         FrameLayout root = new FrameLayout(context);
         root.setBackgroundColor(Color.BLACK);
 
@@ -106,7 +109,8 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         signUp.setPadding(AndroidUtilities.dp(18), 0, AndroidUtilities.dp(18), 0);
         signUp.setOnClickListener(v -> openSignUp());
         root.addView(signUp, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 40,
-                Gravity.TOP | Gravity.RIGHT, 0, 12, 12, 0));
+                Gravity.TOP | Gravity.RIGHT, 0,
+                12 + AndroidUtilities.statusBarHeight / AndroidUtilities.density, 12, 0));
 
         fragmentView = root;
         loadMore();
@@ -137,8 +141,11 @@ public class SvipeGuestReelsActivity extends BaseFragment {
             if (adapter != null) {
                 adapter.notifyItemRangeInserted(from, result.size());
             }
-            if (playingIndex < 0) {
-                onSettled();
+            if (playingIndex < 0 && listView != null) {
+                // AFTER the layout pass, not during it. notifyItemRangeInserted only schedules one,
+                // so asking the layout manager what is on screen right here answers "nothing" — and
+                // since nothing is scrolling yet, nothing would ever ask again.
+                listView.post(SvipeGuestReelsActivity.this::onSettled);
             }
         }));
     }
@@ -148,7 +155,12 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         if (layoutManager == null) {
             return;
         }
-        final int position = layoutManager.findFirstCompletelyVisibleItemPosition();
+        int position = layoutManager.findFirstCompletelyVisibleItemPosition();
+        if (position < 0) {
+            // Mid-settle, or the very first frame after a page landed. The partially visible one is
+            // the right answer then — a snap helper guarantees there is only one candidate.
+            position = layoutManager.findFirstVisibleItemPosition();
+        }
         if (position < 0 || position >= items.size()) {
             return;
         }
@@ -197,7 +209,9 @@ public class SvipeGuestReelsActivity extends BaseFragment {
             player.setDelegate(new VideoPlayer.VideoPlayerDelegate() {
                 @Override public void onStateChanged(boolean playWhenReady, int playbackState) {}
                 @Override public void onError(VideoPlayer p, Exception e) {}
-                @Override public void onVideoSizeChanged(int w, int h, int rotation, float ratio) {}
+                @Override public void onVideoSizeChanged(int w, int h, int rotation, float ratio) {
+                    page.setVideoSize(w, h);
+                }
                 @Override public void onRenderedFirstFrame() {
                     page.onFirstFrame();
                 }
@@ -329,6 +343,8 @@ public class SvipeGuestReelsActivity extends BaseFragment {
 
         void bind(SvipeGuest.Item item) {
             texture.setAlpha(0f);
+            poster.setAlpha(1f);   // a recycled page still carries the last card's faded-out poster
+            videoW = videoH = 0;
             title.setText(item.title);
             caption.setText(item.caption);
             if (item.posterUrl != null && !item.posterUrl.isEmpty()) {
@@ -340,7 +356,54 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         }
 
         void onFirstFrame() {
-            AndroidUtilities.runOnUIThread(() -> texture.animate().alpha(1f).setDuration(120).start());
+            AndroidUtilities.runOnUIThread(() -> {
+                texture.animate().alpha(1f).setDuration(120).start();
+                // And take the poster away. It exists to cover the gap before the first frame; left
+                // underneath a video that does not cover the whole screen it becomes a second,
+                // stretched copy of the same picture showing around the edges of the first.
+                poster.animate().alpha(0f).setDuration(120).start();
+            });
+        }
+
+        /**
+         * Centre-crop the video into the page.
+         *
+         * <p>A reel surface is full-bleed and the catalogue is not: these are real posts, and a
+         * 720x734 clip in a 1080x2400 window either fills it or leaves two thirds of the screen
+         * showing whatever is behind. Scaling by the LARGER ratio and centring is what every reel
+         * player does — the edges are cropped, which is the right thing to lose.
+         */
+        void setVideoSize(int w, int h) {
+            if (w <= 0 || h <= 0) {
+                return;
+            }
+            videoW = w;
+            videoH = h;
+            applyCrop();
+        }
+
+        private int videoW, videoH;
+
+        private void applyCrop() {
+            final int vw = getWidth(), vh = getHeight();
+            if (vw <= 0 || vh <= 0 || videoW <= 0 || videoH <= 0) {
+                return;
+            }
+            final float scale = Math.max(vw / (float) videoW, vh / (float) videoH);
+            final float dw = videoW * scale, dh = videoH * scale;
+            android.graphics.Matrix m = new android.graphics.Matrix();
+            m.setScale(dw / vw, dh / vh);
+            m.postTranslate((vw - dw) / 2f, (vh - dh) / 2f);
+            texture.setTransform(m);
+            texture.invalidate();
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int l, int t, int r, int b) {
+            super.onLayout(changed, l, t, r, b);
+            if (changed) {
+                applyCrop();
+            }
         }
     }
 
