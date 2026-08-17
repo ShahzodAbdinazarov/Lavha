@@ -158,12 +158,22 @@ as unseen, usable for a cold start or a bad connection.
   swiping back is already instant, and eviction is already Telegram's size-based job. That is
   exactly the behaviour asked for;
 * **but** `ReelsActivity` still does a **full download on Wi-Fi** (`only when full downloads are
-  allowed (Wi-Fi)`), which is the part the owner is right to object to.
+  allowed (Wi-Fi)`), which is what the proposal objected to.
+
+**[DECIDED 2026-08-17 — the full download STAYS.]** The owner ruled against deleting it. It is not a
+stray optimisation: it is what fills the persisted offline queue, a shipped feature whose whole
+purpose is instant cold-start playback with no network at all. The proposal and that feature were
+asking for opposite things — "never download a full video" against "full-download always" — and the
+offline queue wins. This paragraph exists so the contradiction is not re-litigated: point 1 below is
+**cancelled**, deliberately, and anyone who reads §4 and reaches for the delete key should stop here.
+
+What the perf work took out instead was the *resolving*, not the downloading. Neither the ahead
+window nor the offline cushion will now spend a `contacts.resolveUsername` on a reel that already
+carries a `play_url` — that was the scarce budget going to the least urgent work.
 
 **Changes.**
 
-1. Delete the full-download path. It spends the user's data and Telegram's bandwidth on videos they
-   may never reach.
+1. ~~Delete the full-download path.~~ **CANCELLED** — see the decision above.
 2. Make the prefix duration-aware. The head-preload is a flat ~2 MB today: far too much for a
    6-second clip and too little for a 5-minute one. MTProto cannot be asked for "5 seconds" — it
    fetches byte ranges — but `supports_streaming` guarantees the `moov` atom is at the front, so
@@ -216,9 +226,9 @@ signed-in play through the identical path, and the only difference left is who c
    `app/content/play_urls.py` + a `play_urls` lane in the sessionless indexer; client side in
    `ReelsActivity` and `SvipeReelWarmer`.
 3. **Guest feed while authenticating** (§3). Biggest cold-start win for signed-in users.
-4. **Kill the Wi-Fi full download; duration-aware prefix; 5-deep graded window** (§4). PARTLY done:
-   the ahead-window and the offline cushion no longer RESOLVE reels they could already play. The
-   full download itself is left in place — see the note below.
+4. **Duration-aware prefix; 5-deep graded window** (§4). PARTLY done: the ahead-window and the
+   offline cushion no longer RESOLVE reels they could already play. Killing the Wi-Fi full download
+   was **cancelled by the owner** — the offline queue depends on it (see §4).
 5. **Per-user A/B precompute with debounce** (§2). Most work, and it only pays once 1–4 are done.
 
 ### What shipped, and what it measured
@@ -258,12 +268,11 @@ of their own demand; somebody else does. This is why the cold list warms its own
 is the one list that is shared, deterministic and served to every new device, so warming it once is
 what makes a first feed playable without a session.
 
-**[CORRECTION] The Wi-Fi full download is not deleted.** §4 asks for it, but it is also what fills
-the persisted offline queue — a shipped feature asked for explicitly ("full-download always"), whose
-whole purpose is instant cold-start playback with no network. Retiring it is a product decision, not
-a side effect of this work, so it was left in place and flagged here instead. What did change is
-that neither the ahead window nor the cushion will RESOLVE a reel that already carries a URL: that
-was spending the scarcest budget on the least urgent work.
+**[DECIDED] The Wi-Fi full download stays.** §4 proposed deleting it; the owner ruled against on
+2026-08-17, because that download is what fills the persisted offline queue. The decision and its
+reasoning now live in §4 itself, where anyone reading the original proposal will meet it. What did
+change is that neither the ahead window nor the cushion will RESOLVE a reel that already carries a
+URL: that was spending the scarcest budget on the least urgent work.
 
 ---
 

@@ -58,7 +58,12 @@ public class SvipeGuest {
         public String durationText = "";
         public String posterUrl = "";
         public boolean portrait = true;
-        /** Filled by {@link #media}; empty until then. Expires — resolve again rather than cache. */
+        /** Length in ms as the server knows it. The watch classifier needs it for a reel that is
+         *  playing over its public URL and has never been resolved. */
+        public int durationMs;
+        /** The playable URL. Arrives WITH the page when the server holds a warm one, otherwise
+         *  filled by {@link #media} just before the reel is needed. Expires — resolve again rather
+         *  than cache it anywhere that outlives the page. */
         public String mediaUrl = "";
         public int width, height;
 
@@ -411,8 +416,16 @@ public class SvipeGuest {
                     it.caption = o.optString("caption", "");
                     it.viewsText = o.optString("views_h", "");
                     it.durationText = o.optString("duration_h", "");
+                    it.durationMs = o.optInt("duration_ms", 0);
                     it.posterUrl = o.optString("poster", "");
                     it.portrait = o.optBoolean("portrait", true);
+                    // The page may already carry its playable URL. The server keeps warm ones for
+                    // the references it serves, so a card that arrives with this needs NO
+                    // /v1/guest/media call at all — and that endpoint is the expensive one: it
+                    // scrapes the public embed behind a process-wide lock with a 0.4s floor, so a
+                    // page of eight used to serialise into seconds of waiting. media() short-circuits
+                    // on a non-empty mediaUrl, so filling it here is the whole change.
+                    it.mediaUrl = o.isNull("play_url") ? "" : o.optString("play_url", "");
                     if (it.code.length() > 0) out.add(it);
                 }
                 Integer next = res.isNull("cursor") ? null : Integer.valueOf(res.optInt("cursor"));

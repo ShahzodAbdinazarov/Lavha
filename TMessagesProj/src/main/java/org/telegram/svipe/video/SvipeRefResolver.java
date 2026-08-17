@@ -87,6 +87,15 @@ public class SvipeRefResolver {
         public Object refParent;    // TLRPC.WebPage when the document came from a link preview
         /** Sessionless https media URL the backend attached to this reference; see {@link SvipeDiscover.Item#playUrl}. */
         public String playUrl;
+        /**
+         * This reference came from the GUEST feed, fetched before our token existed.
+         *
+         * <p>It is a real, playable reel and nothing about it is second-class while it is on screen.
+         * What the flag buys is the hand-over: once the personalised page arrives, the tokenless
+         * items the viewer has not reached are retired in favour of it, so the choice of what to
+         * watch stops being generic as soon as we know who is watching.
+         */
+        public boolean tokenless;
         /** Pixel size as the SERVER knows it, so a page can be framed before anything is resolved. */
         public int width;
         public int height;

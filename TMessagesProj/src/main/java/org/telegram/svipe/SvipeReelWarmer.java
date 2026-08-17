@@ -88,13 +88,21 @@ public final class SvipeReelWarmer {
                 }
                 final SvipeWatchedSet watched = new SvipeWatchedSet(account);
                 final SvipeBlockedChannels blocked = new SvipeBlockedChannels(account);
-                AndroidUtilities.runOnUIThread(() -> SvipeAuth.ensureToken(account, token -> {
-                    if (token == null) { // auth will be retried by whoever needs it next
-                        done.run();
-                        return;
-                    }
-                    fetchPage(account, token, watched, blocked, done);
-                }));
+                // Do we already have a token, or is the auth chain about to run? The answer decides
+                // whether anybody is waiting on it. Measured on this account: with a stored token
+                // ensureToken returns in microseconds; without one the chain took 1,386-4,580 ms,
+                // and 3,134 ms on a cold install.
+                final boolean haveToken = SvipeAuth.getStoredToken(account) != null;
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (!haveToken) fetchGuestPage(account, watched, blocked);
+                    SvipeAuth.ensureToken(account, token -> {
+                        if (token == null) { // auth will be retried by whoever needs it next
+                            done.run();
+                            return;
+                        }
+                        fetchPage(account, token, watched, blocked, done);
+                    });
+                });
             } catch (Exception e) {
                 FileLog.e(e);
                 done.run();
@@ -164,6 +172,56 @@ public final class SvipeReelWarmer {
             warmedAtMs = System.currentTimeMillis();
             FileLog.d("svipe: warm-up holds " + w.items.size() + " reels, resolving the head");
             resolveHead(account, w, 0, done);
+        });
+    }
+
+    /**
+     * A page fetched with NO Telegram identity, while the auth chain is still running.
+     *
+     * <p>The reason this exists: the chain that mints our token measured 1,386-4,580 ms on this
+     * account, and 3,134 ms on a cold install. Until it finishes there is no token, so there is no
+     * {@code /v1/feed} — and the person opened the app to watch something. The guest feed needs no
+     * token at all (a device id mints its own), and since playback stopped resolving anything, what
+     * comes back is playable on arrival. So the wait for auth stops being a wait for a video.
+     *
+     * <p>Nothing here gates {@code done}: this is a bonus running beside the real warm-up, and the
+     * token path owns the completion callback. Nor does it overwrite a personalised page — if auth
+     * won the race, its page is strictly better and stays.
+     *
+     * <p>The items are marked {@code tokenless} so the reels screen can retire the ones the viewer
+     * never reached once the personalised page lands. Everything they play in the meantime is real,
+     * and the events they generate are held and sent the moment the token exists.
+     */
+    private static void fetchGuestPage(final int account, final SvipeWatchedSet watched,
+                                       final SvipeBlockedChannels blocked) {
+        final long startedAt = System.currentTimeMillis();
+        SvipeGuest.reels(0, (items, next, err) -> {
+            if (items == null || items.isEmpty()) {
+                FileLog.d("svipe: tokenless warm-up got nothing (" + err + ")");
+                return;
+            }
+            if (warm != null) return;   // auth won the race; its page is the better one
+            final Warm w = new Warm();
+            for (SvipeGuest.Item g : items) {
+                if (g.username == null || g.username.isEmpty()) continue;
+                if (g.mediaUrl == null || g.mediaUrl.isEmpty()) continue;   // nothing to play yet
+                if (watched.isWatched(g.channelId, g.messageId) || blocked.contains(g.channelId)) continue;
+                SvipeRefResolver.VideoRef ref = new SvipeRefResolver.VideoRef();
+                ref.channelId = g.channelId;
+                ref.messageId = g.messageId;
+                ref.username = g.username;
+                ref.shareUrl = g.shareUrl();
+                ref.playUrl = g.mediaUrl;
+                ref.durationMs = g.durationMs;
+                ref.tokenless = true;
+                w.items.add(ref);
+            }
+            if (w.items.isEmpty()) return;
+            if (warm != null) return;   // checked again: the fetch above was not instantaneous
+            warm = w;
+            warmedAtMs = System.currentTimeMillis();
+            FileLog.d("svipe: tokenless warm-up holds " + w.items.size() + " playable reels in "
+                    + (System.currentTimeMillis() - startedAt) + "ms, auth still running");
         });
     }
 

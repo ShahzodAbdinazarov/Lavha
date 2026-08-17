@@ -319,6 +319,17 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
          * token has expired.
          */
         String playUrl;
+        /**
+         * Came from the guest page fetched before our token existed (see {@link SvipeReelWarmer}).
+         *
+         * <p>Playable and real while it is on screen — the point of it is that the viewer watches
+         * instead of waiting out the auth chain. What the flag buys is the hand-over: when the
+         * personalised page lands, the tokenless items AHEAD of the viewer are retired in favour of
+         * it, so the list stops being generic as soon as we know whose list it should be. The ones
+         * already passed are left alone; rewriting history behind somebody mid-session is worse than
+         * a slightly mixed feed.
+         */
+        boolean tokenless;
         int width;            // server-known pixel size, so the page can be framed before any resolve
         int height;
         int durationMs;       // server-known length; the watch classification needs it before a resolve
@@ -975,6 +986,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             it.topicId = r.topicId;
             it.recId = r.recId;
             it.playUrl = r.playUrl;
+            it.tokenless = r.tokenless;
             it.width = r.width;
             it.height = r.height;
             it.durationMs = r.durationMs;
@@ -995,6 +1007,33 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         currentPosition = -1;
         AndroidUtilities.runOnUIThread(this::checkCurrentPage, 0);
         return true;
+    }
+
+    /**
+     * Retire the guest-page reels the viewer has not reached, now that a personalised page exists.
+     *
+     * <p>The tokenless page is what let them start watching while the auth chain ran. It was chosen
+     * for nobody in particular, so the moment a page chosen for THEM arrives, the rest of it should
+     * go — otherwise the first minute of every cold start stays generic long after it needed to be.
+     *
+     * <p>Two things are deliberately left alone. The reel on screen and the one after it: swapping
+     * out what somebody is about to swipe onto is a worse experience than one more generic video.
+     * And everything behind the current position: those were watched, their events are already sent
+     * or buffered, and rewriting history under a viewer mid-session is the kind of thing this screen
+     * has been bitten by before.
+     */
+    private void retireTokenlessAhead() {
+        final int keepThrough = Math.max(currentPosition, 0) + 1;   // current + the next swipe
+        int removed = 0;
+        for (int i = items.size() - 1; i > keepThrough; i--) {
+            if (!items.get(i).tokenless) continue;
+            items.remove(i);
+            adapter.notifyItemRemoved(i);
+            removed++;
+        }
+        if (removed > 0) {
+            FileLog.d("svipe: retired " + removed + " tokenless reels the personalised page replaces");
+        }
     }
 
     /** Background feed load that MERGES into the playing queue instead of replacing it. */
@@ -1132,6 +1171,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 return;
             }
             token = t;
+            flushPendingEvents();   // whatever was watched before auth finished now has an owner
             if (!append && items.isEmpty()) setProgressStatus(getString(R.string.SvipeReelsLoadingFeed));
             // First request carries the seed (discover tap); afterwards the cursor carries page+seed.
             String path = "/v1/feed";
@@ -1183,6 +1223,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 if (!additive) {
                     items.clear();
                 }
+                // This page knows who is watching. Anything still queued from the tokenless guest
+                // page does not, so make room for it before appending.
+                if (additive) retireTokenlessAhead();
                 int before = items.size();
                 int added = 0;
                 JSONArray arr = res.optJSONArray("items");
@@ -1317,10 +1360,21 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         // A reel played over its public URL may still be unresolved when the user swipes away, and
         // dropping that event would lose exactly the signal the ranking is built on. The feed
         // carries the duration for this reason, so the classification stays meaningful either way.
-        if (item.mo == null && item.durationMs <= 0) return; // nothing shown, nothing to say
+        //
+        // Third source, and the reason there is one: the tokenless guest page that now opens a cold
+        // start is a different payload from /v1/feed, and an older backend on the other end of it
+        // sends no length at all. The player knows — it is still alive here, released a few lines
+        // further down — so ask it rather than throw the event away.
         long durationMs = item.mo != null
                 ? (long) (item.mo.getDuration() * 1000)
                 : item.durationMs;
+        if (durationMs <= 0 && currentPlayer != null) {
+            try {
+                long fromPlayer = currentPlayer.getDuration();
+                if (fromPlayer > 0) durationMs = fromPlayer;
+            } catch (Exception ignore) {}
+        }
+        if (item.mo == null && durationMs <= 0) return; // nothing shown, nothing to say
         String classification = SvipeWatchEvent.classify(watched, durationMs);
         try {
             JSONObject payload = new JSONObject();
@@ -3032,9 +3086,35 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         } catch (Exception ignore) {}
     }
 
+    /**
+     * Events recorded before our token existed, waiting for it.
+     *
+     * <p>The reels screen can now start playing before the auth chain has finished — the feed and
+     * the bytes both arrive without a Telegram identity — so the first things a person watches
+     * happen while {@code token} is still null. This used to be a bare {@code return}: those events
+     * were dropped, and the recommender learned nothing from the two or three reels that shape a
+     * first impression more than any later ones. Bounded, because a device that never authenticates
+     * must not grow a list forever.
+     */
+    private final ArrayList<JSONObject> pendingEvents = new ArrayList<>();
+    private static final int MAX_PENDING_EVENTS = 40;
+
+    /** Send whatever was recorded before the token arrived. Called the moment one does. */
+    private void flushPendingEvents() {
+        if (token == null || pendingEvents.isEmpty()) return;
+        final ArrayList<JSONObject> batches = new ArrayList<>(pendingEvents);
+        pendingEvents.clear();
+        FileLog.d("svipe: flushing " + batches.size() + " event batch(es) buffered before auth");
+        for (JSONObject b : batches) postEvents(b, false);
+    }
+
     /** POST with one silent re-auth retry on 401: watch signals must survive token expiry. */
     private void postEvents(JSONObject batch, boolean retried) {
-        if (token == null) return;
+        if (token == null) {
+            // Not dropped — held. See pendingEvents.
+            if (pendingEvents.size() < MAX_PENDING_EVENTS) pendingEvents.add(batch);
+            return;
+        }
         SvipeApi.post("/v1/events", batch, token, (r, c, e) -> {
             if (c == 401 && !retried) {
                 SvipeAuth.invalidateAccessToken(account);
