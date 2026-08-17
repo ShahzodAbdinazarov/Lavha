@@ -85,6 +85,12 @@ public class SvipeRefResolver {
         public TLRPC.Chat chat;
         public boolean resolving;
         public Object refParent;    // TLRPC.WebPage when the document came from a link preview
+        /** Sessionless https media URL the backend attached to this reference; see {@link SvipeDiscover.Item#playUrl}. */
+        public String playUrl;
+        /** Pixel size as the SERVER knows it, so a page can be framed before anything is resolved. */
+        public int width;
+        public int height;
+        public int durationMs;
         public final ArrayList<Runnable> resolveCallbacks = new ArrayList<>();
 
         public static VideoRef of(SvipeDiscover.Item item) {
@@ -95,6 +101,10 @@ public class SvipeRefResolver {
             r.shareUrl = item.shareUrl;
             r.topicId = item.topicId;
             r.local = item.local;
+            r.playUrl = item.playUrl;
+            r.width = item.width;
+            r.height = item.height;
+            r.durationMs = item.durationMs;
             return r;
         }
 

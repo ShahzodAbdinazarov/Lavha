@@ -15,6 +15,7 @@ import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Shader;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.graphics.PorterDuff;
@@ -305,6 +306,22 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         int likeCount;        // total reactions count, kept in sync locally
         boolean resolving;    // an MTProto resolve is in flight (prevents duplicate prefetch)
         Object refParent;     // TLRPC.WebPage when the document came from a link preview (SvipeWebRef)
+        /**
+         * A playable https URL for this reel, supplied by the backend with the feed.
+         *
+         * <p>When it is here the reel plays with NO Telegram session: no contacts.resolveUsername,
+         * no channels.getMessages, no FileLoader — an ordinary HTTPS stream off Telegram's CDN, the
+         * same route the guest surface has always used. That call is the most flood-limited one this
+         * app makes and watching is what spends it fastest, so taking watching off it is the point.
+         *
+         * <p>Null is normal: the first serve of a reference carries none, and anything over the
+         * ~20 MB public-embed ceiling never will. Both fall back to MTProto, and so does a URL whose
+         * token has expired.
+         */
+        String playUrl;
+        int width;            // server-known pixel size, so the page can be framed before any resolve
+        int height;
+        int durationMs;       // server-known length; the watch classification needs it before a resolve
         final java.util.ArrayList<Runnable> resolveCallbacks = new java.util.ArrayList<>(); // waiters for an in-flight resolve — never dropped
         int resolveAttempts;  // bounded retry counter for transient resolve failures
         boolean preloadStarted;                          // a head-preload was requested
@@ -957,6 +974,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             it.shareUrl = r.shareUrl;
             it.topicId = r.topicId;
             it.recId = r.recId;
+            it.playUrl = r.playUrl;
+            it.width = r.width;
+            it.height = r.height;
+            it.durationMs = r.durationMs;
             it.mo = r.mo;
             it.chat = r.chat;
             if (it.mo != null) {
@@ -1183,6 +1204,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                         it.shareUrl = o.isNull("share_url") ? null : o.optString("share_url", null);
                         it.topicId = o.isNull("topic_id") ? null : o.optInt("topic_id");
                         it.recId = recId;
+                        it.playUrl = o.isNull("play_url") ? null : o.optString("play_url", null);
+                        it.width = o.optInt("width", 0);
+                        it.height = o.optInt("height", 0);
+                        it.durationMs = o.optInt("duration_ms", 0);
                         items.add(it);
                         added++;
                     }
@@ -1289,8 +1314,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         itemShownMs = 0;
         watchStartMs = 0;
         watchedAccumMs = 0;
-        if (item.mo == null) return; // never resolved -> never actually shown
-        long durationMs = (long) (item.mo.getDuration() * 1000);
+        // A reel played over its public URL may still be unresolved when the user swipes away, and
+        // dropping that event would lose exactly the signal the ranking is built on. The feed
+        // carries the duration for this reason, so the classification stays meaningful either way.
+        if (item.mo == null && item.durationMs <= 0) return; // nothing shown, nothing to say
+        long durationMs = item.mo != null
+                ? (long) (item.mo.getDuration() * 1000)
+                : item.durationMs;
         String classification = SvipeWatchEvent.classify(watched, durationMs);
         try {
             JSONObject payload = new JSONObject();
@@ -1349,6 +1379,20 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 final int fpos = pos;
                 resolveItem(item, () -> updateActions(fpos)); // background enrich for the action rail
             }
+        } else if (hasPlayUrl(item)) {
+            // Nothing resolved, and nothing needs to be: the backend attached a plain https URL for
+            // this reel's bytes, so playback starts NOW and MTProto never enters the watching path.
+            // The resolve still runs — the action rail needs a message to show likes, comments and a
+            // channel — but it runs BEHIND the video instead of in front of it.
+            startPlayback(null, null, pos, item);
+            final int fpos = pos;
+            resolveItem(item, () -> {
+                updateActions(fpos);
+                // The URL may have failed while the resolve was in flight (an expired token 403s).
+                if (currentPosition == fpos && item.mo != null && currentPlayer == null) {
+                    startPlayback(item.mo, item.mo.getDocument(), fpos, item);
+                }
+            });
         } else {
             final int fpos = pos;
             resolveItem(item, () -> {
@@ -1360,6 +1404,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         }
         prefetchAround(pos);
         ensureFullDownloadsAhead(pos);
+    }
+
+    /** True when this reel can be streamed with no Telegram session at all. */
+    private static boolean hasPlayUrl(FeedItem it) {
+        return it != null && it.playUrl != null && !it.playUrl.isEmpty();
     }
 
     private ReelsHolder holderAt(int pos) {
@@ -1481,6 +1530,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             it.preloadPriority = SvipePreloadPlan.priorityFor(i, pos) == SvipePreloadPlan.NORMAL
                     ? FileLoader.PRIORITY_NORMAL : FileLoader.PRIORITY_LOW;
             it.preloadBypassGate = SvipePreloadPlan.bypassesGate(i, pos);
+            if (it.mo == null && hasPlayUrl(it)) {
+                // Nothing to resolve and nothing for FileLoader to do: this reel's bytes arrive over
+                // HTTPS, and prepareNextPlayer already buffers the one the user is about to reach.
+                // Resolving the rest of the window would spend the flood budget on reels nobody has
+                // asked for, which is exactly what this whole change exists to stop.
+                continue;
+            }
             if (it.mo == null) {
                 resolveItem(it, null); // resolveItem head-preloads itself on completion
             } else {
@@ -1719,6 +1775,16 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     }
 
 
+    /**
+     * Start this reel playing.
+     *
+     * <p>{@code mo} and {@code doc} may be NULL, and that is the sessionless path: the backend
+     * attached an https URL for the media, so there is no message to resolve and no document to load
+     * before a frame can be drawn. Everything below that needs a document — the quality ladder, the
+     * stream priorities, the dwell-triggered full download — belongs to the MTProto path and is
+     * simply skipped; the bytes come off Telegram's CDN over ordinary HTTPS instead, which is the
+     * same route the guest surface has used since it shipped.
+     */
     private void startPlayback(MessageObject mo, TLRPC.Document doc, int pos, FeedItem item) {
         org.telegram.svipe.SvipeObserved.touch();   // watching: keep background reporting away
         // Async callers (resolve callbacks, the start checker, deferred recovery) can land after the
@@ -1727,13 +1793,20 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (isPaused || isFinished) return;
         ReelsHolder holder = holderAt(pos);
         if (holder == null) return;
+        final boolean viaUrl = doc == null && hasPlayUrl(item);
+        if (doc == null && !viaUrl) return;   // nothing to play and no URL to play it from
         try {
-            float ar = SvipeVideoLadder.videoAspect(doc);
+            // With no document there is still a shape to frame: the server sends the pixel size with
+            // the feed precisely so a page can be laid out before anything is resolved.
+            float ar = viaUrl
+                    ? (item.width > 0 && item.height > 0 ? item.width / (float) item.height : 0f)
+                    : SvipeVideoLadder.videoAspect(doc);
             if (ar > 0) holder.aspect.setAspectRatio(ar, 0);
 
             // A horizontal long-form entry seeded from the Search grid must not loop and must not be
-            // pulled down in full — see SvipeVideoLadder.isLongForm.
-            final boolean longForm = SvipeVideoLadder.isLongForm(doc);
+            // pulled down in full — see SvipeVideoLadder.isLongForm. Anything reachable by URL is
+            // under the ~20 MB public-embed ceiling, so it is never long-form.
+            final boolean longForm = !viaUrl && SvipeVideoLadder.isLongForm(doc);
             final boolean prepared = nextPlayer != null && nextPlayerPos == pos;
             VideoPlayer player;
             if (prepared) {
@@ -1754,18 +1827,20 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             // looping/seeking seamlessly while a skipped reel costs only the streamed prefix.
             // Real reference: this ladder feeds preparePlayer, whose stream URIs must carry a live
             // file reference (one getFileReference per played reel — legacy paid the same).
-            final ArrayList<VideoPlayer.Quality> qualities = SvipeVideoLadder.playbackQualitiesFor(account, mo);
+            final ArrayList<VideoPlayer.Quality> qualities =
+                    viaUrl ? null : SvipeVideoLadder.playbackQualitiesFor(account, mo);
             if (qualities != null) {
                 for (TLRPC.Document d : SvipeVideoLadder.ladderVideoDocs(qualities)) {
                     FileStreamLoadOperation.setPriorityForDocument(d, FileLoader.PRIORITY_HIGH);
                 }
-            } else {
+            } else if (!viaUrl) {
                 FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_HIGH);
             }
             final VideoPlayer boundPlayer = player;
             // Long-form streams only: there are no loops to serve from disk, and completing a
             // 40-minute file after 3 seconds of dwell would be hundreds of MB for a glance.
-            if (!longForm) AndroidUtilities.runOnUIThread(() -> {
+            // Nothing to complete on the URL path either — there is no FileLoader document behind it.
+            if (!longForm && !viaUrl) AndroidUtilities.runOnUIThread(() -> {
                 if (currentPosition == pos && currentPlayer == boundPlayer) {
                     try {
                         // Complete the file that is ACTUALLY streaming (same doc => FileLoader merges
@@ -1798,7 +1873,27 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     }
                 }
                 @Override
-                public void onError(VideoPlayer p, Exception e) { FileLog.e(e); holder.showLoading(false); }
+                public void onError(VideoPlayer p, Exception e) {
+                    FileLog.e(e);
+                    holder.showLoading(false);
+                    // The URL path has one failure MTProto does not: the CDN token can expire before
+                    // we hand it out. Drop it and let the ordinary path take over, so a stale token
+                    // costs one reload rather than a reel that never starts.
+                    if (viaUrl && currentPosition == pos && currentPlayer == boundPlayer) {
+                        FileLog.d("svipe: public url failed pos=" + pos + " — falling back to MTProto");
+                        item.playUrl = null;
+                        releaseCurrentPlayer();
+                        if (item.mo != null) {
+                            startPlayback(item.mo, item.mo.getDocument(), pos, item);
+                        } else {
+                            resolveItem(item, () -> {
+                                if (currentPosition == pos && item.mo != null && currentPlayer == null) {
+                                    startPlayback(item.mo, item.mo.getDocument(), pos, item);
+                                }
+                            });
+                        }
+                    }
+                }
                 @Override
                 public void onVideoSizeChanged(int width, int height, int unappliedRotationDegrees, float pixelWidthHeightRatio) {
                     if (unappliedRotationDegrees == 90 || unappliedRotationDegrees == 270) { int t = width; width = height; height = t; }
@@ -1892,7 +1987,14 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             if (!prepared) {
                 // preparePlayer MUST come after setDelegate: VideoPlayer reports the first state
                 // change during prepare and NPEs on a null delegate.
-                if (qualities != null) {
+                if (viaUrl) {
+                    // A plain https mp4 on Telegram's public CDN, Range-served. No document, no
+                    // FileLoader, no auth key, and nothing spent from the flood budget.
+                    playbackSource = "public_url";
+                    playbackRungs = 0;
+                    FileLog.d("svipe: play pos=" + pos + " source=public-url fromQueue=" + item.fromQueue);
+                    player.preparePlayer(Uri.parse(item.playUrl), "other");
+                } else if (qualities != null) {
                     // Adaptive path: a fully-cached rendition is pinned (plays from disk, works
                     // offline); otherwise AUTO — ExoPlayer starts on a rung the bandwidth estimate
                     // sustains and adapts mid-play instead of buffering.
@@ -2201,6 +2303,33 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         releaseNextPlayer();
         if (!SvipePreloadPlan.shouldPrepareNextPlayer(pos, items.size())) return;
         FeedItem item = items.get(pos);
+        if (item.mo == null && hasPlayUrl(item)) {
+            // Buffer the next reel with no resolve at all. This is the read-ahead that used to cost
+            // one contacts.resolveUsername per reel in the window — for reels the user may never
+            // reach — and it is the single biggest consumer of the budget that has twice taken this
+            // app down. ExoPlayer buffers the https stream the same way it buffers a Telegram one.
+            try {
+                VideoPlayer p = new VideoPlayer(true, false);
+                p.setIsReels();
+                p.setLooping(true);   // under the embed ceiling, so never long-form
+                p.setDelegate(new VideoPlayer.VideoPlayerDelegate() {
+                    @Override public void onStateChanged(boolean playWhenReady, int playbackState) {}
+                    @Override public void onError(VideoPlayer player, Exception e) { FileLog.e(e); }
+                    @Override public void onVideoSizeChanged(int w, int h, int rot, float par) {}
+                    @Override public void onRenderedFirstFrame() {}
+                    @Override public void onSurfaceTextureUpdated(SurfaceTexture st) {}
+                    @Override public boolean onSurfaceDestroyed(SurfaceTexture st) { return false; }
+                });
+                p.preparePlayer(Uri.parse(item.playUrl), "other");
+                p.setPlayWhenReady(false);
+                nextPlayer = p;
+                nextPlayerPos = pos;
+                FileLog.d("svipe: prepared next player pos=" + pos + " from public url");
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+            return;
+        }
         if (item.mo == null) {
             resolveItem(item, () -> {
                 if (currentPosition + 1 == pos && nextPlayer == null) prepareNextPlayer(pos);
