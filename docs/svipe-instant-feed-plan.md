@@ -211,12 +211,59 @@ signed-in play through the identical path, and the only difference left is who c
 
 ## 6. Order of work
 
-1. **Shared cold list in Redis** (§2). Cheapest, touches no client, helps every new user.
-2. **Media URL in the feed payload + warm-URL worker** (§5). Unlocks everything else and removes
-   both the resolve and the per-video call.
+1. ~~**Shared cold list in Redis** (§2).~~ **SHIPPED to dev, 2026-08-17.** `app/recsys/coldlist.py`.
+2. ~~**Media URL in the feed payload + warm-URL worker** (§5).~~ **SHIPPED to dev, 2026-08-17.**
+   `app/content/play_urls.py` + a `play_urls` lane in the sessionless indexer; client side in
+   `ReelsActivity` and `SvipeReelWarmer`.
 3. **Guest feed while authenticating** (§3). Biggest cold-start win for signed-in users.
-4. **Kill the Wi-Fi full download; duration-aware prefix; 5-deep graded window** (§4).
+4. **Kill the Wi-Fi full download; duration-aware prefix; 5-deep graded window** (§4). PARTLY done:
+   the ahead-window and the offline cushion no longer RESOLVE reels they could already play. The
+   full download itself is left in place — see the note below.
 5. **Per-user A/B precompute with debounce** (§2). Most work, and it only pays once 1–4 are done.
+
+### What shipped, and what it measured
+
+Everything here was measured on 2026-08-17 against dev, not estimated.
+
+**The URL reaches the client and the client uses it.** A device with no history asks for `/v1/feed`
+and gets the shared cold list — `source: discover` — with **18 of its 20 items already carrying
+`play_url`**, because building that list also queues its 300 references for the worker. On the
+emulator, one cold start and three swipes:
+
+    svipe: play pos=0 source=public-url
+    svipe: first frame pos=0 in 1360ms prepared=false
+    svipe: prepared next player pos=1 from public url
+    svipe: first frame pos=1 in 6ms prepared=true
+    svipe: prepared next player pos=2 from public url
+    svipe: first frame pos=2 in 5ms prepared=true
+    svipe: prepared next player pos=3                  <- no URL for this one
+    svipe: first frame pos=3 in 15ms prepared=true
+
+**`contacts.resolveUsername`: zero calls in that session.** Twelve `channels.getMessages` remain,
+filling action rails behind reels that are already playing. That distinction is the whole point —
+`getMessages`/`getHistory` were open on the afternoon this was written while `resolveUsername` was
+locked out for 4,122 seconds. Position 3 is the fallback working correctly: no URL, so it took the
+old path.
+
+**The worker drains continuously.** The `play_urls` lane in the sessionless indexer went from 96 to
+214 filled references on dev while this was being written, going through the same request meter as
+the rest of that process. A fill pass measured 18 of 19 filled; the misses are audio posts (no
+`<video src>` in the embed) and posts over the ceiling, and each one is a tombstone rather than a
+repeated scrape.
+
+**[CORRECTION] Demand-driven filling is one page behind, and for one user it never catches up.**
+A feed serves 20 references, records that none had a URL, and the worker fills them — but the seen
+filter guarantees that user's next page holds *different* references, so they never see the benefit
+of their own demand; somebody else does. This is why the cold list warms its own URLs on build. It
+is the one list that is shared, deterministic and served to every new device, so warming it once is
+what makes a first feed playable without a session.
+
+**[CORRECTION] The Wi-Fi full download is not deleted.** §4 asks for it, but it is also what fills
+the persisted offline queue — a shipped feature asked for explicitly ("full-download always"), whose
+whole purpose is instant cold-start playback with no network. Retiring it is a product decision, not
+a side effect of this work, so it was left in place and flagged here instead. What did change is
+that neither the ahead window nor the cushion will RESOLVE a reel that already carries a URL: that
+was spending the scarcest budget on the least urgent work.
 
 ---
 
