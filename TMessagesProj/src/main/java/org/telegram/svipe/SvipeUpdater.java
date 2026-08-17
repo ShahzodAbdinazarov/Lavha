@@ -47,7 +47,7 @@ import java.util.Locale;
  *
  * <p>The Play build ({@code uz.svipe.app}) updates through Google Play; Telegram's own MTProto update
  * check is disabled for every Svipe build. For the {@code .beta} (dev) and {@code .web} (prod) builds
- * this polls the Svipe backend over HTTPS ({@code GET /api/app/update}; routed beta->lavha-dev,
+ * this polls the Svipe backend over HTTPS ({@code GET /api/app/update}; routed beta->dev.svipe.uz,
  * web->svipe.uz by {@link SvipeConfig}). On a newer version it shows the native-style
  * {@link SvipeUpdateSheet} and exposes the update state to the native-style drawer banner
  * ({@link SvipeUpdateLayout}); downloading runs over HTTP with SHA-256 verification, installing via

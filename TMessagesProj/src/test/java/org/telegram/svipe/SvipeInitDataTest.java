@@ -10,7 +10,7 @@ public class SvipeInitDataTest {
     // Shape matches a real messages.requestWebView result: initData rides in the URL fragment as
     // the tgWebAppData param, itself URL-encoded one extra time.
     private static final String URL =
-            "https://lavha-dev.abdinazarov.uz/webapp"
+            "https://dev.svipe.uz/webapp"
                     + "#tgWebAppData=query_id%3DAAHtest%26user%3D%257B%2522id%2522%253A777%257D"
                     + "%26auth_date%3D1662771648%26hash%3Dabc123"
                     + "&tgWebAppVersion=6.7&tgWebAppPlatform=android";

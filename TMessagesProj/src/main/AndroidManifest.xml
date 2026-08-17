@@ -280,6 +280,9 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:host="svipe.uz" android:scheme="https" />
                 <data android:host="www.svipe.uz" android:scheme="https" />
+                <data android:host="dev.svipe.uz" android:scheme="https" />
+                <!-- The dev host we used before dev.svipe.uz. Kept because links carrying it are
+                     already out there and a build in the field still points at it. -->
                 <data android:host="lavha-dev.abdinazarov.uz" android:scheme="https" />
             </intent-filter>
             <intent-filter android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:priority="1">

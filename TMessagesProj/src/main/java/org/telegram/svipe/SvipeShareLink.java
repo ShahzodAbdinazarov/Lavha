@@ -44,7 +44,9 @@ public final class SvipeShareLink {
     /** Hosts whose {@code /<code>} pages are ours to open. Both environments, so a beta build can
      *  still open a prod link (and the other way round) instead of bouncing it to a browser. */
     private static final String[] HOSTS = {
-            "svipe.uz", "www.svipe.uz", "lavha-dev.abdinazarov.uz",
+            "svipe.uz", "www.svipe.uz", "dev.svipe.uz",
+            // The dev host that came before dev.svipe.uz; links carrying it are still in the wild.
+            "lavha-dev.abdinazarov.uz",
     };
 
     /** Top-level paths that are PAGES, not codes — the backend's own reserved list, mirrored. */

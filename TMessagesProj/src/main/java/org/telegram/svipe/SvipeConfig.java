@@ -3,10 +3,10 @@ package org.telegram.svipe;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.MessagesController;
 
-/** Svipe backend connection constants. Prod (release) -> svipe.uz; dev/beta build -> lavha-dev. */
+/** Svipe backend connection constants. Prod (release) -> svipe.uz; dev/beta build -> dev.svipe.uz. */
 public class SvipeConfig {
     private static final String PROD_BASE_URL = "https://svipe.uz";
-    private static final String DEV_BASE_URL = "https://lavha-dev.abdinazarov.uz";
+    private static final String DEV_BASE_URL = "https://dev.svipe.uz";
     private static final String PROD_BOT = "Svipe_auth_bot";
     private static final String DEV_BOT = "Lavha_auth_bot";
 
