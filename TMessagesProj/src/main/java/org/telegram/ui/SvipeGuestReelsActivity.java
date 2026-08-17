@@ -3,8 +3,9 @@ package org.telegram.ui;
 import android.content.Context;
 import android.graphics.Color;
 import android.net.Uri;
+import android.view.GestureDetector;
 import android.view.Gravity;
-import android.view.TextureView;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
@@ -18,9 +19,10 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
+import org.telegram.svipe.SvipeCharDrawable;
 import org.telegram.svipe.SvipeGuest;
 import org.telegram.ui.ActionBar.BaseFragment;
-import org.telegram.ui.Components.BackupImageView;
+import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.VideoPlayer;
@@ -30,22 +32,24 @@ import java.util.ArrayList;
 /**
  * Svipe for somebody who has not signed in: reels, and nothing else.
  *
- * <p><b>Why this is its own screen rather than a mode of {@link ReelsActivity}.</b> That screen is
- * built on the account — it resolves each post over MTProto and streams the bytes through
- * {@code FileLoader}, both of which need an auth key. A guest has none. What they get instead is a
- * plain HTTPS mp4 from Telegram's public CDN, handed over by our backend, played by the same
- * ExoPlayer wrapper with none of the resolve machinery in front of it. Threading "is this a guest"
- * through three and a half thousand lines to express that would have been the expensive way to say
- * something simple.
+ * <p><b>The same reel, drawn by the same code.</b> Every page here comes from
+ * {@link ReelsActivity#createPage} — the identical view tree the signed-in feed uses, down to the
+ * action rail, the channel row and the caption. A guest surface with its own hand-built layout would
+ * have looked almost right on the day it was written and wrong a week later, because only one of the
+ * two would ever get the next change. There is one layout; this screen fills it with different data
+ * and answers its taps differently.
  *
- * <p><b>No tabs.</b> A guest has one surface. Music, Video, Chats and Profile all need an account
- * to mean anything, and a bottom bar offering four doors that each open onto a sign-up prompt reads
- * as a broken app rather than a generous one. So the bar is not drawn, and the only door out is the
- * one button that says what it does.
+ * <p><b>Why the screen itself is separate.</b> {@link ReelsActivity} is built on the account: it
+ * resolves each post over MTProto and streams the bytes through {@code FileLoader}, both of which
+ * need an auth key a guest does not have. What a guest gets instead is a plain HTTPS mp4 on
+ * Telegram's public CDN, handed over by our backend. Same picture, different plumbing.
  *
- * <p><b>Every action is a wall, deliberately.</b> Liking, commenting and following are not features
- * we are withholding — they physically happen on the user's Telegram account. The prompt says that,
- * because "sign up to continue" with no reason is what makes people close an app.
+ * <p><b>No tabs.</b> Music, Video, Chats and Profile all need an account to mean anything, and a
+ * bottom bar offering four doors that each open onto a sign-up prompt reads as a broken app rather
+ * than a generous one. So the bar is not drawn.
+ *
+ * <p><b>Every control is a wall, and the wall explains itself</b> — see
+ * {@link org.telegram.svipe.SvipeGuestSignUpSheet}.
  */
 public class SvipeGuestReelsActivity extends BaseFragment {
 
@@ -54,19 +58,31 @@ public class SvipeGuestReelsActivity extends BaseFragment {
     private LinearLayoutManager layoutManager;
     private Adapter adapter;
     private TextView emptyView;
+    private GestureDetector tapDetector;
 
     private VideoPlayer player;
-    private TextureView boundTexture;
     private int playingIndex = -1;
     private Integer cursor = 0;
     private boolean loading;
 
     @Override
     public View createView(Context context) {
-        // Full bleed, the way every reel surface in the app is: the action bar keeps its back
-        // gesture and its slot in the fragment stack, it just stops taking a strip of the video.
+        // Full bleed, the way every reel surface in the app is: the action bar keeps its back gesture
+        // and its slot in the fragment stack, it just stops taking a strip of the video.
         actionBar.setAddToContainer(false);
-        FrameLayout root = new FrameLayout(context);
+        // The detector sits on the ROOT and reads dispatchTouchEvent, not on the list. RecyclerListView
+        // handles its own touches, so an OnItemTouchListener never saw the taps that land on the rail —
+        // the first attempt let every press through to play/pause. dispatchTouchEvent is the one place
+        // that sees a gesture before anybody can claim it.
+        FrameLayout root = new FrameLayout(context) {
+            @Override
+            public boolean dispatchTouchEvent(MotionEvent ev) {
+                if (tapDetector != null) {
+                    tapDetector.onTouchEvent(ev);
+                }
+                return super.dispatchTouchEvent(ev);
+            }
+        };
         root.setBackgroundColor(Color.BLACK);
 
         listView = new RecyclerListView(context);
@@ -82,6 +98,21 @@ public class SvipeGuestReelsActivity extends BaseFragment {
                 if (newState == RecyclerView.SCROLL_STATE_IDLE) {
                     onSettled();
                 }
+            }
+        });
+
+        // Anything landing on a control opens the sign-in sheet; anything else toggles playback. Read
+        // as a gesture rather than per-child onClick for the same reason the signed-in feed does it:
+        // RecyclerView cancels a child's touch the instant it claims the gesture for vertical paging.
+        tapDetector = new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onSingleTapConfirmed(MotionEvent e) {
+                if (hitsControl(e)) {
+                    wall();
+                } else {
+                    togglePlayback();
+                }
+                return true;
             }
         });
         root.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
@@ -103,7 +134,7 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         signUp.setTextSize(15);
         signUp.setTypeface(AndroidUtilities.bold());
         signUp.setGravity(Gravity.CENTER);
-        signUp.setBackground(org.telegram.ui.ActionBar.Theme.createSimpleSelectorRoundRectDrawable(
+        signUp.setBackground(Theme.createSimpleSelectorRoundRectDrawable(
                 AndroidUtilities.dp(20), 0x33FFFFFF, 0x55FFFFFF));
         signUp.setPadding(AndroidUtilities.dp(18), 0, AndroidUtilities.dp(18), 0);
         signUp.setOnClickListener(v -> wall());
@@ -111,9 +142,99 @@ public class SvipeGuestReelsActivity extends BaseFragment {
                 Gravity.TOP | Gravity.RIGHT, 0,
                 12 + AndroidUtilities.statusBarHeight / AndroidUtilities.density, 12, 0));
 
+        // The comment bar the signed-in feed carries, in the same slot and the same shape: 44dp tall,
+        // 22dp corners, 7dp side insets, translucent dark, sitting above the navigation bar. It is not
+        // a real ChatActivityEnterView — that one belongs to an account and would have nothing to send
+        // to — but a guest should SEE where commenting happens rather than discover later that the
+        // screen was missing a piece. Pressing it says why it cannot be used yet.
+        FrameLayout commentBar = new FrameLayout(context);
+        android.graphics.drawable.GradientDrawable commentBg = new android.graphics.drawable.GradientDrawable();
+        commentBg.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        commentBg.setCornerRadius(AndroidUtilities.dp(22));
+        commentBg.setColor(0xCC1C1C1E);
+        commentBar.setBackground(commentBg);
+        commentBar.setClickable(true);
+        commentBar.setOnClickListener(v -> wall());
+
+        TextView commentHint = new TextView(context);
+        commentHint.setText(LocaleController.getString(R.string.SvipeCommentHint));
+        commentHint.setTextColor(0xFF9E9E9E);
+        commentHint.setTextSize(14);
+        commentHint.setGravity(Gravity.CENTER_VERTICAL);
+        commentBar.addView(commentHint, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT,
+                LayoutHelper.MATCH_PARENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 18, 0, 48, 0));
+
+        android.widget.ImageView sendIcon = new android.widget.ImageView(context);
+        sendIcon.setImageResource(R.drawable.msg_send);
+        sendIcon.setColorFilter(new android.graphics.PorterDuffColorFilter(0xFF9E9E9E,
+                android.graphics.PorterDuff.Mode.SRC_IN));
+        commentBar.addView(sendIcon, LayoutHelper.createFrame(22, 22,
+                Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 14, 0));
+
+        FrameLayout.LayoutParams commentLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 44,
+                Gravity.BOTTOM, 7, 0, 7, 0);
+        commentLp.bottomMargin = AndroidUtilities.navigationBarHeight + AndroidUtilities.dp(6);
+        root.addView(commentBar, commentLp);
+
         fragmentView = root;
         loadMore();
         return root;
+    }
+
+    /** How much of the bottom the comment bar occupies — the inset every page lays its controls above. */
+    private static int commentBarInset() {
+        return AndroidUtilities.dp(44 + 6) + AndroidUtilities.navigationBarHeight;
+    }
+
+    /** Did this tap land on one of the reel's controls? Same hit-test the signed-in feed uses. */
+    private boolean hitsControl(MotionEvent e) {
+        final ReelsActivity.ReelsHolder h = holderAt(currentPosition());
+        if (h == null) {
+            return false;
+        }
+        return ReelsActivity.pointInView(h.likeIcon, e) || ReelsActivity.pointInView(h.likeCount, e)
+                || ReelsActivity.pointInView(h.commentIcon, e) || ReelsActivity.pointInView(h.commentCount, e)
+                || ReelsActivity.pointInView(h.shareIcon, e) || ReelsActivity.pointInView(h.shareCount, e)
+                || ReelsActivity.pointInView(h.saveIcon, e) || ReelsActivity.pointInView(h.saveLabel, e)
+                || ReelsActivity.pointInView(h.moreIcon, e) || ReelsActivity.pointInView(h.followBtn, e)
+                || ReelsActivity.pointInView(h.avatar, e) || ReelsActivity.pointInView(h.channelName, e);
+    }
+
+    private void togglePlayback() {
+        if (player == null) {
+            return;
+        }
+        final ReelsActivity.ReelsHolder h = holderAt(currentPosition());
+        try {
+            if (player.isPlaying()) {
+                player.pause();
+                if (h != null) h.setPaused(true);
+            } else {
+                player.play();
+                if (h != null) h.setPaused(false);
+            }
+        } catch (Exception ignore) {
+            // best-effort
+        }
+    }
+
+    private int currentPosition() {
+        if (layoutManager == null) {
+            return -1;
+        }
+        int pos = playingIndex;
+        if (pos < 0 || pos >= items.size()) {
+            pos = layoutManager.findFirstVisibleItemPosition();
+        }
+        return pos;
+    }
+
+    private ReelsActivity.ReelsHolder holderAt(int position) {
+        if (listView == null || position < 0) {
+            return null;
+        }
+        RecyclerView.ViewHolder vh = listView.findViewHolderForAdapterPosition(position);
+        return vh instanceof ReelsActivity.ReelsHolder ? (ReelsActivity.ReelsHolder) vh : null;
     }
 
     /** Ask for the next page. One in flight at a time; an empty page ends the feed honestly. */
@@ -179,49 +300,63 @@ public class SvipeGuestReelsActivity extends BaseFragment {
     private void playAt(int position) {
         playingIndex = position;
         final SvipeGuest.Item item = items.get(position);
+        final ReelsActivity.ReelsHolder opening = holderAt(position);
+        if (opening != null) {
+            opening.showLoading(true);
+        }
         SvipeGuest.media(item, (resolved, error) -> AndroidUtilities.runOnUIThread(() -> {
             if (playingIndex != position || fragmentView == null) {
                 return;   // swiped away while the URL was being resolved
             }
+            final ReelsActivity.ReelsHolder h = holderAt(position);
             if (resolved == null || resolved.mediaUrl.isEmpty()) {
-                // Nothing to play and nothing to say about it: move on rather than park the guest
-                // in front of a card that never starts.
+                // Nothing to play and nothing to say about it: move on rather than park the guest in
+                // front of a card that never starts.
+                if (h != null) h.showLoading(false);
                 if (position + 1 < items.size() && listView != null) {
                     listView.smoothScrollToPosition(position + 1);
                 }
                 return;
             }
-            final RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(position);
-            if (!(holder instanceof Holder)) {
-                return;
+            if (h != null) {
+                start(h, resolved);
             }
-            start(((Holder) holder).page, resolved);
         }));
     }
 
-    private void start(PageView page, SvipeGuest.Item item) {
+    private void start(ReelsActivity.ReelsHolder h, SvipeGuest.Item item) {
         releasePlayer();
         try {
-            player = new VideoPlayer(true, false);
-            boundTexture = page.texture;
-            player.setTextureView(page.texture);
-            player.setDelegate(new VideoPlayer.VideoPlayerDelegate() {
+            final VideoPlayer p = new VideoPlayer(true, false);
+            player = p;
+            h.textureView.setAlpha(0f);
+            p.setTextureView(h.textureView);
+            p.setDelegate(new VideoPlayer.VideoPlayerDelegate() {
                 @Override public void onStateChanged(boolean playWhenReady, int playbackState) {}
-                @Override public void onError(VideoPlayer p, Exception e) {}
-                @Override public void onVideoSizeChanged(int w, int h, int rotation, float ratio) {
-                    page.setVideoSize(w, h);
+                @Override public void onError(VideoPlayer from, Exception e) {}
+                @Override public void onVideoSizeChanged(int w, int hh, int rotation, float ratio) {
+                    if (w > 0 && hh > 0) {
+                        // The page's AspectRatioFrameLayout does the fitting, exactly as it does for
+                        // a signed-in reel — nothing here re-derives how a reel is framed.
+                        h.aspect.setAspectRatio(w / (float) hh, rotation);
+                    }
                 }
                 @Override public void onRenderedFirstFrame() {
-                    page.onFirstFrame();
+                    AndroidUtilities.runOnUIThread(() -> {
+                        if (player != p) return;
+                        h.textureView.setAlpha(1f);
+                        h.hideCover();
+                        h.showLoading(false);
+                    });
                 }
                 @Override public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture st) {}
                 @Override public boolean onSurfaceDestroyed(android.graphics.SurfaceTexture st) { return false; }
             });
-            player.setLooping(true);
+            p.setLooping(true);
             // A plain https mp4 on Telegram's public CDN. No document, no FileLoader, no auth key —
             // this is the whole reason a guest can watch anything at all.
-            player.preparePlayer(Uri.parse(item.mediaUrl), "other");
-            player.play();
+            p.preparePlayer(Uri.parse(item.mediaUrl), "other");
+            p.play();
         } catch (Exception e) {
             org.telegram.messenger.FileLog.e(e);
         }
@@ -233,7 +368,6 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         }
         try { player.releasePlayer(true); } catch (Exception ignore) {}
         player = null;
-        boundTexture = null;
     }
 
     /**
@@ -243,9 +377,6 @@ public class SvipeGuestReelsActivity extends BaseFragment {
      * "why would I" is a toll booth. See {@link org.telegram.svipe.SvipeGuestSignUpSheet}.
      */
     private void wall() {
-        if (getParentActivity() == null) {
-            return;
-        }
         org.telegram.svipe.SvipeGuestSignUpSheet.show(getParentActivity(), this::openSignUp);
     }
 
@@ -281,150 +412,55 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         return false;   // white text over video, always
     }
 
-    /** One full-screen reel: poster underneath, video on top of it, text and actions over both. */
-    private class PageView extends FrameLayout {
-        final TextureView texture;
-        final BackupImageView poster;
-        final TextView title;
-        final TextView caption;
-
-        PageView(Context context) {
-            super(context);
-            setBackgroundColor(Color.BLACK);
-
-            poster = new BackupImageView(context);
-            poster.getImageReceiver().setAspectFit(false);
-            addView(poster, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
-            texture = new TextureView(context);
-            texture.setOpaque(false);
-            texture.setAlpha(0f);   // revealed on the first frame, so no black flash over the poster
-            addView(texture, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
-            title = new TextView(context);
-            title.setTextColor(Color.WHITE);
-            title.setTextSize(15);
-            title.setTypeface(AndroidUtilities.bold());
-            title.setShadowLayer(AndroidUtilities.dp(3), 0, AndroidUtilities.dp(1), 0x66000000);
-            addView(title, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,
-                    Gravity.BOTTOM | Gravity.LEFT, 16, 0, 72, 46));
-
-            caption = new TextView(context);
-            caption.setTextColor(0xCCFFFFFF);
-            caption.setTextSize(14);
-            caption.setMaxLines(2);
-            caption.setShadowLayer(AndroidUtilities.dp(3), 0, AndroidUtilities.dp(1), 0x66000000);
-            addView(caption, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,
-                    Gravity.BOTTOM | Gravity.LEFT, 16, 0, 72, 22));
-
-            addAction(context, "♥", 0);
-            addAction(context, "💬", 1);
-            addAction(context, "↗", 2);
-        }
-
-        private void addAction(Context context, String glyph, int index) {
-            TextView b = new TextView(context);
-            b.setText(glyph);
-            b.setTextSize(24);
-            b.setTextColor(Color.WHITE);
-            b.setGravity(Gravity.CENTER);
-            b.setOnClickListener(v -> wall());
-            addView(b, LayoutHelper.createFrame(52, 52, Gravity.BOTTOM | Gravity.RIGHT,
-                    0, 0, 6, 60 + index * 58));
-        }
-
-        void bind(SvipeGuest.Item item) {
-            texture.setAlpha(0f);
-            poster.setAlpha(1f);   // a recycled page still carries the last card's faded-out poster
-            videoW = videoH = 0;
-            title.setText(item.title);
-            caption.setText(item.caption);
-            if (item.posterUrl != null && !item.posterUrl.isEmpty()) {
-                poster.setImage(ImageLocation.getForPath(item.posterUrl), "720_720",
-                        (android.graphics.drawable.Drawable) null, (Object) null);
-            } else {
-                poster.getImageReceiver().clearImage();
-            }
-        }
-
-        void onFirstFrame() {
-            AndroidUtilities.runOnUIThread(() -> {
-                texture.animate().alpha(1f).setDuration(120).start();
-                // And take the poster away. It exists to cover the gap before the first frame; left
-                // underneath a video that does not cover the whole screen it becomes a second,
-                // stretched copy of the same picture showing around the edges of the first.
-                poster.animate().alpha(0f).setDuration(120).start();
-            });
-        }
-
-        /**
-         * Centre-crop the video into the page.
-         *
-         * <p>A reel surface is full-bleed and the catalogue is not: these are real posts, and a
-         * 720x734 clip in a 1080x2400 window either fills it or leaves two thirds of the screen
-         * showing whatever is behind. Scaling by the LARGER ratio and centring is what every reel
-         * player does — the edges are cropped, which is the right thing to lose.
-         */
-        void setVideoSize(int w, int h) {
-            if (w <= 0 || h <= 0) {
-                return;
-            }
-            videoW = w;
-            videoH = h;
-            applyCrop();
-        }
-
-        private int videoW, videoH;
-
-        private void applyCrop() {
-            final int vw = getWidth(), vh = getHeight();
-            if (vw <= 0 || vh <= 0 || videoW <= 0 || videoH <= 0) {
-                return;
-            }
-            final float scale = Math.max(vw / (float) videoW, vh / (float) videoH);
-            final float dw = videoW * scale, dh = videoH * scale;
-            android.graphics.Matrix m = new android.graphics.Matrix();
-            m.setScale(dw / vw, dh / vh);
-            m.postTranslate((vw - dw) / 2f, (vh - dh) / 2f);
-            texture.setTransform(m);
-            texture.invalidate();
-        }
-
-        @Override
-        protected void onLayout(boolean changed, int l, int t, int r, int b) {
-            super.onLayout(changed, l, t, r, b);
-            if (changed) {
-                applyCrop();
-            }
-        }
-    }
-
-    private class Holder extends RecyclerView.ViewHolder {
-        final PageView page;
-
-        Holder(PageView view) {
-            super(view);
-            page = view;
-        }
-    }
-
     private class Adapter extends RecyclerListView.SelectionAdapter {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return false;   // a reel is not a row you tap; its actions are their own views
+            return false;   // taps are read at the list level, as in the signed-in feed
         }
 
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            PageView v = new PageView(parent.getContext());
-            v.setLayoutParams(new RecyclerView.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            return new Holder(v);
+            // The page's controls sit above whatever occupies the bottom of the screen. There is no tab
+            // bar here, but there IS the comment bar, and passing 0 put the channel row underneath it.
+            return ReelsActivity.createPage(parent.getContext(), commentBarInset());
         }
 
         @Override
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
-            ((Holder) holder).page.bind(items.get(position));
+            final ReelsActivity.ReelsHolder h = (ReelsActivity.ReelsHolder) holder;
+            final SvipeGuest.Item item = items.get(position);
+
+            h.showLoading(true);
+            h.setPaused(false);
+            // A recycled TextureView still shows the previous reel's frozen frame — hide it until
+            // this reel's own first frame arrives, so the cover shows through instead.
+            h.textureView.setAlpha(0f);
+
+            // The cover is our stored poster rather than a Telegram thumbnail: a guest has no way to
+            // ask Telegram for one, and this is the picture the share page already uses.
+            if (item.posterUrl != null && !item.posterUrl.isEmpty()) {
+                h.cover.setImage(ImageLocation.getForPath(item.posterUrl), "360_640",
+                        (android.graphics.drawable.Drawable) null, (Object) null);
+                h.cover.setVisibility(View.VISIBLE);
+            } else {
+                h.cover.setImageDrawable(null);
+                h.cover.setVisibility(View.GONE);
+            }
+
+            h.channelName.setText(item.username != null && !item.username.isEmpty()
+                    ? "@" + item.username : "");
+            h.avatar.setImageDrawable(new SvipeCharDrawable(
+                    item.username != null && !item.username.isEmpty()
+                            ? item.username.substring(0, 1).toUpperCase() : "?"));
+            h.setVerified(false);
+            h.setTitle(item.caption);
+            // Counts a guest cannot be shown: the reference carries no reaction or reply state, and
+            // inventing zeros would be a claim about the post rather than about what we know.
+            h.setLikeCount(0);
+            h.setLiked(false);
+            h.setCommentCount(0);
+            h.setShareCount(0);
+            h.setFollowing(false);
         }
 
         @Override

@@ -2286,7 +2286,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         return pointInView(h.actionRail, e) || pointInView(h.infoBox, e);
     }
 
-    private static boolean pointInView(View v, MotionEvent e) {
+    /** Public for the same reason as {@link #createPage}: the guest surface hit-tests the same rail. */
+    public static boolean pointInView(View v, MotionEvent e) {
         if (v == null || v.getVisibility() != View.VISIBLE || v.getWidth() == 0 || v.getHeight() == 0) {
             return false;
         }
@@ -3205,7 +3206,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
 
     // ---------------- holder / adapter ----------------
 
-    private static class ReelsHolder extends RecyclerView.ViewHolder {
+    public static class ReelsHolder extends RecyclerView.ViewHolder {
         final AspectRatioFrameLayout aspect;
         final TextureView textureView;
         final BackupImageView cover; // video thumbnail shown until the first frame renders
@@ -3353,6 +3354,203 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         }
     }
 
+    /**
+     * Build one reel page — the whole view tree a reel is drawn into.
+     *
+     * <p>Public and static because the GUEST surface draws the same reel. A guest gets their video
+     * over plain HTTPS instead of MTProto, but nothing about that changes what a reel looks like,
+     * and two hand-built versions of this layout would have drifted apart on the first change to
+     * either. There is one, and both screens call it.
+     *
+     * <p>Deliberately free of click listeners: control taps are dispatched at the LIST level (see
+     * dispatchControlTap), because RecyclerView cancels a child's touch the instant it claims the
+     * gesture for vertical paging. Whoever hosts these pages owns that dispatch.
+     */
+    public static ReelsHolder createPage(Context ctx, int bottomInset) {
+        FrameLayout page = new FrameLayout(ctx);
+        page.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        page.setBackgroundColor(0xFF000000);
+
+        // Thumbnail behind the video: visible from the instant the page appears until the
+        // player renders its first frame (the TextureView is transparent until then).
+        BackupImageView cover = new BackupImageView(ctx);
+        cover.getImageReceiver().setAspectFit(true);
+        page.addView(cover, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
+
+        // Fit-center video.
+        AspectRatioFrameLayout aspect = new AspectRatioFrameLayout(ctx);
+        aspect.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
+        TextureView tv = new TextureView(ctx);
+        aspect.addView(tv, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        page.addView(aspect, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
+
+        View gradient = new View(ctx);
+        gradient.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, new int[]{0xDD000000, 0x00000000}));
+        FrameLayout.LayoutParams gradientLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 0, Gravity.BOTTOM);
+        gradientLp.height = bottomInset + AndroidUtilities.dp(240);
+        page.addView(gradient, gradientLp);
+
+        // NOT a spinner. Instagram has none, and on a reel it is the wrong shape of feedback:
+        // a spinning wheel over somebody's face says "broken", where a sweep across the frame
+        // says "arriving" — which is what Telegram's own stories do while their media loads. The
+        // owner asked for exactly that, and the progress ring is gone from here for good.
+        View pb = new StoryShimmerView(ctx);
+        page.addView(pb, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+
+        // Center pause indicator = Telegram's own video-player play button, 1:1: the exact
+        // PlayPauseDrawable (Theme.playPauseAnimator morph) inside circle_big — identical to
+        // PhotoViewer's playDrawable. That animator is built only by createChatResources (when a
+        // chat opens), so on a cold reels start it can be null and the glyph renders empty (a bare
+        // circle) — initialise it here so the play triangle always shows.
+        if (Theme.playPauseAnimator == null) {
+            Theme.createChatResources(ctx, false);
+        }
+        ImageView paused = new ImageView(ctx);
+        PlayPauseDrawable pausedGlyph = new PlayPauseDrawable(28);
+        pausedGlyph.setPause(false, false); // static play triangle — "tap to resume"
+        android.graphics.drawable.Drawable pauseCircle = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.circle_big);
+        CombinedDrawable pausedDrawable = new CombinedDrawable(pauseCircle != null ? pauseCircle.mutate() : null, pausedGlyph);
+        pausedDrawable.setCustomSize(AndroidUtilities.dp(64), AndroidUtilities.dp(64));
+        pausedDrawable.setIconSize(AndroidUtilities.dp(28), AndroidUtilities.dp(28));
+        paused.setImageDrawable(pausedDrawable);
+        paused.setVisibility(View.GONE);
+        page.addView(paused, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
+
+        // Right action rail.
+        LinearLayout rail = new LinearLayout(ctx);
+        rail.setOrientation(LinearLayout.VERTICAL);
+        rail.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        // Rail icons use a 48dp touch target (icon kept visually ~28-34dp via padding) so they
+        // are reliably tappable over the play/pause video surface.
+        ImageView likeIcon = new ImageView(ctx);
+        likeIcon.setImageResource(R.drawable.media_like);
+        likeIcon.setColorFilter(0xFFFFFFFF);
+        likeIcon.setPadding(AndroidUtilities.dp(7), AndroidUtilities.dp(7), AndroidUtilities.dp(7), AndroidUtilities.dp(7));
+        rail.addView(likeIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
+        TextView likeCount = railLabel(ctx, "Like");
+        rail.addView(likeCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
+
+        ImageView commentIcon = new ImageView(ctx);
+        commentIcon.setImageResource(R.drawable.menu_comments);
+        commentIcon.setColorFilter(0xFFFFFFFF);
+        commentIcon.setPadding(AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8));
+        rail.addView(commentIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
+        TextView commentCount = railLabel(ctx, "Izoh");
+        rail.addView(commentCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
+
+        ImageView shareIcon = new ImageView(ctx);
+        shareIcon.setImageResource(R.drawable.media_share);
+        shareIcon.setColorFilter(0xFFFFFFFF);
+        shareIcon.setPadding(AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8));
+        rail.addView(shareIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
+        TextView shareCount = railLabel(ctx, "Ulashish");
+        rail.addView(shareCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
+
+        // "Saqlash" — forwards this reel into the user's own private, archived "Saved Reels"
+        // channel (SvipeSavedChannels). The list lives in the user's Telegram account, not on our
+        // servers, so it survives the source channel deleting the post and we never learn what
+        // anyone saved.
+        ImageView saveIcon = new ImageView(ctx);
+        saveIcon.setImageResource(R.drawable.msg_saved);
+        saveIcon.setColorFilter(0xFFFFFFFF);
+        saveIcon.setPadding(AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8));
+        rail.addView(saveIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
+        TextView saveLabel = railLabel(ctx, LocaleController.getString(R.string.SvipeReelsSave));
+        rail.addView(saveLabel, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
+
+        ImageView moreIcon = new ImageView(ctx);
+        moreIcon.setImageResource(R.drawable.msg_actions);
+        moreIcon.setColorFilter(0xFFFFFFFF);
+        moreIcon.setPadding(AndroidUtilities.dp(10), AndroidUtilities.dp(10), AndroidUtilities.dp(10), AndroidUtilities.dp(10));
+        rail.addView(moreIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
+
+        FrameLayout.LayoutParams railLp = LayoutHelper.createFrame(56, LayoutHelper.WRAP_CONTENT, Gravity.RIGHT | Gravity.BOTTOM, 0, 0, 6, 0);
+        // Lifted to leave a row for the scrub bar between this cluster and the tab bar.
+        railLp.bottomMargin = bottomInset + AndroidUtilities.dp(30);
+        page.addView(rail, railLp);
+
+        // Bottom channel bar.
+        LinearLayout channelBar = new LinearLayout(ctx);
+        channelBar.setOrientation(LinearLayout.HORIZONTAL);
+        channelBar.setGravity(Gravity.CENTER_VERTICAL);
+
+        BackupImageView avatar = new BackupImageView(ctx);
+        avatar.setRoundRadius(AndroidUtilities.dp(18));
+        channelBar.addView(avatar, LayoutHelper.createLinear(36, 36, Gravity.CENTER_VERTICAL, 0, 0, 10, 0));
+
+        TextView channelName = new TextView(ctx);
+        channelName.setTextColor(0xFFFFFFFF);
+        channelName.setTextSize(15);
+        channelName.setSingleLine(true);
+        channelName.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        // Cap the name to the space left after avatar/badge/Obuna so a long name ellipsizes
+        // instead of pushing the button onto a second line.
+        channelName.setMaxWidth(Math.max(AndroidUtilities.dp(90), AndroidUtilities.displaySize.x - AndroidUtilities.dp(230)));
+        channelName.setShadowLayer(AndroidUtilities.dp(3), 0, AndroidUtilities.dp(1), 0x90000000);
+        channelBar.addView(channelName, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 0, 0, 6, 0));
+
+        // Verified badge (blue area + white check), hidden unless the channel is verified.
+        ImageView verifiedBadge = new ImageView(ctx);
+        try {
+            android.graphics.drawable.Drawable area = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.verified_area).mutate();
+            android.graphics.drawable.Drawable check = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.verified_check).mutate();
+            area.setColorFilter(0xFF55ACEE, android.graphics.PorterDuff.Mode.SRC_IN);
+            check.setColorFilter(0xFFFFFFFF, android.graphics.PorterDuff.Mode.SRC_IN);
+            verifiedBadge.setImageDrawable(new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{area, check}));
+        } catch (Exception e) { FileLog.e(e); }
+        verifiedBadge.setVisibility(View.GONE);
+        channelBar.addView(verifiedBadge, LayoutHelper.createLinear(17, 17, Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
+
+        TextView followBtn = new TextView(ctx);
+        followBtn.setText(getString(R.string.SvipeReelsSubscribe));
+        followBtn.setTextColor(0xFFFFFFFF);
+        followBtn.setTextSize(13);
+        followBtn.setSingleLine(true); // never wrap to a 2nd line
+        followBtn.setPadding(AndroidUtilities.dp(14), AndroidUtilities.dp(6), AndroidUtilities.dp(14), AndroidUtilities.dp(6));
+        GradientDrawable followBg = new GradientDrawable();
+        followBg.setCornerRadius(AndroidUtilities.dp(16));
+        followBg.setColor(0xFF2F6DF6);
+        followBtn.setBackground(followBg);
+        channelBar.addView(followBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
+
+        // Video title (caption) under the channel bar — 2 lines, tap to expand (native-player style).
+        TextView title = new TextView(ctx);
+        title.setTextColor(0xFFFFFFFF);
+        title.setTextSize(13);
+        title.setMaxLines(2);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        title.setLineSpacing(AndroidUtilities.dp(1), 1f);
+        title.setShadowLayer(AndroidUtilities.dp(3), 0, AndroidUtilities.dp(1), 0x90000000);
+        title.setVisibility(View.GONE);
+
+        LinearLayout bottomBox = new LinearLayout(ctx);
+        bottomBox.setOrientation(LinearLayout.VERTICAL);
+        bottomBox.addView(channelBar, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT));
+        bottomBox.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT, 0, 8, 0, 0));
+
+        FrameLayout.LayoutParams bottomLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM | Gravity.LEFT, 14, 0, 64, 0);
+        // Lifted to leave a row for the scrub bar between the caption and the tab bar.
+        bottomLp.bottomMargin = bottomInset + AndroidUtilities.dp(30);
+        page.addView(bottomBox, bottomLp);
+
+        ReelsHolder holder = new ReelsHolder(page, aspect, tv, cover, pb, paused, likeIcon, likeCount,
+                commentIcon, commentCount, shareCount, avatar, channelName, verifiedBadge, followBtn, title);
+        holder.actionRail = rail;
+        holder.infoBox = bottomBox;
+        holder.shareIcon = shareIcon;
+        holder.saveIcon = saveIcon;
+        holder.saveLabel = saveLabel;
+        holder.moreIcon = moreIcon;
+        // NOTE: control taps (rail buttons, follow, channel, caption) are dispatched at the LIST
+        // level in dispatchControlTap — NOT via per-child click listeners. RecyclerView sends a
+        // child an ACTION_CANCEL the instant it claims the touch for vertical paging, so a child's
+        // onClick is unreliable (the share button "didn't press well"). The list-level gesture
+        // detector observes every tap reliably — the same path that drives play/pause + double-tap.
+
+        return holder;
+    }
+
     private class ReelsAdapter extends RecyclerListView.SelectionAdapter {
         private final Context ctx;
 
@@ -3363,188 +3561,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
 
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            FrameLayout page = new FrameLayout(ctx);
-            page.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            page.setBackgroundColor(0xFF000000);
-
-            // Thumbnail behind the video: visible from the instant the page appears until the
-            // player renders its first frame (the TextureView is transparent until then).
-            BackupImageView cover = new BackupImageView(ctx);
-            cover.getImageReceiver().setAspectFit(true);
-            page.addView(cover, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
-
-            // Fit-center video.
-            AspectRatioFrameLayout aspect = new AspectRatioFrameLayout(ctx);
-            aspect.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
-            TextureView tv = new TextureView(ctx);
-            aspect.addView(tv, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-            page.addView(aspect, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
-
-            View gradient = new View(ctx);
-            gradient.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, new int[]{0xDD000000, 0x00000000}));
-            FrameLayout.LayoutParams gradientLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 0, Gravity.BOTTOM);
-            gradientLp.height = bottomInset + AndroidUtilities.dp(240);
-            page.addView(gradient, gradientLp);
-
-            // NOT a spinner. Instagram has none, and on a reel it is the wrong shape of feedback:
-            // a spinning wheel over somebody's face says "broken", where a sweep across the frame
-            // says "arriving" — which is what Telegram's own stories do while their media loads. The
-            // owner asked for exactly that, and the progress ring is gone from here for good.
-            View pb = new StoryShimmerView(ctx);
-            page.addView(pb, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
-            // Center pause indicator = Telegram's own video-player play button, 1:1: the exact
-            // PlayPauseDrawable (Theme.playPauseAnimator morph) inside circle_big — identical to
-            // PhotoViewer's playDrawable. That animator is built only by createChatResources (when a
-            // chat opens), so on a cold reels start it can be null and the glyph renders empty (a bare
-            // circle) — initialise it here so the play triangle always shows.
-            if (Theme.playPauseAnimator == null) {
-                Theme.createChatResources(ctx, false);
-            }
-            ImageView paused = new ImageView(ctx);
-            PlayPauseDrawable pausedGlyph = new PlayPauseDrawable(28);
-            pausedGlyph.setPause(false, false); // static play triangle — "tap to resume"
-            android.graphics.drawable.Drawable pauseCircle = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.circle_big);
-            CombinedDrawable pausedDrawable = new CombinedDrawable(pauseCircle != null ? pauseCircle.mutate() : null, pausedGlyph);
-            pausedDrawable.setCustomSize(AndroidUtilities.dp(64), AndroidUtilities.dp(64));
-            pausedDrawable.setIconSize(AndroidUtilities.dp(28), AndroidUtilities.dp(28));
-            paused.setImageDrawable(pausedDrawable);
-            paused.setVisibility(View.GONE);
-            page.addView(paused, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
-
-            // Right action rail.
-            LinearLayout rail = new LinearLayout(ctx);
-            rail.setOrientation(LinearLayout.VERTICAL);
-            rail.setGravity(Gravity.CENTER_HORIZONTAL);
-
-            // Rail icons use a 48dp touch target (icon kept visually ~28-34dp via padding) so they
-            // are reliably tappable over the play/pause video surface.
-            ImageView likeIcon = new ImageView(ctx);
-            likeIcon.setImageResource(R.drawable.media_like);
-            likeIcon.setColorFilter(0xFFFFFFFF);
-            likeIcon.setPadding(AndroidUtilities.dp(7), AndroidUtilities.dp(7), AndroidUtilities.dp(7), AndroidUtilities.dp(7));
-            rail.addView(likeIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
-            TextView likeCount = railLabel(ctx, "Like");
-            rail.addView(likeCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
-
-            ImageView commentIcon = new ImageView(ctx);
-            commentIcon.setImageResource(R.drawable.menu_comments);
-            commentIcon.setColorFilter(0xFFFFFFFF);
-            commentIcon.setPadding(AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8));
-            rail.addView(commentIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
-            TextView commentCount = railLabel(ctx, "Izoh");
-            rail.addView(commentCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
-
-            ImageView shareIcon = new ImageView(ctx);
-            shareIcon.setImageResource(R.drawable.media_share);
-            shareIcon.setColorFilter(0xFFFFFFFF);
-            shareIcon.setPadding(AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8));
-            rail.addView(shareIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
-            TextView shareCount = railLabel(ctx, "Ulashish");
-            rail.addView(shareCount, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
-
-            // "Saqlash" — forwards this reel into the user's own private, archived "Saved Reels"
-            // channel (SvipeSavedChannels). The list lives in the user's Telegram account, not on our
-            // servers, so it survives the source channel deleting the post and we never learn what
-            // anyone saved.
-            ImageView saveIcon = new ImageView(ctx);
-            saveIcon.setImageResource(R.drawable.msg_saved);
-            saveIcon.setColorFilter(0xFFFFFFFF);
-            saveIcon.setPadding(AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8), AndroidUtilities.dp(8));
-            rail.addView(saveIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
-            TextView saveLabel = railLabel(ctx, LocaleController.getString(R.string.SvipeReelsSave));
-            rail.addView(saveLabel, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 12));
-
-            ImageView moreIcon = new ImageView(ctx);
-            moreIcon.setImageResource(R.drawable.msg_actions);
-            moreIcon.setColorFilter(0xFFFFFFFF);
-            moreIcon.setPadding(AndroidUtilities.dp(10), AndroidUtilities.dp(10), AndroidUtilities.dp(10), AndroidUtilities.dp(10));
-            rail.addView(moreIcon, LayoutHelper.createLinear(48, 48, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0));
-
-            FrameLayout.LayoutParams railLp = LayoutHelper.createFrame(56, LayoutHelper.WRAP_CONTENT, Gravity.RIGHT | Gravity.BOTTOM, 0, 0, 6, 0);
-            // Lifted to leave a row for the scrub bar between this cluster and the tab bar.
-            railLp.bottomMargin = bottomInset + AndroidUtilities.dp(30);
-            page.addView(rail, railLp);
-
-            // Bottom channel bar.
-            LinearLayout channelBar = new LinearLayout(ctx);
-            channelBar.setOrientation(LinearLayout.HORIZONTAL);
-            channelBar.setGravity(Gravity.CENTER_VERTICAL);
-
-            BackupImageView avatar = new BackupImageView(ctx);
-            avatar.setRoundRadius(AndroidUtilities.dp(18));
-            channelBar.addView(avatar, LayoutHelper.createLinear(36, 36, Gravity.CENTER_VERTICAL, 0, 0, 10, 0));
-
-            TextView channelName = new TextView(ctx);
-            channelName.setTextColor(0xFFFFFFFF);
-            channelName.setTextSize(15);
-            channelName.setSingleLine(true);
-            channelName.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            // Cap the name to the space left after avatar/badge/Obuna so a long name ellipsizes
-            // instead of pushing the button onto a second line.
-            channelName.setMaxWidth(Math.max(AndroidUtilities.dp(90), AndroidUtilities.displaySize.x - AndroidUtilities.dp(230)));
-            channelName.setShadowLayer(AndroidUtilities.dp(3), 0, AndroidUtilities.dp(1), 0x90000000);
-            channelBar.addView(channelName, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 0, 0, 6, 0));
-
-            // Verified badge (blue area + white check), hidden unless the channel is verified.
-            ImageView verifiedBadge = new ImageView(ctx);
-            try {
-                android.graphics.drawable.Drawable area = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.verified_area).mutate();
-                android.graphics.drawable.Drawable check = androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.verified_check).mutate();
-                area.setColorFilter(0xFF55ACEE, android.graphics.PorterDuff.Mode.SRC_IN);
-                check.setColorFilter(0xFFFFFFFF, android.graphics.PorterDuff.Mode.SRC_IN);
-                verifiedBadge.setImageDrawable(new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{area, check}));
-            } catch (Exception e) { FileLog.e(e); }
-            verifiedBadge.setVisibility(View.GONE);
-            channelBar.addView(verifiedBadge, LayoutHelper.createLinear(17, 17, Gravity.CENTER_VERTICAL, 0, 0, 8, 0));
-
-            TextView followBtn = new TextView(ctx);
-            followBtn.setText(getString(R.string.SvipeReelsSubscribe));
-            followBtn.setTextColor(0xFFFFFFFF);
-            followBtn.setTextSize(13);
-            followBtn.setSingleLine(true); // never wrap to a 2nd line
-            followBtn.setPadding(AndroidUtilities.dp(14), AndroidUtilities.dp(6), AndroidUtilities.dp(14), AndroidUtilities.dp(6));
-            GradientDrawable followBg = new GradientDrawable();
-            followBg.setCornerRadius(AndroidUtilities.dp(16));
-            followBg.setColor(0xFF2F6DF6);
-            followBtn.setBackground(followBg);
-            channelBar.addView(followBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
-
-            // Video title (caption) under the channel bar — 2 lines, tap to expand (native-player style).
-            TextView title = new TextView(ctx);
-            title.setTextColor(0xFFFFFFFF);
-            title.setTextSize(13);
-            title.setMaxLines(2);
-            title.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            title.setLineSpacing(AndroidUtilities.dp(1), 1f);
-            title.setShadowLayer(AndroidUtilities.dp(3), 0, AndroidUtilities.dp(1), 0x90000000);
-            title.setVisibility(View.GONE);
-
-            LinearLayout bottomBox = new LinearLayout(ctx);
-            bottomBox.setOrientation(LinearLayout.VERTICAL);
-            bottomBox.addView(channelBar, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT));
-            bottomBox.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT, 0, 8, 0, 0));
-
-            FrameLayout.LayoutParams bottomLp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM | Gravity.LEFT, 14, 0, 64, 0);
-            // Lifted to leave a row for the scrub bar between the caption and the tab bar.
-            bottomLp.bottomMargin = bottomInset + AndroidUtilities.dp(30);
-            page.addView(bottomBox, bottomLp);
-
-            ReelsHolder holder = new ReelsHolder(page, aspect, tv, cover, pb, paused, likeIcon, likeCount,
-                    commentIcon, commentCount, shareCount, avatar, channelName, verifiedBadge, followBtn, title);
-            holder.actionRail = rail;
-            holder.infoBox = bottomBox;
-            holder.shareIcon = shareIcon;
-            holder.saveIcon = saveIcon;
-            holder.saveLabel = saveLabel;
-            holder.moreIcon = moreIcon;
-            // NOTE: control taps (rail buttons, follow, channel, caption) are dispatched at the LIST
-            // level in dispatchControlTap — NOT via per-child click listeners. RecyclerView sends a
-            // child an ACTION_CANCEL the instant it claims the touch for vertical paging, so a child's
-            // onClick is unreliable (the share button "didn't press well"). The list-level gesture
-            // detector observes every tap reliably — the same path that drives play/pause + double-tap.
-
-            return holder;
+            return createPage(ctx, bottomInset);
         }
 
         @Override
