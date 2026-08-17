@@ -1600,6 +1600,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         for (int i = pos + 1; i < items.size() && SvipeQueuePlan.needsMoreDownloads(have); i++) {
             FeedItem it = items.get(i);
             if (watchedSet != null && watchedSet.isWatched(it.channelId, it.messageId)) continue;
+            if (it.mo == null && hasPlayUrl(it)) {
+                // The offline cushion is a nicety; the flood budget is not. A reel that can already
+                // be played over HTTPS must not be resolved just so a file can be pre-downloaded for
+                // a cold start that may never happen — that is spending the scarcest thing we have
+                // on the least urgent thing we do.
+                continue;
+            }
             if (it.mo == null) {
                 resolveItem(it, () -> ensureFullDownloadsAhead(currentPosition)); // retry once resolved
                 continue;
