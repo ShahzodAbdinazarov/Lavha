@@ -564,4 +564,9 @@
     <string name="SvipeSeriesSeasonsCount_many">%1$d сезонов</string>
     <string name="SvipeSeriesSeasonsCount_other">%1$d сезонов</string>
     <string name="SvipeLocalCache">Кеш Svipe</string>
+    <string name="SvipeGuestLookAround">Сначала осмотритесь</string>
+    <string name="SvipeGuestSignUp">Регистрация</string>
+    <string name="SvipeGuestWallTitle">Для этого нужна регистрация</string>
+    <string name="SvipeGuestWallText">Смотреть можно без аккаунта. Лайки, комментарии и подписки выполняются в вашем аккаунте Telegram.</string>
+    <string name="SvipeGuestEnd">Это всё, что можно показать без аккаунта</string>
 </resources>

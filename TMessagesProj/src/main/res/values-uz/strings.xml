@@ -291,4 +291,9 @@
     <string name="SvipeSeriesSeasonsCount_one">%1$d ta fasl</string>
     <string name="SvipeSeriesSeasonsCount_other">%1$d ta fasl</string>
     <string name="SvipeLocalCache">Svipe keshi</string>
+    <string name="SvipeGuestLookAround">Avval ko\'rib chiqing</string>
+    <string name="SvipeGuestSignUp">Ro\'yxatdan o\'tish</string>
+    <string name="SvipeGuestWallTitle">Buning uchun ro\'yxatdan o\'ting</string>
+    <string name="SvipeGuestWallText">Ko\'rish uchun akkaunt shart emas. Layk, izoh va obuna esa sizning Telegram akkauntingizda bajariladi.</string>
+    <string name="SvipeGuestEnd">Akkauntsiz ko\'rsata oladiganimiz shu</string>
 </resources>
