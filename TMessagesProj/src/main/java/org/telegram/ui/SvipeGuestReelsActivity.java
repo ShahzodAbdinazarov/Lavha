@@ -19,7 +19,6 @@ import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
 import org.telegram.svipe.SvipeGuest;
-import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.LayoutHelper;
@@ -107,7 +106,7 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         signUp.setBackground(org.telegram.ui.ActionBar.Theme.createSimpleSelectorRoundRectDrawable(
                 AndroidUtilities.dp(20), 0x33FFFFFF, 0x55FFFFFF));
         signUp.setPadding(AndroidUtilities.dp(18), 0, AndroidUtilities.dp(18), 0);
-        signUp.setOnClickListener(v -> openSignUp());
+        signUp.setOnClickListener(v -> wall());
         root.addView(signUp, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 40,
                 Gravity.TOP | Gravity.RIGHT, 0,
                 12 + AndroidUtilities.statusBarHeight / AndroidUtilities.density, 12, 0));
@@ -238,23 +237,16 @@ public class SvipeGuestReelsActivity extends BaseFragment {
     }
 
     /**
-     * What a guest is told when they reach for something an account owns.
+     * What a guest is offered when they reach for something an account owns.
      *
-     * <p>The wording matters more than the wall. "Sign up to continue" with no reason reads as a
-     * toll; saying that a like happens on their own Telegram account is both true and the reason
-     * they would want one.
+     * <p>A sheet rather than an alert, and a list rather than a sentence: a wall with no answer to
+     * "why would I" is a toll booth. See {@link org.telegram.svipe.SvipeGuestSignUpSheet}.
      */
     private void wall() {
         if (getParentActivity() == null) {
             return;
         }
-        new AlertDialog.Builder(getParentActivity())
-                .setTitle(LocaleController.getString(R.string.SvipeGuestWallTitle))
-                .setMessage(LocaleController.getString(R.string.SvipeGuestWallText))
-                .setPositiveButton(LocaleController.getString(R.string.SvipeGuestSignUp),
-                        (d, w) -> openSignUp())
-                .setNegativeButton(LocaleController.getString(R.string.Cancel), null)
-                .show();
+        org.telegram.svipe.SvipeGuestSignUpSheet.show(getParentActivity(), this::openSignUp);
     }
 
     private void openSignUp() {
