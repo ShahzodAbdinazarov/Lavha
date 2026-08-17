@@ -44,9 +44,15 @@ import java.util.ArrayList;
  * need an auth key a guest does not have. What a guest gets instead is a plain HTTPS mp4 on
  * Telegram's public CDN, handed over by our backend. Same picture, different plumbing.
  *
- * <p><b>No tabs.</b> Music, Video, Chats and Profile all need an account to mean anything, and a
- * bottom bar offering four doors that each open onto a sign-up prompt reads as a broken app rather
- * than a generous one. So the bar is not drawn.
+ * <p><b>This is the front door.</b> A fresh install lands here, not on the onboarding: reels need no
+ * account, so asking for a phone number before showing any is asking a stranger to pay before they
+ * can see what they are buying.
+ *
+ * <p><b>No tabs, and no sign-up button either.</b> Music, Video, Chats and Profile all need an
+ * account to mean anything, and a bottom bar of four doors that each open onto a prompt reads as a
+ * broken app rather than a generous one. A banner button on top of the video would be the same
+ * mistake in a smaller way: every control on the page already leads to the offer, at the moment the
+ * visitor actually wants the thing it unlocks. Nothing has to nag them in the meantime.
  *
  * <p><b>Every control is a wall, and the wall explains itself</b> — see
  * {@link org.telegram.svipe.SvipeGuestSignUpSheet}.
@@ -125,22 +131,6 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         emptyView.setPadding(AndroidUtilities.dp(32), 0, AndroidUtilities.dp(32), 0);
         emptyView.setVisibility(View.GONE);
         root.addView(emptyView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-
-        // The only door out, and it says where it goes. Drawn over the video rather than under it,
-        // because there is no bottom bar to put it in.
-        TextView signUp = new TextView(context);
-        signUp.setText(LocaleController.getString(R.string.SvipeGuestSignUp));
-        signUp.setTextColor(Color.WHITE);
-        signUp.setTextSize(15);
-        signUp.setTypeface(AndroidUtilities.bold());
-        signUp.setGravity(Gravity.CENTER);
-        signUp.setBackground(Theme.createSimpleSelectorRoundRectDrawable(
-                AndroidUtilities.dp(20), 0x33FFFFFF, 0x55FFFFFF));
-        signUp.setPadding(AndroidUtilities.dp(18), 0, AndroidUtilities.dp(18), 0);
-        signUp.setOnClickListener(v -> wall());
-        root.addView(signUp, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 40,
-                Gravity.TOP | Gravity.RIGHT, 0,
-                12 + AndroidUtilities.statusBarHeight / AndroidUtilities.density, 12, 0));
 
         // The comment bar the signed-in feed carries, in the same slot and the same shape: 44dp tall,
         // 22dp corners, 7dp side insets, translucent dark, sitting above the navigation bar. It is not
@@ -380,9 +370,17 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         org.telegram.svipe.SvipeGuestSignUpSheet.show(getParentActivity(), this::openSignUp);
     }
 
+    /**
+     * Where "sign up" goes: the onboarding, pushed ON TOP of the feed rather than replacing it.
+     *
+     * <p>Not replacing it matters. Somebody who opens the sign-up flow, thinks better of it and
+     * presses back should land where they were — still watching — instead of on an empty stack that
+     * closes the app. And it is the INTRO rather than the login screen because the intro carries the
+     * language switcher, which is the one thing a first-time visitor from anywhere may need before
+     * they can read a word of the rest.
+     */
     private void openSignUp() {
-        // The guest identity is not carried into the account: from here on the person is the account.
-        presentFragment(new LoginActivity(), true);
+        presentFragment(new IntroActivity());
     }
 
     @Override

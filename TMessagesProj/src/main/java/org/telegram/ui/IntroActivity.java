@@ -110,7 +110,6 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
     private TextView switchLanguageTextView;
     private GradientDrawable startMessagingButtonBackground;
     private TextView startMessagingButton;
-    private TextView svipeGuestButton;
     private FrameLayout frameLayout2;
     private FrameLayout frameContainerView;
     private TextureView textureView;
@@ -412,26 +411,6 @@ public class IntroActivity extends BaseFragment implements NotificationCenter.No
             presentFragment(new LoginActivity().setIntroView(frameContainerView, startMessagingButton), true);
             destroyed = true;
         });
-
-        // Look around first. The reason this is on the FIRST screen and not behind the sign-up flow
-        // is the whole point of guest mode: somebody who has never heard of Svipe has no reason to
-        // hand over a phone number to find out whether there is anything here worth watching. The
-        // button is deliberately quiet — the primary action is still signing up — and what it opens
-        // is reels only, because that is the one surface that works without an account.
-        svipeGuestButton = new TextView(context);
-        svipeGuestButton.setText(LocaleController.getString(R.string.SvipeGuestLookAround));
-        svipeGuestButton.setGravity(Gravity.CENTER);
-        svipeGuestButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        svipeGuestButton.setTextColor(Theme.getColor(Theme.key_chats_actionBackground));
-        svipeGuestButton.setPadding(dp(24), 0, dp(24), 0);
-        svipeGuestButton.setOnClickListener(view -> {
-            if (startPressed) {
-                return;
-            }
-            presentFragment(new SvipeGuestReelsActivity());
-        });
-        frameContainerView.addView(svipeGuestButton, LayoutHelper.createFrame(
-                LayoutHelper.MATCH_PARENT, 40, Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM, 16, 0, 16, 36));
 
         bottomPages = new BottomPagesView(context, viewPager, 6);
         frameContainerView.addView(bottomPages, LayoutHelper.createFrame(66, 5, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, ICON_HEIGHT_DP + 200, 0, 0));

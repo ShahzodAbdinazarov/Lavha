@@ -1097,11 +1097,22 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         onUserLeaveHintListeners.remove(callback);
     }
 
+    /**
+     * What somebody sees before they have signed in — which, since guest mode, is the app itself.
+     *
+     * <p>The onboarding used to be the front door: a stranger who had never heard of Svipe was asked
+     * for a phone number before they could find out whether there was anything here worth watching.
+     * Reels need no account, so the reels are the front door and the intro is somewhere you go when
+     * you have decided to sign up, not somewhere you pass through to look.
+     *
+     * <p>A login already in progress still wins. Somebody who is three screens into entering a code
+     * must land back on that screen and not on a feed.
+     */
     private BaseFragment getClientNotActivatedFragment() {
         if (LoginActivity.loadCurrentState(false, currentAccount).getInt("currentViewNum", 0) != 0) {
             return new LoginActivity();
         }
-        return new IntroActivity();
+        return new SvipeGuestReelsActivity();
     }
 
     public FireworksOverlay getFireworksOverlay() {

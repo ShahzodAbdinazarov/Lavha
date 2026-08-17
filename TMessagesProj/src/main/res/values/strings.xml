@@ -11455,7 +11455,6 @@
     <string name="SvipeSeriesSeasonsCount_one">%1$d season</string>
     <string name="SvipeSeriesSeasonsCount_other">%1$d seasons</string>
     <string name="SvipeLocalCache">Svipe cache</string>
-    <string name="SvipeGuestLookAround">Look around first</string>
     <string name="SvipeGuestSignUp">Sign up</string>
     <string name="SvipeGuestWallTitle">Sign up to do that</string>
     <string name="SvipeGuestWallText">Watching needs no account. Liking, commenting and following do — they happen on your Telegram account.</string>
