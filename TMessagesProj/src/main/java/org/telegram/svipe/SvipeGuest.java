@@ -167,6 +167,43 @@ public class SvipeGuest {
         });
     }
 
+    /**
+     * Tell the server what was watched. This is the only reason the guest feed can adapt at all.
+     *
+     * <p>The same event shapes a signed-in client sends, into the same ingestion path on the server:
+     * the reward reaches the same bandit and the same session wave, and what was shown is remembered
+     * so it is not shown again. A guest surface that reported nothing would be a recommender with no
+     * input — a fixed shelf wearing a recommender's name.
+     *
+     * <p>Fire and forget. Nothing on screen waits for it, and a lost event costs a little learning,
+     * never a frame.
+     */
+    public static void report(String eventType, Item item, long watchedMs, long durationMs) {
+        if (item == null || eventType == null) {
+            return;
+        }
+        ensureToken(token -> {
+            if (token == null) {
+                return;
+            }
+            try {
+                JSONObject payload = new JSONObject();
+                payload.put("watch_ms", Math.max(0, watchedMs));
+                payload.put("duration_ms", Math.max(0, durationMs));
+                JSONObject ev = new JSONObject();
+                ev.put("channel_id", item.channelId);
+                ev.put("message_id", item.messageId);
+                ev.put("event_type", eventType);
+                ev.put("payload", payload);
+                JSONObject body = new JSONObject();
+                body.put("events", new JSONArray().put(ev));
+                SvipeApi.post("/v1/guest/events", body, token, (res, code, err) -> {});
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+        });
+    }
+
     public interface FeedCallback {
         void onResult(List<Item> items, Integer nextCursor, String error);
     }

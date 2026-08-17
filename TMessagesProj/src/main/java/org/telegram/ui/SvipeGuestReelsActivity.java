@@ -69,7 +69,7 @@ public class SvipeGuestReelsActivity extends BaseFragment {
     private VideoPlayer player;
     private int playingIndex = -1;
     /** Wall-clock of the tap/settle that opened the current reel, and of the URL landing. */
-    private long openAtMs, urlAtMs;
+    private long openAtMs, urlAtMs, playStartedAtMs;
     private Integer cursor = 0;
     private boolean loading;
 
@@ -322,9 +322,13 @@ public class SvipeGuestReelsActivity extends BaseFragment {
     }
 
     private void playAt(int position) {
+        // Leaving a reel is the moment we learn something about it: how much of it was watched. Told
+        // BEFORE the next one is set up, while the numbers still belong to the reel that is ending.
+        reportWatched();
         playingIndex = position;
         openAtMs = android.os.SystemClock.elapsedRealtime();
         urlAtMs = 0;
+        playStartedAtMs = 0;
         final SvipeGuest.Item item = items.get(position);
         final ReelsActivity.ReelsHolder opening = holderAt(position);
         if (opening != null) {
@@ -372,6 +376,12 @@ public class SvipeGuestReelsActivity extends BaseFragment {
                 }
                 @Override public void onRenderedFirstFrame() {
                     final long now = android.os.SystemClock.elapsedRealtime();
+                    if (playStartedAtMs == 0) {
+                        playStartedAtMs = now;
+                        // An impression is what stops this reel coming back tomorrow; it is worth
+                        // reporting the moment the guest actually SAW it, not when it was fetched.
+                        SvipeGuest.report("IMPRESSION", item, 0, 0);
+                    }
                     org.telegram.messenger.FileLog.d("svipe-g: first-frame +"
                             + (openAtMs > 0 ? now - openAtMs : -1) + "ms after open, +"
                             + (urlAtMs > 0 ? now - urlAtMs : -1) + "ms after url");
@@ -393,6 +403,31 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         } catch (Exception e) {
             org.telegram.messenger.FileLog.e(e);
         }
+    }
+
+    /**
+     * Report how much of the reel just left was actually watched.
+     *
+     * <p>The distinction the reward function cares about is whether somebody stayed. A reel watched
+     * to the end is a strong yes, a reel abandoned in a second is a no, and both are more useful
+     * than the impression on its own — which is why this is sent on the way OUT rather than on the
+     * way in.
+     */
+    private void reportWatched() {
+        if (playingIndex < 0 || playingIndex >= items.size() || playStartedAtMs == 0) {
+            return;
+        }
+        final long watched = android.os.SystemClock.elapsedRealtime() - playStartedAtMs;
+        long duration = 0;
+        try {
+            if (player != null) duration = Math.max(0, player.getDuration());
+        } catch (Exception ignore) {
+            // best-effort
+        }
+        final boolean finished = duration > 0 && watched >= duration * 0.92;
+        SvipeGuest.report(finished ? "VIDEO_END" : "SWIPE_AWAY",
+                items.get(playingIndex), watched, duration);
+        playStartedAtMs = 0;
     }
 
     private void releasePlayer() {
@@ -444,6 +479,7 @@ public class SvipeGuestReelsActivity extends BaseFragment {
 
     @Override
     public void onFragmentDestroy() {
+        reportWatched();   // the last reel counts too
         releasePlayer();
         super.onFragmentDestroy();
     }
