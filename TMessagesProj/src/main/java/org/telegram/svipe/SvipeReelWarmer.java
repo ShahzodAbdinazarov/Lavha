@@ -150,6 +150,13 @@ public final class SvipeReelWarmer {
                 ref.shareUrl = o.isNull("share_url") ? null : o.optString("share_url", null);
                 ref.topicId = o.isNull("topic_id") ? null : o.optInt("topic_id");
                 ref.recId = w.recommendationId;
+                // The sessionless route, carried straight through to the pager. Without this the
+                // whole warm page arrived with no URL and every reel on it went back to MTProto —
+                // which is how a warm-up meant to SAVE the flood budget ended up spending it.
+                ref.playUrl = o.isNull("play_url") ? null : o.optString("play_url", null);
+                ref.width = o.optInt("width", 0);
+                ref.height = o.optInt("height", 0);
+                ref.durationMs = o.optInt("duration_ms", 0);
                 w.items.add(ref);
             }
             if (w.items.isEmpty()) { done.run(); return; }
@@ -160,13 +167,24 @@ public final class SvipeReelWarmer {
         });
     }
 
-    /** Resolve the first few items one at a time — serial on purpose, to stay off the flood ceiling. */
+    /**
+     * Resolve the first few items one at a time — serial on purpose, to stay off the flood ceiling.
+     *
+     * <p>Skipped entirely for a reel that carries a public URL: it can already be played, and the
+     * only reason to resolve it is the action rail, which the player fills behind the video when the
+     * user actually reaches it. Warming a page used to cost one contacts.resolveUsername per head
+     * item before anything was on screen; now it costs none for the reels that do not need it.
+     */
     private static void resolveHead(final int account, final Warm w, final int index, final Runnable done) {
         if (index >= RESOLVE_AHEAD || index >= w.items.size()) {
             done.run();
             return;
         }
         final SvipeRefResolver.VideoRef ref = w.items.get(index);
+        if (ref.playUrl != null && !ref.playUrl.isEmpty()) {
+            resolveHead(account, w, index + 1, done);
+            return;
+        }
         SvipeRefResolver.resolve(account, ref, () -> {
             if (index == 0) preloadHead(account, ref);
             resolveHead(account, w, index + 1, done);
