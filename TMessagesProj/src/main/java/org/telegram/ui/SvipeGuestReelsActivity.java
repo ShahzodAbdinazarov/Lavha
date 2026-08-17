@@ -68,6 +68,8 @@ public class SvipeGuestReelsActivity extends BaseFragment {
 
     private VideoPlayer player;
     private int playingIndex = -1;
+    /** Wall-clock of the tap/settle that opened the current reel, and of the URL landing. */
+    private long openAtMs, urlAtMs;
     private Integer cursor = 0;
     private boolean loading;
 
@@ -234,8 +236,12 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         }
         loading = true;
         final int at = cursor;
+        final long askedAt = android.os.SystemClock.elapsedRealtime();
         SvipeGuest.reels(at, (result, next, error) -> AndroidUtilities.runOnUIThread(() -> {
             loading = false;
+            org.telegram.messenger.FileLog.d("svipe-g: reels page@" + at + " -> "
+                    + (result == null ? "null" : result.size() + " items") + " in "
+                    + (android.os.SystemClock.elapsedRealtime() - askedAt) + "ms");
             if (result == null || result.isEmpty()) {
                 // Not a failure state: the server fails closed when its safety gate has nothing to
                 // say, and a spinner that never resolves would be a lie about that.
@@ -289,6 +295,8 @@ public class SvipeGuestReelsActivity extends BaseFragment {
 
     private void playAt(int position) {
         playingIndex = position;
+        openAtMs = android.os.SystemClock.elapsedRealtime();
+        urlAtMs = 0;
         final SvipeGuest.Item item = items.get(position);
         final ReelsActivity.ReelsHolder opening = holderAt(position);
         if (opening != null) {
@@ -298,6 +306,9 @@ public class SvipeGuestReelsActivity extends BaseFragment {
             if (playingIndex != position || fragmentView == null) {
                 return;   // swiped away while the URL was being resolved
             }
+            urlAtMs = android.os.SystemClock.elapsedRealtime();
+            org.telegram.messenger.FileLog.d("svipe-g: media #" + position + " -> "
+                    + (resolved == null ? "none" : "url") + " +" + (urlAtMs - openAtMs) + "ms after open");
             final ReelsActivity.ReelsHolder h = holderAt(position);
             if (resolved == null || resolved.mediaUrl.isEmpty()) {
                 // Nothing to play and nothing to say about it: move on rather than park the guest in
@@ -332,6 +343,10 @@ public class SvipeGuestReelsActivity extends BaseFragment {
                     }
                 }
                 @Override public void onRenderedFirstFrame() {
+                    final long now = android.os.SystemClock.elapsedRealtime();
+                    org.telegram.messenger.FileLog.d("svipe-g: first-frame +"
+                            + (openAtMs > 0 ? now - openAtMs : -1) + "ms after open, +"
+                            + (urlAtMs > 0 ? now - urlAtMs : -1) + "ms after url");
                     AndroidUtilities.runOnUIThread(() -> {
                         if (player != p) return;
                         h.textureView.setAlpha(1f);
