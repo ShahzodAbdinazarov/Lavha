@@ -15,7 +15,7 @@
 set -euo pipefail
 
 VN="${1-}"; VC="${2-}"; CHANGELOG="${3-}"
-HOST=root@23.88.110.173           # prod since the 2026-06-29 migration; 49.12.47.209 is dev now
+HOST=root@169.58.191.228         # prod since the 2026-08-17 Contabo migration; dev is dev.svipe.uz on the same box
 KEY=~/.ssh/lavha_deploy
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APK="$ROOT/TMessagesProj_App/build/outputs/apk/afat/standalone/app.apk"

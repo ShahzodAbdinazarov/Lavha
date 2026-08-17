@@ -225,11 +225,14 @@ signed-in play through the identical path, and the only difference left is who c
 2. ~~**Media URL in the feed payload + warm-URL worker** (§5).~~ **SHIPPED to dev, 2026-08-17.**
    `app/content/play_urls.py` + a `play_urls` lane in the sessionless indexer; client side in
    `ReelsActivity` and `SvipeReelWarmer`.
-3. **Guest feed while authenticating** (§3). Biggest cold-start win for signed-in users.
+3. ~~**Guest feed while authenticating** (§3).~~ **BUILT, and it does not pay off yet — see the
+   measurement below.** `SvipeReelWarmer.fetchGuestPage` + the tokenless hand-over in
+   `ReelsActivity`; backend unchanged.
 4. **Duration-aware prefix; 5-deep graded window** (§4). PARTLY done: the ahead-window and the
    offline cushion no longer RESOLVE reels they could already play. Killing the Wi-Fi full download
    was **cancelled by the owner** — the offline queue depends on it (see §4).
-5. **Per-user A/B precompute with debounce** (§2). Most work, and it only pays once 1–4 are done.
+5. ~~**Per-user A/B precompute with debounce** (§2).~~ **SHIPPED, 2026-08-17.**
+   `app/recsys/precompute.py` — the candidate POOL is cached, not the finished page.
 
 ### What shipped, and what it measured
 
@@ -267,6 +270,52 @@ filter guarantees that user's next page holds *different* references, so they ne
 of their own demand; somebody else does. This is why the cold list warms its own URLs on build. It
 is the one list that is shared, deterministic and served to every new device, so warming it once is
 what makes a first feed playable without a session.
+
+**The precomputed pool, measured.** Dev, same user, `build_feed` end to end, five runs warm:
+
+| | median |
+|---|---|
+| first request, nothing cached — retrieval runs inline | **5,792 ms** |
+| every request after it, pool ready | **493 ms** (min 407) |
+
+An 11.8× reduction, and the ratio is the honest part: the box is CPU-starved (prod's workers draw
+~800% of its eight cores while dev is capped at 2.0), so the absolute numbers are inflated and the
+proportion is not. Retrieval was ~5.2 s of that 5.8 s; the pool removes it and leaves the ranking,
+which is arithmetic over a few hundred rows.
+
+The debounce was measured too, because it is the difference between this helping and this being a
+denial of service against our own database: six strong signals in a burst granted **one** rebuild.
+
+**A trap worth writing down: dev cannot exercise this by accident.** The dev database was seeded
+with content only and no `video_event` rows, so every user there reads as brand-new — `event_count`
+0, `graduated` false — and `build_feed` takes the COLD LIST branch every time. The precompute branch
+had to be exercised with a synthetic user given state by hand. Anyone measuring "the feed" on dev and
+concluding anything about the personalised path is measuring the cold list instead.
+
+**[CORRECTION] The guest feed is not a shortcut — it is the slower endpoint.** §3 assumes that
+pulling a guest page while the auth chain runs gets a video on screen sooner, because it skips the
+wait for a token. Measured on dev, server-side, same box and same minute, four requests each:
+
+| | median | fastest |
+|---|---|---|
+| `/v1/feed` (signed-in) | **188 ms** | 88 ms |
+| `/v1/guest/reels` | **1,204 ms** | 696 ms |
+
+The guest page costs 6.4× more to produce than the personalised one, and on top of it a device with
+no guest token pays `POST /v1/guest/device` first (1,197 ms measured on the emulator). Against an
+auth refresh that measured 1,537 ms on the same run, the tokenless path arrived 136 ms AFTER the real
+feed — it won nothing.
+
+The cause is structural, not incidental: the guest pool is deliberately excluded from both the shared
+cold list and the per-user precompute, because its content must pass the safety gate and those two
+caches do not know about the gate. So the one surface that is supposed to answer instantly is the
+only one that computes from scratch every time.
+
+The machinery is built, wired and correct — the hand-over, the tokenless retirement, the event
+buffering all work — and it costs nothing while it loses the race, because the personalised page
+simply overwrites it. **What it needs before it pays is a gated precomputed pool for the guest feed**,
+which is now a small piece of work rather than a new mechanism: `app/recsys/precompute.py` already
+does exactly this for signed-in users and would need a gate-aware key. That is the next item.
 
 **[DECIDED] The Wi-Fi full download stays.** §4 proposed deleting it; the owner ruled against on
 2026-08-17, because that download is what fills the persisted offline queue. The decision and its
