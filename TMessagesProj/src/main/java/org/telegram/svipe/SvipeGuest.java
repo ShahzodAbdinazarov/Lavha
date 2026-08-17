@@ -42,6 +42,8 @@ public class SvipeGuest {
     private static final String PREF_TOKEN = "token";
     /** Re-mint well before the 30-day expiry — a token that dies mid-scroll reads as a broken app. */
     private static final String PREF_MINTED_AT = "minted_at";
+    /** SHA-256 of the App Set ID: stable across a reinstall, and not the id itself. */
+    private static final String PREF_STABLE_ID = "stable_id";
     private static final long REMINT_AFTER_MS = 20L * 24 * 3600 * 1000;
 
     /** One reel as the guest surface sees it: drawable from this alone, playable after one more call. */
@@ -216,6 +218,57 @@ public class SvipeGuest {
         void run(String token);
     }
 
+    /**
+     * Ask Android for an id that survives this app being reinstalled, and hash it before use.
+     *
+     * <p><b>Why not just keep the random one.</b> The device id we mint ourselves lives in this app's
+     * preferences, so uninstalling — or "clear data" — throws away everything a guest taught the feed.
+     * The App Set ID does not: it is per device and per developer account, it needs no permission,
+     * and Google offers it for exactly this (analytics and abuse prevention inside one developer's
+     * apps). It resets when the user removes every app of ours or factory-resets, which is the right
+     * escape hatch to leave them.
+     *
+     * <p><b>Why the hash.</b> What reaches our server is SHA-256 of the App Set ID, never the id
+     * itself. We need something stable, not something identifying, and hashing means a leak of our
+     * database cannot be joined against anybody else's copy of the same identifier. The shape also
+     * matches what the server already validates: hex, 8..64 characters.
+     *
+     * <p>Best-effort throughout. No Play services, an old device, a user who denied it — any of those
+     * and the random id stands, which is exactly what shipped before this existed.
+     */
+    private static void resolveStableId(final Runnable done) {
+        try {
+            com.google.android.gms.appset.AppSet
+                    .getClient(ApplicationLoader.applicationContext)
+                    .getAppSetIdInfo()
+                    .addOnSuccessListener(info -> {
+                        try {
+                            String id = info != null ? info.getId() : null;
+                            if (id != null && id.length() > 0) {
+                                prefs().edit().putString(PREF_STABLE_ID, sha256Hex(id)).apply();
+                            }
+                        } catch (Exception e) {
+                            FileLog.e(e);
+                        }
+                        done.run();
+                    })
+                    .addOnFailureListener(e -> done.run());
+        } catch (Throwable t) {
+            // No Play services at all: nothing to resolve, and nothing broken.
+            done.run();
+        }
+    }
+
+    private static String sha256Hex(String value) throws Exception {
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        byte[] d = md.digest(value.getBytes("UTF-8"));
+        StringBuilder sb = new StringBuilder(64);
+        for (byte b : d) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
+    }
+
     private static SharedPreferences prefs() {
         return ApplicationLoader.applicationContext.getSharedPreferences(PREFS, 0);
     }
@@ -257,11 +310,17 @@ public class SvipeGuest {
             }
             minting = true;
         }
+        resolveStableId(() -> mint(p));
+    }
+
+    private static void mint(final SharedPreferences p) {
         JSONObject body = new JSONObject();
         try {
-            // Sent back so a returning guest keeps the same device — and therefore its place in the
-            // feed. A device id the server does not like is simply replaced by one it minted.
-            String known = p.getString(PREF_DEVICE_ID, "");
+            // Prefer the id that survives a reinstall; fall back to the one this install minted.
+            // Either way the server is told which device this is, so a returning guest keeps the
+            // feed it taught — and a device id the server does not like is simply replaced.
+            String known = p.getString(PREF_STABLE_ID, "");
+            if (known.length() == 0) known = p.getString(PREF_DEVICE_ID, "");
             if (known.length() > 0) body.put("device_id", known);
         } catch (Exception ignore) {
             // best-effort
