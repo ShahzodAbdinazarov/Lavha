@@ -420,6 +420,14 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         currentAccount = UserConfig.selectedAccount;
         registerReceiver(batteryReceiver, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
         if (!UserConfig.getInstance(currentAccount).isClientActivated()) {
+            // Start the guest feed's two round-trips NOW, while the window, the theme and the
+            // fragment stack are still being built. They are strictly serial — the page needs the
+            // token — so on a cold start they were most of a second of dead time in front of the
+            // first screen a stranger ever sees. Nothing waits on this; if it has not landed by the
+            // time the screen is up, the screen asks for itself exactly as it did before.
+            org.telegram.svipe.SvipeGuest.warmUp();
+        }
+        if (!UserConfig.getInstance(currentAccount).isClientActivated()) {
             Intent intent = getIntent();
             boolean isProxy = false;
             if (intent != null && intent.getAction() != null) {

@@ -173,6 +173,11 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         return root;
     }
 
+    /** Is this the very first page? Only that one can come from the warm-up. */
+    private boolean at0() {
+        return items.isEmpty() && cursor != null && cursor == 0;
+    }
+
     /** How much of the bottom the comment bar occupies — the inset every page lays its controls above. */
     private static int commentBarInset() {
         return AndroidUtilities.dp(44 + 6) + AndroidUtilities.navigationBarHeight;
@@ -232,6 +237,29 @@ public class SvipeGuestReelsActivity extends BaseFragment {
     /** Ask for the next page. One in flight at a time; an empty page ends the feed honestly. */
     private void loadMore() {
         if (loading || cursor == null) {
+            return;
+        }
+        if (at0()) {
+            // The app started warming this the moment it knew there was no account. Wait for it
+            // rather than racing it: firing a second request for the same page means two requests
+            // and the screen still waiting on the slower one.
+            loading = true;
+            SvipeGuest.takeWarm(w -> {
+                loading = false;
+                if (w != null && w.items != null && !w.items.isEmpty()) {
+                    org.telegram.messenger.FileLog.d("svipe-g: took warm page (" + w.items.size() + " items)");
+                    items.addAll(w.items);
+                    cursor = w.next;
+                    if (adapter != null) {
+                        adapter.notifyItemRangeInserted(0, w.items.size());
+                    }
+                    if (listView != null) {
+                        listView.post(this::onSettled);
+                    }
+                    return;
+                }
+                loadMore();   // nothing held — ask, exactly as this would have without a warm-up
+            });
             return;
         }
         loading = true;
