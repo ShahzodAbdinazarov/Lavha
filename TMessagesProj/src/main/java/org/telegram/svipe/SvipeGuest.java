@@ -219,7 +219,7 @@ public class SvipeGuest {
     }
 
     /**
-     * Ask Android for an id that survives this app being reinstalled, and hash it before use.
+     * The id this device is known by, resolved once and remembered.
      *
      * <p><b>Why not just keep the random one.</b> The device id we mint ourselves lives in this app's
      * preferences, so uninstalling — or "clear data" — throws away everything a guest taught the feed.
@@ -237,6 +237,32 @@ public class SvipeGuest {
      * and the random id stands, which is exactly what shipped before this existed.
      */
     private static void resolveStableId(final Runnable done) {
+        // ANDROID_ID first. It is the ONLY identifier that survives this app being uninstalled and
+        // installed again — App Set ID resets when every app from a developer is gone, and Svipe is
+        // our only app on a device, so for us "uninstall" is always "every app" (measured: the App Set
+        // ID changed across a reinstall, and held across a clear-data).
+        //
+        // WHAT IT IS USED FOR, and nothing else: a guest has no account, so the recommender has no
+        // one to attribute a taste to. This id IS that identity — the user id of somebody who has not
+        // registered. It is not joined to a phone number, a Telegram account, an advertising id or
+        // any other identifier, and the moment a guest signs in the account replaces it entirely.
+        //
+        // Hashed before it leaves the device, so what we store is stable but not the identifier: our
+        // database cannot be joined against anybody else's copy of the same value.
+        try {
+            String ssaid = android.provider.Settings.Secure.getString(
+                    ApplicationLoader.applicationContext.getContentResolver(),
+                    android.provider.Settings.Secure.ANDROID_ID);
+            // "9774d56d682e549c" is the famous broken value some devices share; treat it as absent.
+            if (ssaid != null && ssaid.length() >= 8 && !"9774d56d682e549c".equals(ssaid)) {
+                prefs().edit().putString(PREF_STABLE_ID, sha256Hex(ssaid)).apply();
+                done.run();
+                return;
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+        // No usable ANDROID_ID: fall back to the App Set ID, which at least survives a clear-data.
         try {
             com.google.android.gms.appset.AppSet
                     .getClient(ApplicationLoader.applicationContext)
