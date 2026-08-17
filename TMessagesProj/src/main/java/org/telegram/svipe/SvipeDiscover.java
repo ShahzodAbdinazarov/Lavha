@@ -85,6 +85,21 @@ public class SvipeDiscover {
          */
         public String thumbB64;
         /**
+         * A playable HTTPS URL for this video's bytes — no Telegram session involved.
+         *
+         * <p>Anything under ~20 MB has a second route to its media: Telegram's public embed exposes
+         * the file on its CDN over ordinary HTTPS with Range support, and the backend keeps a fresh
+         * one for the references it serves (app/content/play_urls.py). When this is set the player
+         * streams it directly and spends no {@code contacts.resolveUsername} at all — which matters
+         * far beyond speed: that call is the most flood-limited one this app makes, it has taken
+         * reels and music down for hours twice, and watching is what spends it fastest.
+         *
+         * <p>Null is normal and safe: the first serve of a reference carries none, anything over the
+         * ceiling never will, and both simply fall back to MTProto. A URL that has expired early
+         * fails the same way, so the fallback is not only for the null case.
+         */
+        public String playUrl;
+        /**
          * The id of the recommendation PAGE this reference arrived with, so an event about it can be
          * attributed back to the ranking that served it. The reels feed carries one; the discover /
          * long-form responses do not yet, so this stays null and their events land unattributed —
@@ -534,6 +549,7 @@ public class SvipeDiscover {
             it.needsObserve = o.optBoolean("obs", false);
             it.posterUrl = o.isNull("poster_url") ? null : o.optString("poster_url", null);
             it.thumbB64 = o.isNull("thumb_b64") ? null : o.optString("thumb_b64", null);
+            it.playUrl = o.isNull("play_url") ? null : o.optString("play_url", null);
             it.recId = recId;
             out.add(it);
         }

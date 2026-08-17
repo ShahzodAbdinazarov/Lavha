@@ -406,7 +406,10 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         // the only place the observation queue is ever loaded.
         org.telegram.svipe.SvipeObserved.restore();
         SvipeWarmup.enqueue("settings", (acc, done) -> { SvipeSettingsSync.pull(acc); done.run(); });
-        SvipeWarmup.enqueue("reels", SvipeReelWarmer::warm);
+        // Not enqueue: the reels feed is what a person opens this app for, so it does not wait out
+        // the settle delay. Measured 2026-08-17, that delay was 4.0 s of a 5.0 s wait for a request
+        // the network answered in 631 ms.
+        SvipeWarmup.enqueueNow("reels", SvipeReelWarmer::warm);
         SvipeWarmup.enqueue("video", SvipeVideoWarmer::warm);
         SvipeWarmup.enqueue("music", SvipeMusicWarmer::warm);
         SvipeWarmup.start(currentAccount);

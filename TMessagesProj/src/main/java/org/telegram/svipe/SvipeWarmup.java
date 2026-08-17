@@ -30,17 +30,25 @@ public final class SvipeWarmup {
         void run(int account, Runnable done);
     }
 
-    /** How long the app is left alone to finish opening before any of this starts.
+    /** How long the app is left alone to finish opening before the UNURGENT warm-ups start.
      *
      * <p>This buys the cold start four seconds of quiet, and it is worth having for work the user
      * did not ask for. It is NOT what gates the tab they DID open: a screen fetches its own data the
      * moment it is created, and since {@link org.telegram.svipe.SvipeApi} got its own threads that
-     * fetch no longer queues behind these. */
+     * fetch no longer queues behind these.
+     *
+     * <p>It is also not for everything any more. Measured on a signed-in cold start, 2026-08-17:
+     * the process came up at 31.32 s, the first frame drew at 32.72, and {@code GET /v1/feed} was
+     * not even ISSUED until 36.33 — 5.0 s after launch, of which 4.0 s was this constant and only
+     * 631 ms was the network. The reels feed is the one thing a person opens this app to see, so it
+     * no longer waits; see {@link #enqueueNow}. */
     private static final long SETTLE_MS = 4000;
     /** A task that has not reported back by now is presumed stuck; the queue moves on without it. */
     private static final long TASK_DEADLINE_MS = 45_000;
 
     private static final ArrayDeque<Named> queue = new ArrayDeque<>();
+    /** Work that starts with the app rather than after it. Drained before {@link #queue}. */
+    private static final ArrayDeque<Named> urgent = new ArrayDeque<>();
     private static final java.util.HashSet<String> everEnqueued = new java.util.HashSet<>();
     private static boolean started;
 
@@ -65,12 +73,28 @@ public final class SvipeWarmup {
         }
     }
 
-    /** Begin, once per process, after the settle delay. Safe to call more than once. */
+    /**
+     * Add work that must NOT wait out the settle delay, and runs ahead of everything enqueued.
+     *
+     * For the one surface a person opens this app to see. Waiting four seconds to ask for a feed
+     * that answers in under one is four seconds of a loading spinner bought for nothing — and the
+     * reason the settle existed (a warm-up fighting the chat list for a thread) stopped applying
+     * when {@link org.telegram.svipe.SvipeApi} got threads of its own.
+     */
+    public static void enqueueNow(String name, Task task) {
+        synchronized (queue) {
+            if (!everEnqueued.add(name)) return;
+            urgent.add(new Named(name, task));
+        }
+    }
+
+    /** Begin, once per process. Urgent work starts now; the rest after the settle delay. */
     public static void start(final int account) {
         if (started) return;
         started = true;
+        // Fill the window rather than hand out one task and wait for it to come back.
+        for (int i = 0; i < MAX_IN_FLIGHT; i++) next(account);
         AndroidUtilities.runOnUIThread(() -> {
-            // Fill the window rather than hand out one task and wait for it to come back.
             for (int i = 0; i < MAX_IN_FLIGHT; i++) next(account);
         }, SETTLE_MS);
     }
@@ -93,8 +117,11 @@ public final class SvipeWarmup {
         final Named entry;
         synchronized (queue) {
             if (inFlight >= MAX_IN_FLIGHT) return;
-            entry = queue.poll();
-            if (entry == null) return;
+            // Urgent first, always. Before the settle fires this is the ONLY queue with anything in
+            // it, so the early call to next() cannot accidentally start the unurgent work early.
+            final Named picked = urgent.isEmpty() ? queue.poll() : urgent.poll();
+            if (picked == null) return;
+            entry = picked;
             inFlight++;
         }
         final AtomicBoolean finished = new AtomicBoolean();
