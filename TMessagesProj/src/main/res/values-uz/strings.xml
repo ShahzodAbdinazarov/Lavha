@@ -97,7 +97,7 @@
 
     <!-- Bottom tabs -->
     <string name="MainTabsMusic">Musiqa</string>
-    <string name="MainTabsReels">Reels</string>
+    <string name="MainTabsReels">Clips</string>
     <string name="MainTabsSearch">Qidiruv</string>
     <string name="MainTabsVideo">Video</string>
 
@@ -179,7 +179,7 @@
     <string name="SvipeReelsWatchHistory">Ko\'rish tarixi</string>
     <string name="SvipeBlockedChannels">Bloklangan kanallar</string>
     <string name="SvipeSettingsTitle">Svipe</string>
-    <string name="SvipeSettingsSubtitle">Musiqa, reels, avatar va sinxronlash</string>
+    <string name="SvipeSettingsSubtitle">Musiqa, Clips, avatar va sinxronlash</string>
     <string name="SvipeNoBlockedChannels">Bloklangan kanallar yo\'q</string>
     <string name="SvipeNoListeningHistory">Tinglash tarixi hali yo\'q</string>
     <string name="SvipeNoWatchHistory">Ko\'rish tarixi hali yo\'q</string>
@@ -258,7 +258,7 @@
     <string name="SvipeMoviesEmpty">Hozircha bo\'sh</string>
     <string name="SvipeActorFilmography">Filmlar</string>
     <string name="SvipeWatchLaterChannel">Keyinroq ko\'rish</string>
-    <string name="SvipeSavedReelsChannel">Saqlangan Reels</string>
+    <string name="SvipeSavedReelsChannel">Saqlangan Clips</string>
     <string name="SvipeSavedVideosChannel">Saqlangan videolar</string>
     <string name="SvipeSaveWatchLater">Keyinroq ko\'rishga saqlash</string>
     <string name="SvipeSavedToList">Saqlandi</string>
@@ -296,11 +296,11 @@
     <string name="SvipeGuestWallText">Ko\'rish uchun akkaunt shart emas. Layk, izoh va obuna esa sizning Telegram akkauntingizda bajariladi.</string>
     <string name="SvipeGuestEnd">Akkauntsiz ko\'rsata oladiganimiz shu</string>
     <string name="SvipeGuestSheetTitle">Svipe\'ning hammasi uchun tizimga kiring</string>
-    <string name="SvipeGuestSheetSub">Reels ko\'rish uchun akkaunt shart emas. Quyidagilar esa sizning Telegram akkauntingizda ishlaydi.</string>
+    <string name="SvipeGuestSheetSub">Clips ko\'rish uchun akkaunt shart emas. Quyidagilar esa sizning Telegram akkauntingizda ishlaydi.</string>
     <string name="SvipeGuestBenefit1">Layk, izoh va obuna</string>
     <string name="SvipeGuestBenefit1Text">Ko\'rgan narsangizga munosabat bildiring va yoqqan kanallarni kuzatib boring</string>
     <string name="SvipeGuestBenefit2">Musiqa, kinolar va seriallar</string>
-    <string name="SvipeGuestBenefit2Text">Reels — kutubxonaning bir tokchasi. Qolgani akkaunt bilan ochiladi</string>
+    <string name="SvipeGuestBenefit2Text">Clips — kutubxonaning bir tokchasi. Qolgani akkaunt bilan ochiladi</string>
     <string name="SvipeGuestBenefit3">Sizni o\'rganadigan lenta</string>
     <string name="SvipeGuestBenefit3Text">Nima ko\'rsangiz, keyingisi shunga moslashadi — kirgan har bir qurilmangizda</string>
     <string name="SvipeGuestBenefit4">Saqlang va qayting</string>

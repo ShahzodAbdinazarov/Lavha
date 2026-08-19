@@ -3011,7 +3011,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (link == null) return;
         // Caption that rides UNDER the shared video: promo line, one blank line, then the bare URL
         // (no scheme — Telegram still auto-links svipe.uz/<code>).
-        final String caption = "watch reels on telegram with svipe\n\n" + link.replaceFirst("^https?://", "");
+        final String caption = "watch clips on telegram with svipe\n\n" + link.replaceFirst("^https?://", "");
         try {
             TLRPC.Document d = item.mo != null ? item.mo.getDocument() : null;
             if (d instanceof TLRPC.TL_document) {

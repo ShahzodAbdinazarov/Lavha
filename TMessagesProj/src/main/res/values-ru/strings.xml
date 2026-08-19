@@ -359,7 +359,7 @@
 
     <!-- Bottom tabs -->
     <string name="MainTabsMusic">Музыка</string>
-    <string name="MainTabsReels">Reels</string>
+    <string name="MainTabsReels">Clips</string>
     <string name="MainTabsSearch">Поиск</string>
     <string name="MainTabsVideo">Видео</string>
 
@@ -444,7 +444,7 @@
     <string name="SvipeReelsWatchHistory">История просмотров</string>
     <string name="SvipeBlockedChannels">Заблокированные каналы</string>
     <string name="SvipeSettingsTitle">Svipe</string>
-    <string name="SvipeSettingsSubtitle">Музыка, reels, аватар и синхронизация</string>
+    <string name="SvipeSettingsSubtitle">Музыка, Clips, аватар и синхронизация</string>
     <string name="SvipeNoBlockedChannels">Нет заблокированных каналов</string>
     <string name="SvipeNoListeningHistory">Пока нет истории прослушивания</string>
     <string name="SvipeNoWatchHistory">Пока нет истории просмотров</string>
@@ -523,7 +523,7 @@
     <string name="SvipeMoviesEmpty">Пока пусто</string>
     <string name="SvipeActorFilmography">Фильмы</string>
     <string name="SvipeWatchLaterChannel">Смотреть позже</string>
-    <string name="SvipeSavedReelsChannel">Сохранённые Reels</string>
+    <string name="SvipeSavedReelsChannel">Сохранённые Clips</string>
     <string name="SvipeSavedVideosChannel">Сохранённые видео</string>
     <string name="SvipeSaveWatchLater">Смотреть позже</string>
     <string name="SvipeSavedToList">Сохранено</string>
@@ -569,11 +569,11 @@
     <string name="SvipeGuestWallText">Смотреть можно без аккаунта. Лайки, комментарии и подписки выполняются в вашем аккаунте Telegram.</string>
     <string name="SvipeGuestEnd">Это всё, что можно показать без аккаунта</string>
     <string name="SvipeGuestSheetTitle">Войдите, чтобы открыть весь Svipe</string>
-    <string name="SvipeGuestSheetSub">Смотреть reels можно без аккаунта. Всё остальное работает в вашем аккаунте Telegram.</string>
+    <string name="SvipeGuestSheetSub">Смотреть Clips можно без аккаунта. Всё остальное работает в вашем аккаунте Telegram.</string>
     <string name="SvipeGuestBenefit1">Лайки, комментарии и подписки</string>
     <string name="SvipeGuestBenefit1Text">Реагируйте на то, что смотрите, и следите за каналами, которые вам нравятся</string>
     <string name="SvipeGuestBenefit2">Музыка, фильмы и сериалы</string>
-    <string name="SvipeGuestBenefit2Text">Reels — лишь одна полка библиотеки. Остальное открывается с аккаунтом</string>
+    <string name="SvipeGuestBenefit2Text">Clips — лишь одна полка библиотеки. Остальное открывается с аккаунтом</string>
     <string name="SvipeGuestBenefit3">Лента, которая вас изучает</string>
     <string name="SvipeGuestBenefit3Text">То, что вы смотрите, определяет следующее — на каждом устройстве, где вы вошли</string>
     <string name="SvipeGuestBenefit4">Сохраняйте и возвращайтесь</string>

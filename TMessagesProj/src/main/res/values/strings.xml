@@ -10542,7 +10542,7 @@
     <string name="MainTabsChats">Chats</string>
     <string name="MainTabsMusic">Music</string>
     <string name="MainTabsProfile">Profile</string>
-    <string name="MainTabsReels">Reels</string>
+    <string name="MainTabsReels">Clips</string>
     <string name="MainTabsSearch">Search</string>
     <string name="MainTabsVideo">Video</string>
     <string name="MainTabsSettings">Settings</string>
@@ -11112,7 +11112,7 @@
     <string name="SvipeReelsWatchHistory">Watch history</string>
     <string name="SvipeBlockedChannels">Blocked channels</string>
     <string name="SvipeSettingsTitle">Svipe</string>
-    <string name="SvipeSettingsSubtitle">Music, reels, avatar &amp; sync</string>
+    <string name="SvipeSettingsSubtitle">Music, clips, avatar &amp; sync</string>
     <string name="SvipeNoBlockedChannels">No blocked channels</string>
     <string name="SvipeNoListeningHistory">No listening history yet</string>
     <string name="SvipeNoWatchHistory">No watch history yet</string>
@@ -11422,7 +11422,7 @@
     <string name="SvipeMoviesEmpty">Nothing here yet</string>
     <string name="SvipeActorFilmography">Films</string>
     <string name="SvipeWatchLaterChannel">Watch Later</string>
-    <string name="SvipeSavedReelsChannel">Saved Reels</string>
+    <string name="SvipeSavedReelsChannel">Saved Clips</string>
     <string name="SvipeSavedVideosChannel">Saved Videos</string>
     <string name="SvipeSaveWatchLater">Save to Watch Later</string>
     <string name="SvipeSavedToList">Saved</string>
@@ -11460,11 +11460,11 @@
     <string name="SvipeGuestWallText">Watching needs no account. Liking, commenting and following do — they happen on your Telegram account.</string>
     <string name="SvipeGuestEnd">That is everything we can show without an account</string>
     <string name="SvipeGuestSheetTitle">Sign in to get all of Svipe</string>
-    <string name="SvipeGuestSheetSub">Watching reels needs no account. Everything below does — it runs on your Telegram account.</string>
+    <string name="SvipeGuestSheetSub">Watching clips needs no account. Everything below does — it runs on your Telegram account.</string>
     <string name="SvipeGuestBenefit1">Like, comment and follow</string>
     <string name="SvipeGuestBenefit1Text">React to what you watch and keep up with the channels you like</string>
     <string name="SvipeGuestBenefit2">Music, films and series</string>
-    <string name="SvipeGuestBenefit2Text">Reels are one shelf of the library. The rest opens with an account</string>
+    <string name="SvipeGuestBenefit2Text">Clips are one shelf of the library. The rest opens with an account</string>
     <string name="SvipeGuestBenefit3">A feed that learns you</string>
     <string name="SvipeGuestBenefit3Text">What you watch shapes what comes next, on every device you sign in on</string>
     <string name="SvipeGuestBenefit4">Save it and come back</string>
