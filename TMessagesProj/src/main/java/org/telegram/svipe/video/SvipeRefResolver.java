@@ -264,6 +264,10 @@ public class SvipeRefResolver {
         // reference to play; a poster or a read-ahead waits its turn behind them.
         org.telegram.svipe.SvipeChannelResolve.pace(urgent, () -> {
         org.telegram.svipe.SvipeChannelResolve.spend(account);
+        // Logged at DISPATCH, not only on failure. This is the call the whole sessionless design
+        // exists to avoid, and "how many did that session spend" was previously only answerable by
+        // reading raw tgnet request dumps.
+        FileLog.d("svipe: contacts.resolveUsername @" + username + (urgent ? " (urgent)" : ""));
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> {
             if (!answered.compareAndSet(false, true)) return; // the timeout already gave up on this one
             org.telegram.svipe.SvipeChannelResolve.sent();

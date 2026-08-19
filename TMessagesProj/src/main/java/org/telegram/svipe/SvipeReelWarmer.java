@@ -9,6 +9,7 @@ import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.svipe.video.SvipePublicUrl;
 import org.telegram.svipe.video.SvipeRefResolver;
 import org.telegram.svipe.video.SvipeVideoLadder;
 import org.telegram.tgnet.TLRPC;
@@ -41,6 +42,16 @@ public final class SvipeReelWarmer {
     private static final long FRESH_FOR_MS = 10 * 60 * 1000L;
     /** Resolve only the head of the page — enough for an instant first reel plus the swipe after it. */
     private static final int RESOLVE_AHEAD = 2;
+    /**
+     * How many reels get their sessionless URL minted here, before anyone opens the tab.
+     *
+     * <p>This is the whole reason position 0 costs nothing. The URL is minted from the public embed
+     * page, which needs no session and no flood budget, and the fetch happens while the app is still
+     * opening — so by the time the reels tab exists the first reels can be played the instant they
+     * are laid out. Three, because the viewer can only be looking at one and swiping towards the
+     * next; the rest are minted by the screen's own read-ahead as they come into range.
+     */
+    private static final int URL_AHEAD = 3;
     /** Below this many ready reels on disk the warm-up is worth running at all. */
     private static final int QUEUE_COMFORTABLE = 3;
 
@@ -171,6 +182,7 @@ public final class SvipeReelWarmer {
             warm = w;
             warmedAtMs = System.currentTimeMillis();
             FileLog.d("svipe: warm-up holds " + w.items.size() + " reels, resolving the head");
+            mintHead(w);
             resolveHead(account, w, 0, done);
         });
     }
@@ -226,12 +238,39 @@ public final class SvipeReelWarmer {
     }
 
     /**
+     * Mint the head reels' sessionless URLs, in parallel, before anything else touches them.
+     *
+     * <p>These are ordinary https GETs against the public embed page — no session, no MTProto, and
+     * nothing off the flood budget — so there is no reason to serialise them the way the resolves
+     * below are serialised. {@link SvipePublicUrl} caches the answers, so the resolve chain that
+     * follows and the reels screen that opens later both read them for free.
+     */
+    private static void mintHead(final Warm w) {
+        for (int i = 0; i < URL_AHEAD && i < w.items.size(); i++) {
+            final SvipeRefResolver.VideoRef ref = w.items.get(i);
+            if (ref.playUrl != null && !ref.playUrl.isEmpty()) continue;
+            SvipePublicUrl.resolve(ref.username, ref.messageId, media -> {
+                if (media == null) return;
+                ref.playUrl = media.url;
+                if (ref.width <= 0 || ref.height <= 0) {
+                    ref.width = media.width;
+                    ref.height = media.height;
+                }
+            });
+        }
+    }
+
+    /**
      * Resolve the first few items one at a time — serial on purpose, to stay off the flood ceiling.
      *
      * <p>Skipped entirely for a reel that carries a public URL: it can already be played, and the
      * only reason to resolve it is the action rail, which the player fills behind the video when the
      * user actually reaches it. Warming a page used to cost one contacts.resolveUsername per head
      * item before anything was on screen; now it costs none for the reels that do not need it.
+     *
+     * <p>The URL may still be in the air from {@link #mintHead} when this reaches an item, so ask
+     * for it again here rather than reading the field: that call joins the in-flight fetch instead
+     * of starting a second one, and an item that gets a URL never pays for the resolve at all.
      */
     private static void resolveHead(final int account, final Warm w, final int index, final Runnable done) {
         if (index >= RESOLVE_AHEAD || index >= w.items.size()) {
@@ -243,10 +282,21 @@ public final class SvipeReelWarmer {
             resolveHead(account, w, index + 1, done);
             return;
         }
-        SvipeRefResolver.resolve(account, ref, () -> {
-            if (index == 0) preloadHead(account, ref);
-            resolveHead(account, w, index + 1, done);
-        }, null, true);   // warm-up: nothing is on screen waiting, so it queues behind the user
+        SvipePublicUrl.resolve(ref.username, ref.messageId, media -> {
+            if (media != null) {
+                ref.playUrl = media.url;
+                if (ref.width <= 0 || ref.height <= 0) {
+                    ref.width = media.width;
+                    ref.height = media.height;
+                }
+                resolveHead(account, w, index + 1, done);
+                return;
+            }
+            SvipeRefResolver.resolve(account, ref, () -> {
+                if (index == 0) preloadHead(account, ref);
+                resolveHead(account, w, index + 1, done);
+            }, null, true);   // warm-up: nothing is on screen waiting, so it queues behind the user
+        });
     }
 
     /**

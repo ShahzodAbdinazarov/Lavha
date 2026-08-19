@@ -60,6 +60,7 @@ import org.telegram.svipe.SvipeReelQueue;
 import org.telegram.svipe.SvipeReelWarmer;
 import org.telegram.svipe.SvipeWatchedSet;
 import org.telegram.svipe.SvipeWatchEvent;
+import org.telegram.svipe.video.SvipePublicUrl;
 import org.telegram.svipe.video.SvipeRefResolver;
 import org.telegram.svipe.video.SvipeVideoLadder;
 import org.telegram.messenger.AndroidUtilities;
@@ -254,6 +255,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     // priority; the swipe just attaches it to the texture — no setup, no buffer ramp-up.
     private VideoPlayer nextPlayer;
     private int nextPlayerPos = -1;
+    /** What the prepared player was handed, carried over to {@link #playbackSource} on the swipe.
+     *  Without it every prefetched reel reported the PREVIOUS reel's source, and prefetched reels
+     *  are most of them — so the one number that says which route a reel took was wrong for the
+     *  majority of the sample. */
+    private String nextPlayerSource;
+    private int nextPlayerRungs;
     // --- stuck-reel watchdog (auto skip-and-back): a prepared player whose stream stalled in the
     // FileLoader priority queue shows the spinner forever; promotion only re-maps priority and never
     // wakes the parked read(). This watchdog rebuilds the reel fresh (like a manual revisit) when a
@@ -338,6 +345,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         boolean preloadStarted;                          // a head-preload was requested
         int preloadPriority = FileLoader.PRIORITY_LOW;   // set by prefetchAround before resolve
         boolean preloadBypassGate;                       // next-in-line skips the data-saving gate
+        boolean urlMintTried;                            // the embed page was asked for a sessionless URL (once)
         boolean fromQueue;                               // restored from the persisted offline queue
         boolean fullDownloadStarted;                     // a full (cacheType 0) download was requested
         long downloadDocId;                              // the rendition doc a full download targets (0 = none); the observers key off this
@@ -1449,6 +1457,16 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             });
         } else {
             final int fpos = pos;
+            // Two routes to a first frame, started together, and whichever gets home first wins.
+            //
+            // The embed page mints an https URL for this reel with no session at all — that is the
+            // cheap way in, and on a cold start it is usually the fast one too. But it needs a
+            // network that reaches t.me, which is not the same network as the one that reaches
+            // Telegram. So the MTProto resolve runs BESIDE it rather than behind it: the action rail
+            // needs the message either way, and where t.me is unreachable it is the only thing that
+            // will ever produce a frame. Both start-playback paths guard on {@code currentPlayer},
+            // so the loser is a no-op rather than a second player.
+            mintPlayUrl(item, null);
             resolveItem(item, () -> {
                 updateActions(fpos);
                 if (currentPosition == fpos && item.mo != null && currentPlayer == null) {
@@ -1463,6 +1481,48 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     /** True when this reel can be streamed with no Telegram session at all. */
     private static boolean hasPlayUrl(FeedItem it) {
         return it != null && it.playUrl != null && !it.playUrl.isEmpty();
+    }
+
+    /**
+     * Mint this reel's sessionless URL on the device, and play it the moment it lands if nothing
+     * else has by then.
+     *
+     * <p>The backend used to fill {@code play_url} on a worker lane, hours before anybody watched.
+     * It could not work: the CDN token lives about three hours, so nine in ten of the URLs that lane
+     * fetched expired unseen, and the one reel a viewer was actually looking at was as likely as not
+     * to have none. Asking {@link SvipePublicUrl} here mints it seconds before it is played, for the
+     * twenty reels that matter instead of the two million that do not.
+     *
+     * <p>{@code onDone} runs on BOTH outcomes — a URL or none — so a caller can use it as "the cheap
+     * route has had its turn, do it the expensive way now". Callers that only want the URL as a
+     * bonus pass null. Asked once per item: {@link SvipePublicUrl} caches and de-duplicates, but the
+     * flag is what keeps a caller that re-enters on completion from looping.
+     */
+    private void mintPlayUrl(final FeedItem item, final Runnable onDone) {
+        if (item == null || item.username == null || item.username.isEmpty() || hasPlayUrl(item)) {
+            if (onDone != null) onDone.run();
+            return;
+        }
+        item.urlMintTried = true;
+        final long t0 = System.currentTimeMillis();
+        SvipePublicUrl.resolve(item.username, item.messageId, media -> {
+            if (media != null) {
+                item.playUrl = media.url;
+                // The feed normally knows the pixel size; a page restored from elsewhere may not,
+                // and the widget's own aspect box is enough to frame the reel before any resolve.
+                if (item.width <= 0 || item.height <= 0) {
+                    item.width = media.width;
+                    item.height = media.height;
+                }
+                int idx = items.indexOf(item);
+                if (idx >= 0 && currentPosition == idx && currentPlayer == null && item.mo == null) {
+                    FileLog.d("svipe: minted public url for pos=" + idx + " in "
+                            + (System.currentTimeMillis() - t0) + "ms");
+                    startPlayback(null, null, idx, item);
+                }
+            }
+            if (onDone != null) onDone.run();
+        });
     }
 
     private ReelsHolder holderAt(int pos) {
@@ -1592,7 +1652,15 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 continue;
             }
             if (it.mo == null) {
-                resolveItem(it, null); // resolveItem head-preloads itself on completion
+                // The sessionless URL first, while the current reel plays. It costs one 17 KB page
+                // and no session, and a reel that has one needs no resolve at all to start — so by
+                // the time the swipe lands it is already in hand. Only when the embed page has
+                // nothing for it (over the ~20 MB ceiling, previews off, t.me unreachable) does this
+                // reel fall back to the MTProto prefetch it used to get unconditionally.
+                final FeedItem fit = it;
+                mintPlayUrl(fit, () -> {
+                    if (!hasPlayUrl(fit)) resolveItem(fit, null); // resolveItem head-preloads itself
+                });
             } else {
                 preloadMedia(it);
             }
@@ -1660,6 +1728,24 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 // a cold start that may never happen — that is spending the scarcest thing we have
                 // on the least urgent thing we do.
                 continue;
+            }
+            if (it.mo == null && !hasPlayUrl(it)) {
+                // The same rule, applied to a URL that has not arrived YET. It used to be a race the
+                // cushion always won, because the embed page takes a few hundred milliseconds and
+                // this loop runs the instant the page is laid out — so every reel got resolved and
+                // fully downloaded moments before it turned out to need neither. Measured on the
+                // emulator, 2026-08-19: 26 file loads started while position 0 was streaming, its
+                // stream was starved, and the stall watchdog rebuilt it 17.6 s in. Waiting for the
+                // answer costs the cushion a swipe and costs the viewer nothing.
+                if (!it.urlMintTried) {
+                    final FeedItem fit = it;
+                    mintPlayUrl(fit, () -> ensureFullDownloadsAhead(currentPosition));
+                    continue;
+                }
+                // Already asked and still unanswered — whoever asked owns the re-entry.
+                if (SvipePublicUrl.inFlight(it.username, it.messageId)) continue;
+                // Answered with nothing: over the ceiling, previews off, or t.me unreachable. This
+                // reel is MTProto's, and the cushion is the right place for it.
             }
             if (it.mo == null) {
                 resolveItem(it, () -> ensureFullDownloadsAhead(currentPosition)); // retry once resolved
@@ -1874,7 +1960,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 player = nextPlayer;
                 nextPlayer = null;
                 nextPlayerPos = -1;
+                playbackSource = nextPlayerSource;
+                playbackRungs = nextPlayerRungs;
                 player.setLooping(!longForm);
+                FileLog.d("svipe: play pos=" + pos + " source=" + playbackSource
+                        + " prepared=true fromQueue=" + item.fromQueue);
             } else {
                 player = new VideoPlayer(true, false); // Svipe: pauseOther=true -> starting a reel pauses music, and music pauses the reel
                 player.setIsReels();
@@ -2234,7 +2324,30 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         long now = System.currentTimeMillis();
         if (stuckRecoveryAttempts > 0 && now - lastStuckRecoveryMs < 1000) return; // debounce double-fires
         final FeedItem item = items.get(pos);
-        if (item == null || item.mo == null) return;
+        if (item == null) return;
+        // A stalled URL stream is the case this screen meets most, and the URL fallback wired to
+        // ExoPlayer's onError does not cover it: a CDN that refuses the connection or simply stops
+        // answering never produces an error, so the player buffers and the handler never runs.
+        // Measured with the CDN blocked on the emulator, 2026-08-19: not one onError fired, and the
+        // reels were rescued only by this watchdog, 3.6 s in. Withdraw the URL here so the rebuild
+        // cannot pick the same dead one, and so a reel whose ONLY route it was goes and gets a
+        // message instead of falling out at the check below.
+        if (hasPlayUrl(item) && "public_url".equals(playbackSource)) {
+            FileLog.d("svipe: public url stalled pos=" + pos + " — dropping it for MTProto");
+            item.playUrl = null;
+        }
+        if (item.mo == null) {
+            stuckRecoveryAttempts++;
+            lastStuckRecoveryMs = now;
+            currentReelFirstFrame = false;
+            pendingSeekToMs = 0;
+            FileLog.d("svipe: recovering stuck reel pos=" + pos + " attempt=" + stuckRecoveryAttempts
+                    + " cause=" + cause + " — no message yet, resolving");
+            releaseCurrentPlayer();
+            releaseNextPlayer();
+            resolveAndPlay(pos);
+            return;
+        }
         final TLRPC.Document doc = item.mo.getDocument();
         if (doc == null) return;
         stuckRecoveryAttempts++;
@@ -2385,10 +2498,22 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 p.setPlayWhenReady(false);
                 nextPlayer = p;
                 nextPlayerPos = pos;
+                nextPlayerSource = "public_url";
+                nextPlayerRungs = 0;
                 FileLog.d("svipe: prepared next player pos=" + pos + " from public url");
             } catch (Exception e) {
                 FileLog.e(e);
             }
+            return;
+        }
+        if (item.mo == null && !item.urlMintTried) {
+            // Nothing prefetched this one yet (a fresh page, or it arrived while the user was
+            // already here). Ask the embed page before paying for a resolve — the re-entry below is
+            // bounded by urlMintTried, which is set before the fetch leaves.
+            final int fpos = pos;
+            mintPlayUrl(item, () -> {
+                if (currentPosition + 1 == fpos && nextPlayer == null) prepareNextPlayer(fpos);
+            });
             return;
         }
         if (item.mo == null) {
@@ -2427,18 +2552,23 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 for (TLRPC.Document d : SvipeVideoLadder.ladderVideoDocs(qualities)) {
                     FileStreamLoadOperation.setPriorityForDocument(d, FileLoader.PRIORITY_NORMAL);
                 }
-                p.preparePlayer(qualities, SvipeVideoLadder.cachedQualityOf(qualities));
+                VideoPlayer.Quality cached = SvipeVideoLadder.cachedQualityOf(qualities);
+                nextPlayerSource = cached != null ? "local_cache" : "network_auto";
+                nextPlayerRungs = qualities.size();
+                p.preparePlayer(qualities, cached);
             } else {
                 int reference = FileLoader.getInstance(account).getFileReference(
                         item.refParent != null ? item.refParent : item.mo);
                 VideoPlayer.VideoUri vu = VideoPlayer.VideoUri.of(account, doc, null, reference, false);
                 FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_NORMAL);
+                nextPlayerSource = vu.isCached() ? "local_cache" : "network";
+                nextPlayerRungs = 0;
                 p.preparePlayer(vu.uri, "other");
             }
             p.setPlayWhenReady(false);
             nextPlayer = p;
             nextPlayerPos = pos;
-            FileLog.d("svipe: prepared next player pos=" + pos);
+            FileLog.d("svipe: prepared next player pos=" + pos + " source=" + nextPlayerSource);
         } catch (Exception e) {
             FileLog.e(e);
         }
