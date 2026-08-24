@@ -313,11 +313,11 @@ public final class SvipeApkGuard {
                 if (o.optBoolean("hashed")) {
                     // Somebody else has already taught the server what this file is; this device's
                     // download has nothing left to contribute.
-                    markReported(docId);
+                    markReported(docId, false);
                 }
             }
+            persist();  // one write for the batch — the reported set may have grown even if no verdict did
             if (changed) {
-                persist();
                 AndroidUtilities.runOnUIThread(() -> NotificationCenter.getGlobalInstance()
                         .postNotificationName(NotificationCenter.svipeApkVerdictUpdated));
             }
@@ -504,7 +504,7 @@ public final class SvipeApkGuard {
             if (res == null) {
                 return;
             }
-            markReported(docId);
+            markReported(docId, true);
             // The reply carries the verdict this very report produced — including the case that
             // matters most, where the manifest this device just read is what condemned the file.
             if (put(docId, parseVerdict(res.optString("verdict", "unknown")))) {
@@ -691,7 +691,7 @@ public final class SvipeApkGuard {
         }
     }
 
-    private static void markReported(long docId) {
+    private static void markReported(long docId, boolean persistNow) {
         synchronized (reported) {
             if (!reported.add(docId)) {
                 return;
@@ -701,7 +701,9 @@ public final class SvipeApkGuard {
                 reported.remove(oldest);
             }
         }
-        persist();
+        if (persistNow) {
+            persist();
+        }
     }
 
     private static void load() {
