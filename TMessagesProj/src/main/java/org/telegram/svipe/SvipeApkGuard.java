@@ -112,6 +112,13 @@ public final class SvipeApkGuard {
     private static final LinkedHashSet<Long> reported = new LinkedHashSet<>();
     /** doc_ids waiting to be asked about, with the little we know about them before a download. */
     private static final LinkedHashMap<Long, TLRPC.Document> pending = new LinkedHashMap<>();
+    /**
+     * Documents re-checked during THIS run of the app. Deliberately not persisted: one refresh per
+     * launch is the right cadence for a verdict that changes hours later, and it costs one batched
+     * request for the handful of APKs a person actually has in their chats.
+     */
+    private static final java.util.Set<Long> refreshed =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<>());
 
     private static volatile boolean loaded;
     private static boolean flushScheduled;
@@ -187,6 +194,19 @@ public final class SvipeApkGuard {
         if (cached == null) {
             enqueue(messageObject.currentAccount, doc);
             return UNKNOWN;
+        }
+        // A cached answer is not a final one. Most files are `unknown` the first time anybody sees
+        // them and become something else later — when the first device to download one reports its
+        // manifest, or when an antivirus finishes with the sample hours afterwards. Caching that
+        // first `unknown` forever would mean the phone that received the file EARLIEST, the one
+        // most at risk, is the one never told what it turned out to be.
+        //
+        // So every non-final verdict is re-asked once per app run: the cached value is returned
+        // immediately (no wait, no flicker) and the answer, if it changed, arrives moments later
+        // through svipeApkVerdictUpdated. `malicious` is not re-asked — nothing it could change to
+        // would make the file safe to open.
+        if (cached != MALICIOUS && refreshed.add(doc.id)) {
+            enqueue(messageObject.currentAccount, doc);
         }
         return cached;
     }
