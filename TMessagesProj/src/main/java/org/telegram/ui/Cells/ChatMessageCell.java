@@ -12845,7 +12845,24 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             }
 
             String str = AndroidUtilities.formatFileSize(documentAttach.size) + " " + FileLoader.getDocumentExtension(documentAttach);
-            infoWidth = Math.min(maxWidth - dp(30), (int) Math.ceil(Theme.chat_infoPaint.measureText("000.0 mm / " + AndroidUtilities.formatFileSize(documentAttach.size))));
+            // Svipe: an APK nobody can vouch for carries its warning on the info line — the one line
+            // of the file bubble that is always drawn, right under the file name, so it is read
+            // before the download button is reached. A file the guard is sure about is left alone:
+            // no "safe" badge, because a badge that appears on almost nothing teaches people that
+            // its absence means nothing. (A file that is known malware never gets here at all — the
+            // message became a text bubble in MessageObject.)
+            if (org.telegram.svipe.SvipeApkGuard.needsCaution(messageObject)) {
+                str = getString(org.telegram.svipe.SvipeApkGuard.verdict(messageObject)
+                        == org.telegram.svipe.SvipeApkGuard.SUSPICIOUS
+                        ? R.string.SvipeApkSuspiciousShort : R.string.SvipeApkUnknownShort);
+            }
+            // The reserved width is the DOWNLOAD PROGRESS text ("1.2 MB / 5.0 MB"), which replaces
+            // this line while the file is coming down — measuring the current string instead would
+            // clip the progress. A warning that is wider than that widens the bubble instead (see
+            // the infoWidth term in maxTextWidth above), so the sentence gets a line of its own.
+            infoWidth = Math.min(maxWidth - dp(30), (int) Math.ceil(Math.max(
+                    Theme.chat_infoPaint.measureText("000.0 mm / " + AndroidUtilities.formatFileSize(documentAttach.size)),
+                    Theme.chat_infoPaint.measureText(str))));
             CharSequence str2 = TextUtils.ellipsize(str, Theme.chat_infoPaint, infoWidth, TextUtils.TruncateAt.END);
             try {
                 if (infoWidth < 0) {

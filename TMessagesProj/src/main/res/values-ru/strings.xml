@@ -579,4 +579,14 @@
     <string name="SvipeGuestBenefit4">Сохраняйте и возвращайтесь</string>
     <string name="SvipeGuestBenefit4Text">Избранное, история просмотров и продолжение с того места, где вы остановились</string>
     <string name="SvipeGuestNotNow">Не сейчас</string>
+
+    <string name="SvipeApkBlocked">⚠️ Этот файл был вирусом. Svipe распознал и заблокировал его — открыть или установить отсюда нельзя.</string>
+    <string name="SvipeApkBlockedTitle">Заблокировано: известное вредоносное ПО</string>
+    <string name="SvipeApkBlockedDetail">Именно этот файл числится вредоносным. Отправитель может об этом не знать — его телефон может быть заражён и рассылать файл сам.</string>
+    <string name="SvipeApkUnknownShort">⚠ Непроверенное приложение</string>
+    <string name="SvipeApkSuspiciousShort">⚠ Просит опасные разрешения</string>
+    <string name="SvipeApkWarnTitle">Установить это приложение?</string>
+    <string name="SvipeApkUnknownDetail">Это приложение никто не проверял. Оно может быть безопасным, а может быть вирусом — пока сказать невозможно.\n\nПроверьте дважды, прежде чем устанавливать: знаете ли вы отправителя и просили ли вы этот файл?</string>
+    <string name="SvipeApkSuspiciousDetail">Приложение просит читать ваш экран, рисовать поверх других приложений или читать сообщения — тот самый набор, которым крадут доступ к банку и одноразовые коды.\n\nНе устанавливайте, если не уверены, что это.</string>
+    <string name="SvipeApkInstallAnyway">Всё равно установить</string>
 </resources>

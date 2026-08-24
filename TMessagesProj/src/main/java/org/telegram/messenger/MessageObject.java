@@ -5918,6 +5918,14 @@ public class MessageObject {
             if (!TextUtils.isEmpty(restrictionReason)) {
                 messageText = restrictionReason;
                 isRestrictedMessage = true;
+            } else if (org.telegram.svipe.SvipeApkGuard.isBlocked(this)) {
+                // Svipe: this exact file is known malware (SvipeApkGuard). Telegram's own
+                // restricted-content path is reused deliberately rather than reinvented — it turns the
+                // message into a plain text bubble, which means the document is not merely hidden
+                // behind a warning: there is no longer a download button, a thumbnail or an open
+                // action anywhere in the message. Nothing to tap by accident.
+                messageText = LocaleController.getString(R.string.SvipeApkBlocked);
+                isRestrictedMessage = true;
             } else if (messageOwner.rich_message != null) {
                 messageText = formatRichMessage(messageOwner.rich_message, isOutOwner());
                 messageText = AndroidUtilities.replaceNewLines(messageText);

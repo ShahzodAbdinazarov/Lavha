@@ -1019,6 +1019,11 @@ public class FileLoader extends BaseController {
 
                 if (!operation.isPreloadVideoOperation()) {
                     loadOperationPathsUI.remove(fileName);
+                    // Svipe: an APK just finished downloading. Hash it and read its manifest, then
+                    // tell the backend — which is what lets every OTHER device be warned about this
+                    // file before it downloads anything. The call returns immediately for every
+                    // other kind of file, and the work itself runs on the guard's own queue.
+                    org.telegram.svipe.SvipeApkGuard.onFileLoaded(currentAccount, document, finalFile);
                     if (delegate != null) {
                         delegate.fileDidLoaded(fileName, finalFile, parentObject, finalType);
                     }

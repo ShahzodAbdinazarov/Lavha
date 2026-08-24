@@ -306,4 +306,14 @@
     <string name="SvipeGuestBenefit4">Saqlang va qayting</string>
     <string name="SvipeGuestBenefit4Text">Sevimlilar, ko\'rish tarixi va to\'xtagan joyingizdan davom etish</string>
     <string name="SvipeGuestNotNow">Hozir emas</string>
+
+    <string name="SvipeApkBlocked">⚠️ Bu fayl virus edi. Svipe uni aniqladi va bloklab qo\'ydi — bu yerdan ochib ham, o\'rnatib ham bo\'lmaydi.</string>
+    <string name="SvipeApkBlockedTitle">Bloklandi: ma\'lum zararli dastur</string>
+    <string name="SvipeApkBlockedDetail">Aynan shu fayl zararli dastur sifatida ro\'yxatga olingan. Yuborgan odam buni bilmasligi mumkin — uning telefoni zararlangan bo\'lib, faylni o\'zi tarqatayotgan bo\'lishi mumkin.</string>
+    <string name="SvipeApkUnknownShort">⚠ Tekshirilmagan ilova — ehtiyot bo\'ling</string>
+    <string name="SvipeApkSuspiciousShort">⚠ Xavfli ruxsatlar so\'raydi</string>
+    <string name="SvipeApkWarnTitle">Bu ilova o\'rnatilsinmi?</string>
+    <string name="SvipeApkUnknownDetail">Bu ilovani hech kim tekshirmagan. U xavfsiz ham, virus ham bo\'lishi mumkin — hozircha buni aytishning iloji yo\'q.\n\nO\'rnatishdan oldin ikki marta tekshiring: yuboruvchini taniysizmi va bu faylni o\'zingiz so\'raganmidingiz?</string>
+    <string name="SvipeApkSuspiciousDetail">Bu ilova ekraningizni o\'qishni, boshqa ilovalar ustiga chizishni yoki xabarlaringizni o\'qishni so\'raydi — bu bank paroli va bir martalik kodlarni o\'g\'irlash uchun ishlatiladigan to\'plam.\n\nNima ekanligiga to\'liq ishonchingiz komil bo\'lmasa, o\'rnatmang.</string>
+    <string name="SvipeApkInstallAnyway">Baribir o\'rnatish</string>
 </resources>

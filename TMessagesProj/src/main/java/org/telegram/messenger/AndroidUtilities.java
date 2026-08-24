@@ -4328,6 +4328,19 @@ public class AndroidUtilities {
             f = FileLoader.getInstance(message.currentAccount).getPathToMessage(message.messageOwner);
         }
         String mimeType = message.type == MessageObject.TYPE_FILE || message.type == MessageObject.TYPE_TEXT ? message.getMimeType() : null;
+        // Svipe: the last gate in front of the installer. Only this overload knows WHICH message the
+        // file came from, and the verdict is keyed on that document — the plain-File overload below
+        // has no way to look one up, so the check has to happen here rather than deeper down.
+        // `restrict` means the caller is only probing whether the file could be opened, so it must
+        // not raise a dialog.
+        if (!restrict) {
+            final File file = f;
+            final String fileMimeType = mimeType;
+            if (org.telegram.svipe.SvipeApkGuard.interceptOpen(message, activity, resourcesProvider,
+                    () -> openForView(file, message.getFileName(), fileMimeType, activity, resourcesProvider, false))) {
+                return true;
+            }
+        }
         return openForView(f, message.getFileName(), mimeType, activity, resourcesProvider, restrict);
     }
 

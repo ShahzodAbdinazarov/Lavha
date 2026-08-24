@@ -11470,4 +11470,17 @@
     <string name="SvipeGuestBenefit4">Save it and come back</string>
     <string name="SvipeGuestBenefit4Text">Favourites, watch history, and picking up exactly where you stopped</string>
     <string name="SvipeGuestNotNow">Not now</string>
+
+    <!-- Svipe: APK safety. Chat documents only — nothing here looks at installed apps. The wording
+         is deliberately asymmetric: a blocked file is stated as fact, an unverified one is stated as
+         an absence of knowledge, and a safe one is never announced at all. -->
+    <string name="SvipeApkBlocked">⚠️ This file was a virus. Svipe recognised it and blocked it, so it can\'t be opened or installed from here.</string>
+    <string name="SvipeApkBlockedTitle">Blocked: known malware</string>
+    <string name="SvipeApkBlockedDetail">This exact file is listed as malware. Whoever sent it may not know — their own phone could be infected and sending it on by itself.</string>
+    <string name="SvipeApkUnknownShort">⚠ Unverified app — check first</string>
+    <string name="SvipeApkSuspiciousShort">⚠ Asks for dangerous permissions</string>
+    <string name="SvipeApkWarnTitle">Install this app?</string>
+    <string name="SvipeApkUnknownDetail">Nobody has verified this app. It may be safe, and it may be a virus — we have no way to tell yet.\n\nCheck twice before you install it: do you know the sender, and did you ask for this file?</string>
+    <string name="SvipeApkSuspiciousDetail">This app asks to read your screen, draw over other apps, or read your messages — the combination used to steal banking logins and one-time codes.\n\nDon\'t install it unless you are certain you know what it is.</string>
+    <string name="SvipeApkInstallAnyway">Install anyway</string>
 </resources>

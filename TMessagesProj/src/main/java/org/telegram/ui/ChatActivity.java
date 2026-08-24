@@ -2967,6 +2967,10 @@ public class ChatActivity extends BaseFragment implements
             .add(NotificationCenter.joinedGroup);
 
         globalObserversGroup
+            // Svipe: a verdict landed for an APK sent in a chat — the message may have to be redrawn
+            // as a warning, or replaced outright. Global because the same file can be on screen in
+            // more than one chat at once.
+            .add(NotificationCenter.svipeApkVerdictUpdated)
             .add(NotificationCenter.emojiLoaded)
             .add(NotificationCenter.invalidateMotionBackground)
             .add(NotificationCenter.didSetNewWallpapper)
@@ -22475,6 +22479,16 @@ public class ChatActivity extends BaseFragment implements
                 } else {
                     removeSelfFromStack();
                 }
+            }
+        } else if (id == NotificationCenter.svipeApkVerdictUpdated) {
+            // Svipe: verdicts for APKs in this chat changed. Re-derive the affected messages and
+            // redraw — a file that was an ordinary attachment a second ago may now be a warning.
+            boolean apkChanged = false;
+            for (int a = 0, N = messages.size(); a < N; a++) {
+                apkChanged |= org.telegram.svipe.SvipeApkGuard.refresh(messages.get(a));
+            }
+            if (apkChanged && chatAdapter != null) {
+                chatAdapter.notifyDataSetChanged();
             }
         } else if (id == NotificationCenter.svipeMsgLocalArchived) {
             // Svipe: a message was just deleted/edited in a chat -> maybe prompt for sync consent (this one).

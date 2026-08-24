@@ -393,6 +393,10 @@ public class NotificationCenter {
     // Svipe: the cached set of indexed channel ids changed (SvipeChannelIndex). Global — drives the
     // badge redraw in the chat list / search rows.
     public static final int svipeChannelIndexUpdated = totalEvents++;
+    // Svipe: a verdict arrived for an APK sent in a chat (SvipeApkGuard), so a message that was
+    // drawn as an ordinary file may now have to be drawn as a warning — or hidden outright. Global:
+    // the same file can be on screen in more than one chat at once.
+    public static final int svipeApkVerdictUpdated = totalEvents++;
 
     public static boolean alreadyLogged;
 
