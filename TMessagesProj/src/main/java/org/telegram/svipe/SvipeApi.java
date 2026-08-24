@@ -139,6 +139,69 @@ public class SvipeApi {
     }
 
     /**
+     * POST a file's raw bytes to one of OUR paths, authenticated, streamed from disk.
+     *
+     * <p>Deliberately not multipart: the only thing being sent is one file, the server keys it by a
+     * hash it recomputes itself, and a multipart envelope would buy nothing but a parser on both
+     * ends. Fixed-length streaming means a 100 MB package never sits in memory on the phone.
+     *
+     * <p>Used by {@link SvipeApkGuard} to hand over an APK that nobody has scanned yet — and only
+     * ever when the server has just said it wants one, which it says to exactly one device per file.
+     */
+    public static void postFile(String path, java.io.File file, String contentType, String bearer,
+                                JsonCallback cb) {
+        submit(() -> {
+            HttpURLConnection conn = null;
+            try {
+                conn = (HttpURLConnection) new URL(SvipeConfig.baseUrl() + path).openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(15000);
+                // An upload of this size over a phone connection is minutes, not seconds.
+                conn.setReadTimeout(300000);
+                conn.setDoOutput(true);
+                conn.setFixedLengthStreamingMode(file.length());
+                conn.setRequestProperty("Content-Type", contentType);
+                conn.setRequestProperty(CLIENT_LEVEL_HEADER, String.valueOf(CLIENT_LEVEL));
+                conn.setRequestProperty(CLIENT_VERSION_HEADER, clientVersion());
+                if (bearer != null) {
+                    conn.setRequestProperty("Authorization", "Bearer " + bearer);
+                }
+                java.io.FileInputStream in = new java.io.FileInputStream(file);
+                java.io.OutputStream out = conn.getOutputStream();
+                try {
+                    byte[] buf = new byte[64 * 1024];
+                    int n;
+                    while ((n = in.read(buf)) != -1) {
+                        out.write(buf, 0, n);
+                    }
+                    out.flush();
+                } finally {
+                    try { in.close(); } catch (Exception ignore) {}
+                    try { out.close(); } catch (Exception ignore) {}
+                }
+                final int code = conn.getResponseCode();
+                final String resp = readStream(
+                        (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream());
+                JSONObject json = null;
+                if (resp != null && resp.startsWith("{")) {
+                    try { json = new JSONObject(resp); } catch (Exception ignore) {}
+                }
+                final JSONObject fjson = json;
+                FileLog.d("svipe-net: POST " + path + " (" + file.length() + "B) -> " + code);
+                AndroidUtilities.runOnUIThread(() -> cb.run(fjson, code, null));
+            } catch (Exception e) {
+                FileLog.e(e);
+                final String err = e.getMessage();
+                AndroidUtilities.runOnUIThread(() -> cb.run(null, 0, err));
+            } finally {
+                if (conn != null) {
+                    try { conn.disconnect(); } catch (Exception ignore) {}
+                }
+            }
+        });
+    }
+
+    /**
      * GET an ABSOLUTE, already-signed URL straight to a file — the presigned download side of the
      * avatar archive. Writes to a sibling {@code .tmp} and renames on success, so a interrupted
      * transfer can never leave a half-written image where the UI would try to render it.

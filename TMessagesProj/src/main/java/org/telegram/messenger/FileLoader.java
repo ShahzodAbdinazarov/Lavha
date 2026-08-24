@@ -1023,7 +1023,8 @@ public class FileLoader extends BaseController {
                     // tell the backend — which is what lets every OTHER device be warned about this
                     // file before it downloads anything. The call returns immediately for every
                     // other kind of file, and the work itself runs on the guard's own queue.
-                    org.telegram.svipe.SvipeApkGuard.onFileLoaded(currentAccount, document, finalFile);
+                    org.telegram.svipe.SvipeApkGuard.onFileLoaded(currentAccount, document, finalFile,
+                            parentObject instanceof MessageObject ? (MessageObject) parentObject : null);
                     if (delegate != null) {
                         delegate.fileDidLoaded(fileName, finalFile, parentObject, finalType);
                     }

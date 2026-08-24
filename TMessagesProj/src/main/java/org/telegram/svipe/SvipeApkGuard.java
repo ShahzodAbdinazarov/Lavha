@@ -100,6 +100,11 @@ public final class SvipeApkGuard {
      * trade worth making, and an APK this large is not what the feature is about.
      */
     private static final long MAX_HASH_BYTES = 512L * 1024 * 1024;
+    /**
+     * Past this the sample is not uploaded. Hashing a large file costs this device a disk read;
+     * sending it costs somebody's bandwidth twice over, and the server has its own ceiling anyway.
+     */
+    private static final long MAX_UPLOAD_BYTES = 200L * 1024 * 1024;
 
     /** doc_id -> verdict. Read on the UI thread from cell binding, so it must never block. */
     private static final LinkedHashMap<Long, Integer> verdicts = new LinkedHashMap<>();
@@ -433,7 +438,8 @@ public final class SvipeApkGuard {
      * first thing it does is decide this is none of its business. The work itself runs on this
      * class's own queue: hashing a large file is real I/O and must not sit on a shared thread.
      */
-    public static void onFileLoaded(int account, TLRPC.Document doc, File file) {
+    public static void onFileLoaded(int account, TLRPC.Document doc, File file,
+                                    MessageObject messageObject) {
         if (doc == null || file == null || !isApk(doc)) {
             return;
         }
@@ -449,27 +455,50 @@ public final class SvipeApkGuard {
         final String path = file.getAbsolutePath();
         final long docId = doc.id;
         final long size = file.length();
+        // The story the file was told with. A trojan spreads because somebody is told something — a
+        // court summons, a delivery slip — and the same file keeps arriving under the same few
+        // sentences, which names a campaign long before any engine has a signature for the binary.
+        final String text = messageText(messageObject);
         queue().postRunnable(() -> {
             final String sha = sha256(path);
             if (sha == null) {
                 return;
             }
             final Manifest manifest = readManifest(path);
-            AndroidUtilities.runOnUIThread(() -> sendReport(account, docId, sha, size, manifest));
+            AndroidUtilities.runOnUIThread(() ->
+                    sendReport(account, docId, sha, size, manifest, text, path));
         });
     }
 
-    private static void sendReport(int account, long docId, String sha, long size, Manifest m) {
+    /** The caption or message body that carried the file, trimmed to what the server will store. */
+    private static String messageText(MessageObject messageObject) {
+        if (messageObject == null || messageObject.messageOwner == null) {
+            return null;
+        }
+        final CharSequence caption = messageObject.caption;
+        String out = caption != null ? caption.toString() : messageObject.messageOwner.message;
+        if (out == null) {
+            return null;
+        }
+        out = out.trim();
+        if (out.isEmpty()) {
+            return null;
+        }
+        return out.length() > 4000 ? out.substring(0, 4000) : out;
+    }
+
+    private static void sendReport(int account, long docId, String sha, long size, Manifest m,
+                                   String text, String path) {
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {
                 return;
             }
-            reportRequest(account, token, docId, sha, size, m, false);
+            reportRequest(account, token, docId, sha, size, m, text, path, false);
         });
     }
 
     private static void reportRequest(int account, String token, long docId, String sha, long size,
-                                      Manifest m, boolean retried) {
+                                      Manifest m, String text, String path, boolean retried) {
         final JSONObject body = new JSONObject();
         try {
             body.put("doc_id", docId);
@@ -486,6 +515,9 @@ public final class SvipeApkGuard {
             } else {
                 body.put("flags", new JSONArray(java.util.Collections.singletonList("parse_failed")));
             }
+            if (text != null) {
+                body.put("message_text", text);
+            }
         } catch (Exception e) {
             FileLog.e(e);
             return;
@@ -496,7 +528,7 @@ public final class SvipeApkGuard {
                 SvipeAuth.invalidateAccessToken(account);
                 SvipeAuth.ensureToken(account, t2 -> {
                     if (t2 != null) {
-                        reportRequest(account, t2, docId, sha, size, m, true);
+                        reportRequest(account, t2, docId, sha, size, m, text, path, true);
                     }
                 });
                 return;
@@ -512,7 +544,67 @@ public final class SvipeApkGuard {
                 AndroidUtilities.runOnUIThread(() -> NotificationCenter.getGlobalInstance()
                         .postNotificationName(NotificationCenter.svipeApkVerdictUpdated));
             }
+            if (res.optBoolean("want_upload")) {
+                uploadSample(account, token, docId, sha, path);
+            }
         });
+    }
+
+    /**
+     * Hand the APK's bytes to our own backend, so a third-party antivirus can look at the file
+     * itself rather than at a hash of it.
+     *
+     * <p>Only ever runs when the server has just said it wants this sample, and it says that to
+     * <b>exactly one device per file</b>. That matters more than it sounds: an infected account
+     * forwards the same package to every contact and every group it can reach, so the same bytes
+     * reach us as hundreds of distinct Telegram documents. The server keys its store on the content
+     * hash, so the first holder uploads and everybody after is told there is nothing to send.
+     *
+     * <p>The upload goes to <b>our</b> server and nowhere else. The phone holds no antivirus
+     * credential, makes no call to any third party, and never learns which service answered.
+     *
+     * <p>Deliberately unmetered-only and deliberately silent. This is the lowest-priority thing the
+     * app does — a hundred megabytes is not something to spend somebody's mobile data on for a file
+     * they have already downloaded and may never open, and a failure simply means the next device
+     * that gets this file will be asked instead.
+     */
+    private static void uploadSample(int account, String token, long docId, String sha, String path) {
+        if (path == null) {
+            return;
+        }
+        final File file = new File(path);
+        if (!file.isFile() || file.length() <= 0 || file.length() > MAX_UPLOAD_BYTES) {
+            return;
+        }
+        if (!isUnmetered()) {
+            // Not now. The server keeps asking until somebody answers, and somebody on wifi will.
+            return;
+        }
+        SvipeApi.postFile("/v1/apk/upload?sha256=" + sha + "&doc_id=" + docId, file,
+                "application/vnd.android.package-archive", token,
+                (res, code, err) -> {
+                    if (res != null && res.optBoolean("stored")) {
+                        FileLog.d("svipe-apk: sample " + sha.substring(0, 12) + " uploaded for scanning");
+                    }
+                });
+    }
+
+    /** True on wifi (or any connection the system does not consider metered). */
+    private static boolean isUnmetered() {
+        try {
+            final android.net.ConnectivityManager cm = (android.net.ConnectivityManager)
+                    ApplicationLoader.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) {
+                return false;
+            }
+            final android.net.Network network = cm.getActiveNetwork();
+            final android.net.NetworkCapabilities caps =
+                    network == null ? null : cm.getNetworkCapabilities(network);
+            return caps != null
+                    && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED);
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /* ------------------------------------------------------------------ *
