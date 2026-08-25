@@ -1686,6 +1686,22 @@ public class DatabaseMigrationHelper {
             database.executeFast("PRAGMA user_version = 177").stepThis().dispose();
             version = 177;
         }
+        if (version == 177) {
+            // Upstream 12.10.0 added welcome_messages in ITS 176 -> 177 step. We had already claimed
+            // that number for svipe_deleted_messages and SHIPPED it (1.1.55, user_version = 177), so
+            // every installed Svipe is sitting at 177 with the Svipe table and without this one.
+            // Renumbering upstream's step to 177 -> 178 is what reaches those installs; keeping
+            // upstream's number would have left every existing user missing a table the merged code
+            // reads. Fresh installs are unaffected either way — createTables() in MessagesStorage
+            // writes both tables and jumps straight to LAST_DB_VERSION without running migrations.
+            database.executeFast("CREATE TABLE welcome_messages(mid INTEGER, dialog_id INTEGER, send_state INTEGER, date INTEGER, data BLOB, ttl INTEGER, replydata BLOB, reply_to_message_id INTEGER, PRIMARY KEY(mid, dialog_id))").stepThis().dispose();
+            database.executeFast("CREATE INDEX IF NOT EXISTS send_state_idx_welcome_messages ON welcome_messages(mid, send_state, date);").stepThis().dispose();
+            database.executeFast("CREATE INDEX IF NOT EXISTS dialog_date_idx_welcome_messages ON welcome_messages(dialog_id, date);").stepThis().dispose();
+            database.executeFast("CREATE INDEX IF NOT EXISTS reply_to_idx_welcome_messages ON welcome_messages(mid, reply_to_message_id);").stepThis().dispose();
+            database.executeFast("CREATE INDEX IF NOT EXISTS idx_to_reply_welcome_messages ON welcome_messages(reply_to_message_id, mid);").stepThis().dispose();
+            database.executeFast("PRAGMA user_version = 178").stepThis().dispose();
+            version = 178;
+        }
 
         return version;
     }

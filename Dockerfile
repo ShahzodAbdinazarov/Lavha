@@ -11,15 +11,30 @@ ENV ANDROID_VERSION 36
 ENV ANDROID_NDK_HOME ${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}/
 ENV PATH ${PATH}:${ANDROID_HOME}/tools:${ANDROID_HOME}/platform-tools
 
-RUN mkdir "$ANDROID_HOME" .android && \
-    cd "$ANDROID_HOME" && \
-    curl -o sdk.zip $ANDROID_SDK_URL && \
-    unzip sdk.zip && \
-    rm sdk.zip
+ENV ANDROID_HOME=/usr/local/android-sdk-linux
 
-RUN yes | ${ANDROID_HOME}/cmdline-tools/bin/sdkmanager --sdk_root=$ANDROID_HOME --licenses
-RUN $ANDROID_HOME/cmdline-tools/bin/sdkmanager --sdk_root=$ANDROID_HOME --update
-RUN $ANDROID_HOME/cmdline-tools/bin/sdkmanager --sdk_root=$ANDROID_HOME "build-tools;30.0.3" \
+ENV ANDROID_API_LEVEL=android-36
+ENV ANDROID_VERSION=36
+ENV ANDROID_BUILD_TOOLS_VERSION=36.0.0
+
+ENV ANDROID_NDK_VERSION=27.2.12479018
+ENV ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}
+
+ENV PATH=${PATH}:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools
+ENV PATH=${PATH}:${ANDROID_NDK_HOME}
+ENV PATH=${PATH}:${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin
+
+RUN mkdir -p "${ANDROID_HOME}/cmdline-tools" /home/gradle/.android && \
+    cd /tmp && \
+    curl -fL "${ANDROID_SDK_URL}" -o commandlinetools.zip && \
+    unzip commandlinetools.zip && \
+    mv cmdline-tools "${ANDROID_HOME}/cmdline-tools/latest" && \
+    rm commandlinetools.zip
+
+RUN yes | sdkmanager --sdk_root="${ANDROID_HOME}" --licenses
+RUN sdkmanager \
+    --sdk_root="${ANDROID_HOME}" \
+    "build-tools;36.0.0" \
     "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
     "platforms;android-${ANDROID_VERSION}" \
     "platform-tools" \
@@ -34,11 +49,12 @@ CMD mkdir -p /home/source/TMessagesProj/build/outputs/apk && \
     mkdir -p /home/source/TMessagesProj/build/outputs/native-debug-symbols && \
     cp -R /home/source/. /home/gradle && \
     cd /home/gradle && \
-    gradle :TMessagesProj_App:bundleBundleAfat_SDK23Release && \
-    gradle :TMessagesProj_App:bundleBundleAfatRelease && \
-    gradle :TMessagesProj_AppStandalone:assembleAfatStandalone && \
-    gradle :TMessagesProj_App:assembleAfatRelease && \
-    gradle :TMessagesProj_AppHuawei:assembleAfatRelease && \
+    gradle --parallel \
+        :TMessagesProj_App:bundleBundleAfat_SDK23Release \
+        :TMessagesProj_App:bundleBundleAfatRelease \
+        :TMessagesProj_AppStandalone:assembleAfatStandalone \
+        :TMessagesProj_App:assembleAfatRelease \
+        :TMessagesProj_AppHuawei:assembleAfatRelease --stacktrace && \
     cp -R /home/gradle/TMessagesProj_App/build/outputs/apk/. /home/source/TMessagesProj/build/outputs/apk && \
     cp -R /home/gradle/TMessagesProj_AppHuawei/build/outputs/apk/. /home/source/TMessagesProj/build/outputs/apk && \
     cp -R /home/gradle/TMessagesProj_AppStandalone/build/outputs/apk/. /home/source/TMessagesProj/build/outputs/apk && \
