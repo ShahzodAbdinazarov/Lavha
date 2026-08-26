@@ -90,6 +90,12 @@ android {
         }
 
         standalone {
+            // `standalone` is ours; a third-party library module only publishes `debug` and
+            // `release`, so without a fallback Gradle has nothing to match and the variant simply
+            // cannot be resolved. It went unnoticed until upstream 12.10 added :jlatexmath as a
+            // project dependency — the first outside module this build ever consumed. TMessagesProj
+            // and TMessagesProj_AppStandalone already carried the fallback; this one did not.
+            matchingFallbacks = ['release']
             debuggable false
             jniDebuggable false
             signingConfig signingConfigs.release
