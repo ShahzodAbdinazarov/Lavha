@@ -21,6 +21,8 @@ import androidx.core.content.FileProvider;
 
 import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.BuildVars;
+import org.telegram.messenger.browser.Browser;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BuildConfig;
 import org.telegram.messenger.FileLog;
@@ -137,6 +139,38 @@ public class SvipeUpdater {
         if (ctx == null) return false;
         String pkg = ctx.getPackageName();
         return pkg != null && (pkg.endsWith(".beta") || pkg.endsWith(".web"));
+    }
+
+    /**
+     * "Update the app" — sent to the right updater for the build the user is actually holding.
+     *
+     * <p>Upstream has six of these buttons (an unsupported message or block, an out-of-date request,
+     * a story this version cannot render, a blocking update screen, an admin-log entry) and every one
+     * of them opened {@link org.telegram.messenger.BuildVars#PLAYSTORE_APP_URL} directly. For the Play
+     * build that is already right — the constant was repointed at uz.svipe.app long ago, so the button
+     * offers Svipe rather than Telegram. For the {@code .web} and {@code .beta} builds it is wrong in a
+     * way that cannot be recovered from: those are a DIFFERENT package (uz.svipe.app.web), installed
+     * from svipe.uz, so sending their owner to a Play listing offers them a second app beside the one
+     * they are holding, and the message they could not read stays unreadable.
+     *
+     * <p>They have their own updater and it is the one that works for them, so it is the one they get.
+     * Everyone else keeps the store, Huawei included.
+     */
+    public static void openAppUpdate(Context context) {
+        if (isSelfUpdateBuild()) {
+            Activity activity = AndroidUtilities.findActivity(context);
+            if (activity == null) {
+                activity = AndroidUtilities.findActivity(ApplicationLoader.applicationContext);
+            }
+            if (activity != null) {
+                checkNow(activity);
+                return;
+            }
+            // No activity to host the sheet: fall through rather than swallow the press.
+        }
+        if (context == null) return;
+        Browser.openUrl(context, BuildVars.isHuaweiStoreApp()
+                ? BuildVars.HUAWEI_STORE_URL : BuildVars.PLAYSTORE_APP_URL);
     }
 
     // ---- state accessors for the drawer banner ----

@@ -677,7 +677,10 @@ public class AlertsCreator {
         builder.setMessage(text);
         builder.setPositiveButton(LocaleController.getString(R.string.OK), null);
         if (updateApp) {
-            builder.setNegativeButton(LocaleController.getString(R.string.UpdateApp), (dialog, which) -> Browser.openUrl(context, BuildVars.PLAYSTORE_APP_URL));
+            // Svipe: this one dialog stands behind about twenty call sites (login, passport, payments,
+            // two-step verification, deep links), so it is the single highest-traffic "update the app"
+            // button in the app. Routed through the same door as the rest.
+            builder.setNegativeButton(LocaleController.getString(R.string.UpdateApp), (dialog, which) -> org.telegram.svipe.SvipeUpdater.openAppUpdate(context));
         }
         return builder.show();
     }

@@ -2929,7 +2929,12 @@ public class ChannelAdminLogActivity extends BaseFragment implements Notificatio
 
                     @Override
                     public void didPressAppUpdateButton() {
-                        if (ApplicationLoader.isStandaloneBuild()) {
+                        // Svipe: one door for every "update the app" press. The .web/.beta builds are a
+                        // different package installed from svipe.uz, so a Play listing offers them a
+                        // SECOND app instead of the update. See SvipeUpdater.openAppUpdate.
+                        if (org.telegram.svipe.SvipeUpdater.isSelfUpdateBuild()) {
+                            org.telegram.svipe.SvipeUpdater.openAppUpdate(getContext());
+                        } else if (ApplicationLoader.isStandaloneBuild()) {
                             if (LaunchActivity.instance != null) {
                                 LaunchActivity.instance.checkAppUpdate(true, null);
                             }
@@ -3420,7 +3425,12 @@ public class ChannelAdminLogActivity extends BaseFragment implements Notificatio
                 cell.setDelegate(new ChatMessageCell.ChatMessageCellDelegate() {
                     @Override
                     public void didPressAppUpdateButton() {
-                        if (ApplicationLoader.isStandaloneBuild()) {
+                        // Svipe: one door for every "update the app" press. The .web/.beta builds are a
+                        // different package installed from svipe.uz, so a Play listing offers them a
+                        // SECOND app instead of the update. See SvipeUpdater.openAppUpdate.
+                        if (org.telegram.svipe.SvipeUpdater.isSelfUpdateBuild()) {
+                            org.telegram.svipe.SvipeUpdater.openAppUpdate(getContext());
+                        } else if (ApplicationLoader.isStandaloneBuild()) {
                             if (LaunchActivity.instance != null) {
                                 LaunchActivity.instance.checkAppUpdate(true, null);
                             }

@@ -4413,7 +4413,10 @@ public class PeerStoriesView extends SizeNotifierFrameLayout implements Notifica
                 ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_featuredStickers_buttonText, resourcesProvider), 30))
         );
         buttonTextView.setOnClickListener(v -> {
-            if (ApplicationLoader.isStandaloneBuild()) {
+            // Svipe: .web/.beta update themselves from svipe.uz — see SvipeUpdater.openAppUpdate.
+            if (org.telegram.svipe.SvipeUpdater.isSelfUpdateBuild()) {
+                org.telegram.svipe.SvipeUpdater.openAppUpdate(getContext());
+            } else if (ApplicationLoader.isStandaloneBuild()) {
                 if (LaunchActivity.instance != null) {
                     LaunchActivity.instance.checkAppUpdate(true, null);
                 }

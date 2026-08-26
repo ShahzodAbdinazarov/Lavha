@@ -150,6 +150,11 @@ public final class SvipeBrand {
         k.add("UpdateAppAlert");
         k.add("UnsupportedMedia2");
         k.add("StoryUnsupported");
+        // Telegram 12.10 replaced the plain "unsupported" text with a card carrying its own
+        // "Update Telegram" line and button. Every occurrence here means the app in the user's hand —
+        // the message is unreadable because THIS build is old — so it is ours to rename.
+        k.add("UnsupportedBlockMessage");
+        k.add("UnsupportedMessageMessage");
         k.add("Gift2ExportTONUpdateRequiredText");
 
         // ── Passcode and privacy ─────────────────────────────────────────────────────────────────

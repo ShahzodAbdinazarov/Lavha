@@ -151,6 +151,11 @@ public class BlockingUpdateView extends FrameLayout implements NotificationCente
                 } else if (appUpdate.url != null) {
                     Browser.openUrl(getContext(), appUpdate.url);
                 }
+            } else if (org.telegram.svipe.SvipeUpdater.isSelfUpdateBuild()) {
+                // Svipe: this is the BLOCKING screen — the app is unusable until it updates, so
+                // sending a .web owner to a Play listing for a package they do not have would strand
+                // them there. Their updater is the only one that can free them.
+                org.telegram.svipe.SvipeUpdater.openAppUpdate(context);
             } else if (BuildVars.isHuaweiStoreApp()){
                 Browser.openUrl(context, BuildVars.HUAWEI_STORE_URL);
             } else {

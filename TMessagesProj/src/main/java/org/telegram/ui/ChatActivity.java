@@ -41977,7 +41977,15 @@ public class ChatActivity extends BaseFragment implements
         }
         
         private void didPressAppUpdateButtonInternal() {
-            if (ApplicationLoader.isStandaloneBuild()) {
+            // Svipe: the .web and .beta builds are a different package (uz.svipe.app.web), installed
+            // from svipe.uz and updated by SvipeUpdater. Sending their owner to a Play listing offers
+            // a SECOND app beside the one they are holding, and the message they could not read stays
+            // unreadable. ApplicationLoader.isStandaloneBuild() does NOT catch them — our
+            // ApplicationLoaderImpl reports false so Telegram's own MTProto updater stays out of the
+            // way — so the check has to be ours, and it has to come first.
+            if (org.telegram.svipe.SvipeUpdater.isSelfUpdateBuild()) {
+                org.telegram.svipe.SvipeUpdater.openAppUpdate(getContext());
+            } else if (ApplicationLoader.isStandaloneBuild()) {
                 if (LaunchActivity.instance != null) {
                     /*
                     if (progressDialogCurrent != null) {
