@@ -86,6 +86,7 @@ public final class SvipeApkGuard {
     private static final String PREFS = "svipe_apk_guard";
     private static final String KEY_VERDICTS = "verdicts";
     private static final String KEY_REPORTED = "reported";
+    private static final String KEY_EVIDENCE = "evidence";
 
     /** Verdicts kept on disk. Small rows; this is a couple of hundred documents at most. */
     private static final int MAX_CACHED = 400;
@@ -108,6 +109,15 @@ public final class SvipeApkGuard {
 
     /** doc_id -> verdict. Read on the UI thread from cell binding, so it must never block. */
     private static final LinkedHashMap<Long, Integer> verdicts = new LinkedHashMap<>();
+    /**
+     * doc_id -> "detections/engines", when a scan produced them.
+     *
+     * <p>Kept because it is the difference between a claim and a finding. "This is a virus" asks the
+     * user to take our word for it; "flagged by 13 of 76 antivirus engines" shows them the evidence
+     * and lets them decide what it is worth — which is the only version of this warning that earns
+     * being believed the second time.
+     */
+    private static final LinkedHashMap<Long, int[]> evidence = new LinkedHashMap<>();
     /** doc_ids the server told us it already has a hash for, plus the ones we reported ourselves. */
     private static final LinkedHashSet<Long> reported = new LinkedHashSet<>();
     /** doc_ids waiting to be asked about, with the little we know about them before a download. */
@@ -335,6 +345,7 @@ public final class SvipeApkGuard {
                     continue;
                 }
                 changed |= put(docId, parseVerdict(o.optString("verdict", "unknown")));
+                noteEvidence(docId, o);
                 if (o.optBoolean("hashed")) {
                     // Somebody else has already taught the server what this file is; this device's
                     // download has nothing left to contribute.
@@ -385,6 +396,83 @@ public final class SvipeApkGuard {
             messageObject.applyNewText(messageObject.messageText);
         }
         return true;
+    }
+
+    /**
+     * The warning that stands where the file used to be.
+     *
+     * <p>Built as a QUOTE BLOCK rather than a paragraph, and that is the whole visual idea: a quote
+     * is already a card in Telegram's own language — an accent bar down its side, its own inset — so
+     * the warning reads as a thing the app placed there, not as a message somebody sent. It costs no
+     * custom drawing and inherits every theme, in and out bubble alike.
+     *
+     * <p>Three parts, in the order a frightened person reads them:
+     *
+     * <ol>
+     *   <li>a shield and a short bold red verdict — what happened, in two words;</li>
+     *   <li>a plain sentence — what we did about it, so the reader knows it is already handled;</li>
+     *   <li>the evidence, small and quiet — "flagged by 13 of 76 antivirus engines". This is the line
+     *       that makes the other two believable, and the reason the engine counts are carried all the
+     *       way from the server to here.</li>
+     * </ol>
+     */
+    public static CharSequence blockedText(long docId) {
+        final android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder();
+
+        final String title = org.telegram.messenger.LocaleController.getString(
+                org.telegram.messenger.R.string.SvipeApkBlockedTitle);
+        sb.append("\uD83D\uDEE1 ").append(title);
+        final int titleEnd = sb.length();
+        sb.setSpan(new org.telegram.ui.Components.TypefaceSpan(AndroidUtilities.bold()), 0, titleEnd,
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.setSpan(new android.text.style.ForegroundColorSpan(
+                        org.telegram.ui.ActionBar.Theme.getColor(
+                                org.telegram.ui.ActionBar.Theme.key_text_RedBold)),
+                0, titleEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+
+        sb.append("\n").append(org.telegram.messenger.LocaleController.getString(
+                org.telegram.messenger.R.string.SvipeApkBlocked));
+
+        final int detailStart = sb.length();
+        sb.append("\n").append(evidenceLine(docId));
+        // Quieter and a shade smaller: it is the footnote that proves the headline, not a headline of
+        // its own. A fixed grey rather than a theme colour, because it has to sit on both bubbles.
+        sb.setSpan(new android.text.style.RelativeSizeSpan(0.92f), detailStart, sb.length(),
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.setSpan(new android.text.style.ForegroundColorSpan(0xFF8E8E93), detailStart, sb.length(),
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+
+        org.telegram.ui.Components.QuoteSpan.putQuote(sb, 0, sb.length(), false);
+        return sb;
+    }
+
+    /** "Flagged by 13 of 76 antivirus engines", or the honest fallback when no scan produced counts. */
+    private static String evidenceLine(long docId) {
+        final int[] ev;
+        synchronized (verdicts) {
+            ev = evidence.get(docId);
+        }
+        if (ev == null || ev[0] <= 0 || ev[1] <= 0) {
+            return org.telegram.messenger.LocaleController.getString(
+                    org.telegram.messenger.R.string.SvipeApkBlockedListed);
+        }
+        return org.telegram.messenger.LocaleController.formatString(
+                org.telegram.messenger.R.string.SvipeApkBlockedEngines, ev[0], ev[1]);
+    }
+
+    private static void noteEvidence(long docId, JSONObject o) {
+        final int det = o.optInt("detections", 0);
+        final int eng = o.optInt("engines", 0);
+        if (det <= 0 || eng <= 0) {
+            return;
+        }
+        synchronized (verdicts) {
+            evidence.remove(docId);
+            evidence.put(docId, new int[]{det, eng});
+            while (evidence.size() > MAX_CACHED) {
+                evidence.remove(evidence.keySet().iterator().next());
+            }
+        }
     }
 
     /* ------------------------------------------------------------------ *
@@ -559,6 +647,7 @@ public final class SvipeApkGuard {
             markReported(docId, true);
             // The reply carries the verdict this very report produced — including the case that
             // matters most, where the manifest this device just read is what condemned the file.
+            noteEvidence(docId, res);
             if (put(docId, parseVerdict(res.optString("verdict", "unknown")))) {
                 persist();
                 AndroidUtilities.runOnUIThread(() -> NotificationCenter.getGlobalInstance()
@@ -839,6 +928,21 @@ public final class SvipeApkGuard {
                         }
                     }
                 }
+                final String rawEvidence = p.getString(KEY_EVIDENCE, null);
+                if (rawEvidence != null) {
+                    final JSONObject o = new JSONObject(rawEvidence);
+                    final java.util.Iterator<String> it = o.keys();
+                    synchronized (verdicts) {
+                        while (it.hasNext()) {
+                            final String k = it.next();
+                            final JSONArray pair = o.optJSONArray(k);
+                            if (pair != null && pair.length() == 2) {
+                                evidence.put(Long.parseLong(k),
+                                        new int[]{pair.optInt(0), pair.optInt(1)});
+                            }
+                        }
+                    }
+                }
                 final String rawReported = p.getString(KEY_REPORTED, null);
                 if (rawReported != null) {
                     final JSONArray arr = new JSONArray(rawReported);
@@ -868,7 +972,15 @@ public final class SvipeApkGuard {
                     arr.put((long) id);
                 }
             }
+            final JSONObject ev = new JSONObject();
+            synchronized (verdicts) {
+                for (Map.Entry<Long, int[]> e : evidence.entrySet()) {
+                    ev.put(String.valueOf(e.getKey()),
+                            new JSONArray().put(e.getValue()[0]).put(e.getValue()[1]));
+                }
+            }
             prefs().edit().putString(KEY_VERDICTS, o.toString())
+                    .putString(KEY_EVIDENCE, ev.toString())
                     .putString(KEY_REPORTED, arr.toString()).apply();
         } catch (Exception ignore) {
         }

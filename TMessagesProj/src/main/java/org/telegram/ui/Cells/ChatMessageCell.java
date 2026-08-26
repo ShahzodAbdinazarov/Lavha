@@ -15010,6 +15010,15 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                 Theme.chat_docBackPaint.setColor(getThemedColor(isDrawSelectionBackground() ? Theme.key_chat_inFileBackgroundSelected : Theme.key_chat_inFileBackground));
                 menuDrawable = isDrawSelectionBackground() ? Theme.chat_msgInMenuSelectedDrawable : Theme.chat_msgInMenuDrawable;
             }
+            // Svipe: the info line under an unverified APK's name is the warning, so it is painted in
+            // the theme's alert red instead of the usual muted grey. Set AFTER the branches above so
+            // it wins in all of them — incoming, outgoing and link-preview bubbles alike — and only
+            // while the file is downloading is it left alone, because that is the one moment the line
+            // is showing progress rather than the warning (buttonState 1 swaps in loadingProgressLayout
+            // a few lines below, and that text shares this paint).
+            if (buttonState != 1 && org.telegram.svipe.SvipeApkGuard.needsCaution(currentMessageObject)) {
+                Theme.chat_infoPaint.setColor(getThemedColor(Theme.key_text_RedBold));
+            }
 
             float x;
             int titleY;

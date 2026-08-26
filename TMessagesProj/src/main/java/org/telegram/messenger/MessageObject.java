@@ -255,6 +255,8 @@ public class MessageObject {
     public boolean useCustomPhoto;
     public StringBuilder botButtonsLayout;
     public boolean isRestrictedMessage;
+    /** Svipe: this message was replaced by the APK-safety warning card (see SvipeApkGuard). */
+    public boolean svipeApkBlocked;
     public long loadedFileSize;
     public boolean forceExpired;
     public long actionDeleteGroupEventId = -1;
@@ -5914,6 +5916,7 @@ public class MessageObject {
             }
         } else {
             isRestrictedMessage = false;
+            svipeApkBlocked = false;
             String restrictionReason = MessagesController.getInstance(currentAccount).getRestrictionReason(messageOwner.restriction_reason);
             if (!TextUtils.isEmpty(restrictionReason)) {
                 messageText = restrictionReason;
@@ -5924,8 +5927,15 @@ public class MessageObject {
                 // message into a plain text bubble, which means the document is not merely hidden
                 // behind a warning: there is no longer a download button, a thumbnail or an open
                 // action anywhere in the message. Nothing to tap by accident.
-                messageText = LocaleController.getString(R.string.SvipeApkBlocked);
+                //
+                // The text itself is a quote block built by the guard, so it reads as a card the app
+                // placed there rather than as something the sender wrote. svipeApkBlocked keeps it
+                // out of the restricted path's italic-everything styling, which would flatten it.
+                final TLRPC.Document blockedDoc = getDocument();
+                messageText = org.telegram.svipe.SvipeApkGuard.blockedText(
+                        blockedDoc != null ? blockedDoc.id : 0);
                 isRestrictedMessage = true;
+                svipeApkBlocked = true;
             } else if (messageOwner.rich_message != null) {
                 messageText = formatRichMessage(messageOwner.rich_message, isOutOwner());
                 messageText = AndroidUtilities.replaceNewLines(messageText);
@@ -7894,6 +7904,13 @@ public class MessageObject {
     public boolean addEntitiesToText(CharSequence text, boolean photoViewer, boolean useManualParse) {
         if (text == null) {
             return false;
+        }
+        if (svipeApkBlocked) {
+            // Svipe: the warning card carries its own styling (a bold red heading, a quiet evidence
+            // line, a quote block). The restricted path below would italicise all of it and throw
+            // that away, so this one keeps the spans it was built with.
+            return addEntitiesToText(text, new ArrayList<>(), isOutOwner(), true, photoViewer,
+                    useManualParse);
         }
         if (isRestrictedMessage || getMedia(messageOwner) instanceof TLRPC.TL_messageMediaUnsupported) {
             ArrayList<TLRPC.MessageEntity> entities = new ArrayList<>();
