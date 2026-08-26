@@ -20,7 +20,6 @@ import com.android.billingclient.api.BillingResult;
 import com.android.billingclient.api.ConsumeParams;
 import com.android.billingclient.api.PendingPurchasesParams;
 import com.android.billingclient.api.ProductDetails;
-import com.android.billingclient.api.ProductDetailsResponseListener;
 import com.android.billingclient.api.Purchase;
 import com.android.billingclient.api.PurchasesResponseListener;
 import com.android.billingclient.api.PurchasesUpdatedListener;
@@ -162,7 +161,7 @@ public class BillingController implements PurchasesUpdatedListener, BillingClien
             return;
         }
         billingClientEmpty = true;
-        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.billingProductDetailsUpdated);
+        NotificationCenter.getGlobalInstance().postNotificationNameOnUIThread(NotificationCenter.billingProductDetailsUpdated);
     }
 
     private void switchBackFromInvoice() {
@@ -170,7 +169,7 @@ public class BillingController implements PurchasesUpdatedListener, BillingClien
             return;
         }
         billingClientEmpty = false;
-        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.billingProductDetailsUpdated);
+        NotificationCenter.getGlobalInstance().postNotificationNameOnUIThread(NotificationCenter.billingProductDetailsUpdated);
     }
 
     public boolean isReady() {
@@ -180,16 +179,19 @@ public class BillingController implements PurchasesUpdatedListener, BillingClien
     /**
      * Since Play Billing 8.0.0 {@link ProductDetailsResponseListener} receives a {@link QueryProductDetailsResult}
      * instead of a {@link List} of {@link ProductDetails}; this keeps the 7.x callback shape for the callers.
+     * Upstream reached the same shim independently in 12.10.0 and named it
+     * ``ProductDetailsResponseListenerLegacy``; we use theirs, so this stops being a fork difference.
      */
-    public interface ProductDetailsCallback {
+    public interface ProductDetailsResponseListenerLegacy {
         void onProductDetailsResponse(BillingResult billingResult, List<ProductDetails> list);
     }
 
-    public void queryProductDetails(List<QueryProductDetailsParams.Product> products, ProductDetailsCallback responseListener) {
+    public void queryProductDetails(List<QueryProductDetailsParams.Product> products, ProductDetailsResponseListenerLegacy responseListener) {
         if (!isReady()) {
             throw new IllegalStateException("Billing: Controller should be ready for this call!");
         }
-        billingClient.queryProductDetailsAsync(QueryProductDetailsParams.newBuilder().setProductList(products).build(), (billingResult, queryProductDetailsResult) -> responseListener.onProductDetailsResponse(billingResult, queryProductDetailsResult.getProductDetailsList()));
+        billingClient.queryProductDetailsAsync(QueryProductDetailsParams.newBuilder().setProductList(products).build(), (billingResult, queryProductDetailsResult) ->
+            responseListener.onProductDetailsResponse(billingResult, queryProductDetailsResult.getProductDetailsList()));
     }
 
     /**
