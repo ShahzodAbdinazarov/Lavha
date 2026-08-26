@@ -112,7 +112,11 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
     private static final int FAKE_TOP_PADDING = 4;
 
     private static final int ANIMATOR_ID_HAS_TITLE_TEXT = 1;
-    private final BoolAnimator animatorHasTitleText = new BoolAnimator(ANIMATOR_ID_HAS_TITLE_TEXT, this, CubicBezierInterpolator.EASE_OUT_QUINT, 380);
+    // Starts TRUE. Upstream starts in logo mode and switches to the text title once there is one to
+    // show, which for this fork meant the Telegram wordmark was on screen for the frames before the
+    // first setStories() — the "Telegram, then Svipe" flicker on a cold open. The brand is text here,
+    // and it is text from the very first frame.
+    private final BoolAnimator animatorHasTitleText = new BoolAnimator(ANIMATOR_ID_HAS_TITLE_TEXT, this, CubicBezierInterpolator.EASE_OUT_QUINT, 380, true);
 
     private final int type;
     public final static int HEIGHT_IN_DP = 81;
@@ -330,12 +334,18 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
         titleView.setTextSize(dp(!AndroidUtilities.isTablet() && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE ? 18 : 20));
         titleView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         titleView.setFocusableInTouchMode(true);
+        // The brand, from the first frame. updateItems() sets this too, but it does not run until the
+        // story list arrives, and an empty title until then is what let the wordmark show through.
+        titleView.setText("Svipe", false);
         addView(titleView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         telegramLogoView = new ImageView(context);
         telegramLogoView.setContentDescription(getString(R.string.AppName));
         telegramLogoView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        telegramLogoView.setImageResource(R.drawable.telegram_logo_2);
+        // NO IMAGE. This view drew Telegram's wordmark; the brand is the text title now, and the one
+        // thing this view could still do was put the wrong name on screen. Kept as an empty view
+        // rather than deleted because the layout pass and checkUi_titleVisibility both address it,
+        // and a null here is an NPE in dispatchDraw.
         telegramLogoView.setColorFilter(getTextLogoColor(), PorterDuff.Mode.MULTIPLY);
         telegramLogoView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         telegramLogoView.setFocusableInTouchMode(true);
@@ -946,7 +956,10 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             telegramLogoView.setTranslationX(titleView.getTranslationX() + dp(1));
             telegramLogoView.setTranslationY(bottomY + dp(14 + FAKE_TOP_PADDING + 4.333f) + translationOffset /*titleView.getTranslationY() + dpf2(37.33f)*/);
 
-            emojiStatusView.setTranslationX(titleView.getTranslationX() - dpf2(3.33f) + telegramLogoView.getMeasuredWidth());
+            // After the TITLE, not after the logo: the logo is retired and measures 0, which parked the
+            // status on top of the first letter of "Svipe". The animated title reports the width it is
+            // currently drawing, so the status keeps its place while the text changes.
+            emojiStatusView.setTranslationX(titleView.getTranslationX() + dpf2(3.33f) + titleView.getDrawable().getCurrentWidth());
             emojiStatusView.setTranslationY(bottomY + dp(14 - 11 + FAKE_TOP_PADDING + 4.333f) + translationOffset);
 
             subtitleOverlayContainer.setTranslationX(titleView.getTranslationX());
@@ -2223,8 +2236,11 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             telegramLogoView.setVisibility(logoAlpha > 0 ? VISIBLE : GONE);
         }
         if (emojiStatusView != null) {
-            emojiStatusView.setAlpha(logoAlpha);
-            emojiStatusView.setVisibility(logoAlpha > 0 ? VISIBLE : GONE);
+            // Tied to the TITLE. Upstream tied it to the logo, which was right while the logo WAS the
+            // brand; here the brand is the title, so a premium user's status disappeared the moment
+            // the text took over — which, since the text is now permanent, meant always.
+            emojiStatusView.setAlpha(titleAlpha);
+            emojiStatusView.setVisibility(titleAlpha > 0 ? VISIBLE : GONE);
         }
         if (subtitleOverlayContainer != null) {
             subtitleOverlayContainer.setAlpha(progress);
