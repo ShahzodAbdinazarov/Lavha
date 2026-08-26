@@ -1,0 +1,4 @@
+# Rendered output. The three scripts beside this file rebuild all of it, and a repo that carries
+# generated video grows by a few megabytes every time somebody re-renders — for bytes nobody reads
+# from git.
+out/
