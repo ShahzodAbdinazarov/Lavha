@@ -30,6 +30,9 @@ import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
 import org.telegram.svipe.SvipeDiscover;
+import org.telegram.svipe.SvipeGridExposure;
+import org.telegram.svipe.SvipeQueuePlan;
+import org.telegram.svipe.SvipeRecAttribution;
 import org.telegram.svipe.SvipeVideoWarmer;
 import org.telegram.svipe.SvipeMovies;
 import org.telegram.svipe.SvipeVideoSearchHistory;
@@ -527,6 +530,9 @@ public class SvipeExploreGrid extends RecyclerListView {
         addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(RecyclerView rv, int dx, int dy) {
+                // Exposure is measured in BOTH directions — a tile the viewer scrolled back up to
+                // look at is exactly the one they looked at.
+                noteExposure();
                 if (dy <= 0) {
                     return;
                 }
@@ -1062,6 +1068,11 @@ public class SvipeExploreGrid extends RecyclerListView {
         loadingShorts = false;
         loadingLongs = false;
         refreshing = false;
+        // The tiles that were on the clock are gone with the list; what has already been reported
+        // stays reported, so a category the viewer comes back to does not re-send its screenful.
+        if (exposure != null) {
+            exposure.clearPending();
+        }
     }
 
     private void refreshRecentRows() {
@@ -1518,6 +1529,21 @@ public class SvipeExploreGrid extends RecyclerListView {
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
         resetPull();
+        // Nothing is on screen any more, and the process may not be either: stop the clock and send
+        // what it already earned rather than losing a screenful on the way out.
+        if (exposure != null) {
+            exposure.clearPending();
+            AndroidUtilities.cancelRunOnUIThread(exposureTick);
+            AndroidUtilities.cancelRunOnUIThread(exposureFlush);
+        }
+        flushExposures();
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int l, int t, int r, int b) {
+        super.onLayout(changed, l, t, r, b);
+        // A page landing under a still finger changes what is on screen without any scroll at all.
+        noteExposure();
     }
 
     @Override
@@ -1527,6 +1553,12 @@ public class SvipeExploreGrid extends RecyclerListView {
         // instant may never get its ACTION_UP/CANCEL, so reset here too (no-op when idle).
         if (visibility != VISIBLE) {
             resetPull();
+            if (exposure != null) {
+                exposure.clearPending();
+                AndroidUtilities.cancelRunOnUIThread(exposureTick);
+            }
+        } else {
+            noteExposure();
         }
     }
 
@@ -1543,6 +1575,150 @@ public class SvipeExploreGrid extends RecyclerListView {
         pullStartY = -1f;
         pullDistance = 0f;
         spinRotation = 0f;
+    }
+
+    // ---- exposure: telling the server what actually reached this screen ----
+
+    /**
+     * Whether the full-width LONG-FORM cards report exposure too. Off, and the reasoning is written
+     * down because the flag is one word to flip.
+     *
+     * <p>Exposure is not free: the server removes what a viewer has seen from what it serves, and the
+     * long-form corpus is roughly three orders of magnitude smaller than the shorts one (app/api/videos.py
+     * says as much where it applies the same filter). A rhythm of one long card per row of shorts puts
+     * twenty of them under the thumb per page, so grid-scrolling alone would retire long videos far
+     * faster than anyone watches them — the failure SvipeVideoTelemetry already warns about for the
+     * related row. Shorts carry the duplicate problem this whole change is about and can afford it;
+     * long-form is left to the one signal that unambiguously means "watched": the player's own.
+     */
+    private static final boolean EXPOSE_LONG_FORM = false;
+
+    /** Send once this many exposures have piled up, rather than one request per tile. */
+    private static final int EXPOSURE_BATCH = 20;
+    /** ...and at the latest this long after the first of them, so a slow scroller still reports. */
+    private static final long EXPOSURE_FLUSH_MS = 5_000L;
+
+    private final SvipeGridExposure exposure = new SvipeGridExposure();
+    private final ArrayList<SvipeDiscover.Event> exposureOutbox = new ArrayList<>();
+    private final Runnable exposureTick = this::noteExposure;
+    private final Runnable exposureFlush = this::flushExposures;
+
+    /**
+     * Re-read what is on screen and turn whatever has dwelled long enough into IMPRESSION events.
+     *
+     * <p>IMPRESSION is the grid's event because it is the one thing in the server's exposure set that
+     * means "this reached a person" without also claiming it played (app/api/events.py
+     * {@code _EXPOSURE_EVENTS}); everything else in that set is a playback fact the grid has no right
+     * to assert. Cheap enough to call on every scroll frame: it walks the attached children only.
+     */
+    private void noteExposure() {
+        // A visibility or layout callback can land while the superclass constructor is still running,
+        // before these fields exist. Nothing is on screen then, so there is nothing to measure.
+        if (exposure == null) {
+            return;
+        }
+        AndroidUtilities.cancelRunOnUIThread(exposureTick);
+        if (getVisibility() != VISIBLE) {
+            exposure.clearPending();
+            return;
+        }
+        final long now = System.currentTimeMillis();
+        final HashMap<String, SvipeDiscover.Item> visible = visibleExposable();
+        for (String key : exposure.update(visible.keySet(), now)) {
+            final SvipeDiscover.Item ref = visible.get(key);
+            if (ref == null) {
+                continue;
+            }
+            exposureOutbox.add(new SvipeDiscover.Event(ref.channelId, ref.messageId, "IMPRESSION",
+                    SvipeRecAttribution.attributableId(ref.recId)));
+        }
+        // A tile ripening while the viewer holds still produces no callback of its own — arm one.
+        final long nextRipe = exposure.nextRipeInMs(now);
+        if (nextRipe >= 0) {
+            AndroidUtilities.runOnUIThread(exposureTick, Math.max(nextRipe, 50));
+        }
+        if (exposureOutbox.size() >= EXPOSURE_BATCH) {
+            flushExposures();
+        } else if (!exposureOutbox.isEmpty()) {
+            AndroidUtilities.cancelRunOnUIThread(exposureFlush);
+            AndroidUtilities.runOnUIThread(exposureFlush, EXPOSURE_FLUSH_MS);
+        }
+    }
+
+    /** The reportable references currently meeting the visibility bar, keyed channel:message. */
+    private HashMap<String, SvipeDiscover.Item> visibleExposable() {
+        final HashMap<String, SvipeDiscover.Item> out = new HashMap<>();
+        final int top = getPaddingTop();
+        final int bottom = getHeight() - getPaddingBottom();
+        if (bottom <= top) {
+            return out;
+        }
+        for (int i = 0; i < getChildCount(); i++) {
+            final View child = getChildAt(i);
+            if (child == null || child.getHeight() <= 0) {
+                continue;
+            }
+            final int shown = Math.min(child.getBottom(), bottom) - Math.max(child.getTop(), top);
+            if (shown < child.getHeight() * SvipeGridExposure.MIN_VISIBLE_FRACTION) {
+                continue;
+            }
+            final SvipeDiscover.Item ref = exposableAt(getChildAdapterPosition(child));
+            if (ref != null) {
+                out.put(SvipeQueuePlan.compositeKey(ref.channelId, ref.messageId), ref);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The reference behind an adapter position, or null when that cell must never be reported.
+     *
+     * <p>Four things are excluded, and each for its own reason:
+     * <ul>
+     *   <li>a reference the user ran into in their OWN chats ({@code local}) — nothing about a private
+     *       message may reach our server, the same structural gate SvipeVideoTelemetry holds;</li>
+     *   <li>film and show POSTERS — their channel:message is a catalog artifact, not a clip in the
+     *       recommendable corpus, and marking it seen would quietly retire a whole title;</li>
+     *   <li>the recents strip — it is the user's own watch history, already exposed when watched;</li>
+     *   <li>long-form cards, unless {@link #EXPOSE_LONG_FORM}.</li>
+     * </ul>
+     */
+    private SvipeDiscover.Item exposableAt(int position) {
+        if (position < 0 || hasRecents() || showingSkeleton() || searchEmpty()) {
+            return null;
+        }
+        final int idx = position - headerRows();
+        if (idx < 0 || idx >= items.size()) {
+            return null;
+        }
+        final GridItem gi = items.get(idx);
+        if (gi == null || gi.ref == null || gi.ref.local) {
+            return null;
+        }
+        if (gi.movie() != null || gi.series() != null) {
+            return null;
+        }
+        if (gi.wide && !EXPOSE_LONG_FORM) {
+            return null;
+        }
+        if (gi.ref.channelId == 0 || gi.ref.messageId == 0) {
+            return null;
+        }
+        return gi.ref;
+    }
+
+    /** Send what the clock has earned, in one request. */
+    private void flushExposures() {
+        if (exposureOutbox == null) {
+            return;
+        }
+        AndroidUtilities.cancelRunOnUIThread(exposureFlush);
+        if (exposureOutbox.isEmpty()) {
+            return;
+        }
+        final ArrayList<SvipeDiscover.Event> batch = new ArrayList<>(exposureOutbox);
+        exposureOutbox.clear();
+        SvipeDiscover.sendEvents(account, batch, null);
     }
 
     /** The shimmer placeholder grid is shown while the first page (initial or refresh) loads. */

@@ -64,6 +64,43 @@ public class SvipeConfig {
      *  a session that ended offline is exactly the session whose numbers we most want. */
     public static final String PREF_PERF_BUFFER = "svipe_perf_buffer";
 
+    /**
+     * The server's own recommendation-context TTL, in seconds, as last stated by a response.
+     *
+     * <p>The number that decides whether an event may still carry its {@code recommendation_id}
+     * belongs to the server (app/recsys/engine.py {@code REC_TTL_SECONDS}), so the client LEARNS it
+     * rather than duplicating it: {@link SvipeDiscover#notePage} reads it off any response that
+     * states one, this remembers it across launches, and {@link SvipeRecAttribution#DEFAULT_TTL_SECONDS}
+     * only stands in until the first response arrives. Retuning the server needs no app release.
+     */
+    public static final String PREF_REC_TTL_SECONDS = "svipe_rec_ttl_seconds";
+
+    /** Push the last-learned TTL into {@link SvipeRecAttribution}. Call once, early — before any
+     *  restored page can be judged against the compiled-in default. */
+    public static void applyRecTtl(int account) {
+        try {
+            long seconds = MessagesController.getMainSettings(account)
+                    .getLong(PREF_REC_TTL_SECONDS, SvipeRecAttribution.DEFAULT_TTL_SECONDS);
+            SvipeRecAttribution.setTtlSeconds(seconds);
+        } catch (Exception e) {
+            // best-effort: the compiled-in default already stands
+        }
+    }
+
+    /** Remember a TTL the server just stated, and adopt it now. Non-positive values are ignored. */
+    public static void setRecTtlSeconds(int account, long seconds) {
+        if (seconds <= 0) {
+            return;
+        }
+        SvipeRecAttribution.setTtlSeconds(seconds);
+        try {
+            MessagesController.getMainSettings(account).edit()
+                    .putLong(PREF_REC_TTL_SECONDS, seconds).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
     /** Persisted offline ready-queue (JSON blob) and the watched-reel ledger (JSON array). */
     public static final String PREF_REEL_QUEUE = "svipe_reel_queue";
     public static final String PREF_REEL_WATCHED = "svipe_reel_watched";

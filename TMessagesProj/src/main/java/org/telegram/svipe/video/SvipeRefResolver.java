@@ -109,6 +109,12 @@ public class SvipeRefResolver {
             r.username = item.username;
             r.shareUrl = item.shareUrl;
             r.topicId = item.topicId;
+            // The page this reference was served on. It used to be left behind here, so the long-form
+            // player posted every IMPRESSION / FIRST_FRAME / watch event with no recommendation_id at
+            // all — the server could not look the page up, and the clip's duplicate keys (fp/cg) were
+            // therefore never written for anything watched in long form. Three call sites had each
+            // re-attached it by hand afterwards; one that forgot was the whole bug.
+            r.recId = item.recId;
             r.local = item.local;
             r.playUrl = item.playUrl;
             r.width = item.width;

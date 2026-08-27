@@ -77,6 +77,10 @@ public final class SvipeReelWarmer {
         if (started) { done.run(); return; }
         started = true;
         if (!UserConfig.getInstance(account).isClientActivated()) { done.run(); return; }
+        // App start is the earliest this can be done, and it must happen before the queue below hands
+        // its restored pages to the attribution register: the TTL decides which of them may still
+        // attribute an event.
+        SvipeConfig.applyRecTtl(account);
         // The queue blob and the watched ledger are parsed off the UI thread — they are the two
         // biggest JSON blobs this app keeps in preferences, and this runs during app start, when
         // the main thread has better things to do (the reels cold start reads them the same way).
@@ -152,6 +156,9 @@ public final class SvipeReelWarmer {
             }
             final Warm w = new Warm();
             w.recommendationId = res.isNull("recommendation_id") ? null : res.optString("recommendation_id", null);
+            // The warm page is minted here, minutes before anything is watched off it — so the clock
+            // that decides whether its id may still attribute an event starts here too.
+            SvipeDiscover.notePage(account, res, w.recommendationId);
             w.cursor = res.isNull("next_cursor") ? null : res.optString("next_cursor", null);
             JSONArray arr = res.optJSONArray("items");
             for (int i = 0; arr != null && i < arr.length(); i++) {

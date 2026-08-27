@@ -1239,7 +1239,6 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
             watchPage.openItem(next);
         } else {
             final SvipeRefResolver.VideoRef ref = SvipeRefResolver.VideoRef.of(next);
-            ref.recId = next.recId;
             open(ref, null);
         }
     }
@@ -1290,7 +1289,6 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
             watchPage.openItem(next);
         } else {
             final SvipeRefResolver.VideoRef ref = SvipeRefResolver.VideoRef.of(next);
-            ref.recId = next.recId;
             open(ref, null);
         }
         pendingAutoplay = false;
@@ -1345,9 +1343,6 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
             final SvipeRefResolver.VideoRef ref = SvipeRefResolver.VideoRef.of(page.getWatchItem());
             ref.mo = page.getWatchMessage();
             ref.chat = page.getWatchChat();
-            // VideoRef.of copies only the fields the resolver needs; the recommendation id is the
-            // telemetry's, so it is attached here.
-            ref.recId = page.getWatchItem().recId;
             final Rect hole = new Rect();
             // Where the user tapped, so the picture grows out of that card instead of appearing from
             // nowhere. Handed over before open() so the very first layout can start there.

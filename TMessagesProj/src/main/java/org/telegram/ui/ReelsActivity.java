@@ -51,11 +51,14 @@ import org.telegram.svipe.SvipeApi;
 import org.telegram.svipe.SvipeAuth;
 import org.telegram.svipe.SvipeBlockedChannels;
 import org.telegram.svipe.SvipeColdStart;
+import org.telegram.svipe.SvipeConfig;
+import org.telegram.svipe.SvipeDiscover;
 import org.telegram.svipe.SvipeFeedRetry;
 import org.telegram.svipe.SvipePerf;
 import org.telegram.svipe.SvipePreloadPlan;
 import org.telegram.svipe.SvipeSavedChannels;
 import org.telegram.svipe.SvipeQueuePlan;
+import org.telegram.svipe.SvipeRecAttribution;
 import org.telegram.svipe.SvipeReelQueue;
 import org.telegram.svipe.SvipeReelWarmer;
 import org.telegram.svipe.SvipeWatchedSet;
@@ -388,6 +391,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             args.putInt("seed_message", it.messageId);
             args.putString("seed_username", it.username);
             args.putInt("seed_topic", it.topicId != null ? it.topicId : -1);
+            // The page the tapped tile came from. Without it the FIRST video of a seeded session —
+            // the one the user chose, the strongest signal in it — went out unattributed, so its
+            // duplicate keys were never written and near-copies of it stayed servable.
+            if (it.recId != null) args.putString("seed_rec", it.recId);
         }
         return new ReelsActivity(args);
     }
@@ -407,6 +414,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         it.messageId = msg;
         it.username = user;
         it.topicId = topic >= 0 ? topic : null;
+        it.recId = args.getString("seed_rec");
         items.add(it);
 
         // Continuation feed is conditioned on this tapped video; loadMore sends it to /v1/feed.
@@ -569,6 +577,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         root.addView(statusView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
 
         fragmentView = root;
+        // Adopt the TTL the server last stated BEFORE the queue loads: the queue hands every page it
+        // restored to the attribution register, and judging those against a stale default is the very
+        // thing that let dead recommendation ids back onto the wire.
+        SvipeConfig.applyRecTtl(account);
         reelQueue = new SvipeReelQueue(account);
         watchedSet = new SvipeWatchedSet(account);
         svipeBlockedChannels = new SvipeBlockedChannels(account);
@@ -903,6 +915,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         Utilities.globalQueue.postRunnable(() -> {
             final ArrayList<FeedItem> rebuilt = new ArrayList<>();
             int total = 0, skipWatched = 0, skipDeser = 0, skipNoFile = 0, downloadedUnwatched = 0;
+            int staleRec = 0;   // restored reels whose page context the server has already dropped
             for (SvipeReelQueue.Entry e : reelQueue.list()) {
                 total++;
                 if (watchedSet.isWatched(e.channelId, e.messageId) || blockedChannels.contains(e.channelId) || (svipeBlockedChannels != null && svipeBlockedChannels.contains(e.channelId))) { skipWatched++; continue; } // never re-show watched/blocked (persistent blocks too)
@@ -929,6 +942,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 it.shareUrl = e.shareUrl;
                 it.topicId = e.topicId;
                 it.recId = e.recId;
+                // Carried, not trusted: the send path drops it if the page is past its TTL (the
+                // queue survives for days, the context for an hour). Counted here so the log says
+                // how much of a cold start can still be attributed at all.
+                if (e.recId != null && SvipeRecAttribution.attributableId(e.recId) == null) staleRec++;
                 it.mo = mo;
                 it.fromQueue = true;
                 it.liked = isLiked(mo);
@@ -936,6 +953,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 rebuilt.add(it);
             }
             final int fTotal = total, fSkipWatched = skipWatched, fSkipDeser = skipDeser, fSkipNoFile = skipNoFile;
+            final int fStaleRec = staleRec;
             final int fDownloadedUnwatched = downloadedUnwatched;
             AndroidUtilities.runOnUIThread(() -> {
                 if (!items.isEmpty()) { // another pass — or the online feed — already won
@@ -944,7 +962,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     return;
                 }
                 FileLog.d("svipe: cold start attempt=" + attempt + " queue total=" + fTotal + " restored=" + rebuilt.size()
-                        + " skip(watched=" + fSkipWatched + ",deser=" + fSkipDeser + ",noFile=" + fSkipNoFile + ")");
+                        + " skip(watched=" + fSkipWatched + ",deser=" + fSkipDeser + ",noFile=" + fSkipNoFile + ")"
+                        + " staleRec=" + fStaleRec);
                 if (!rebuilt.isEmpty()) {
                     coldStartDone = true;
                     items.clear();
@@ -1222,6 +1241,9 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 }
                 String recId = res.isNull("recommendation_id") ? null : res.optString("recommendation_id", null);
                 recommendationId = recId;
+                // Start this page's clock, and take the server's TTL if it stated one. Events about
+                // these items may only carry the id while the context behind it is still alive.
+                SvipeDiscover.notePage(account, res, recId);
                 // Advance pagination: the cursor carries the next page index (+ seed). Null => no more.
                 feedCursor = res.isNull("next_cursor") ? null : res.optString("next_cursor", null);
                 // additive = append page OR a background merge into the already-playing queue.
@@ -3205,8 +3227,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             ev.put("channel_id", item.channelId);
             ev.put("message_id", item.messageId);
             ev.put("event_type", type);
-            // The item's own page id, not the latest one — endless paging would misattribute.
-            if (item.recId != null) ev.put("recommendation_id", item.recId);
+            // The item's own page id, not the latest one — endless paging would misattribute. And
+            // only while the server still holds that page's context: past its TTL the id buys no
+            // duplicate keys and only makes an unattributed event look attributed.
+            final String attributed = SvipeRecAttribution.attributableId(item.recId);
+            if (attributed != null) ev.put("recommendation_id", attributed);
             if (payload != null) ev.put("payload", payload);
             JSONArray a = new JSONArray();
             a.put(ev);

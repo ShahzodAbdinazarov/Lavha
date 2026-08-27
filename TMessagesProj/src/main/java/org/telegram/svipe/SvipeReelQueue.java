@@ -30,6 +30,16 @@ public class SvipeReelQueue {
         public String shareUrl;   // owned svipe.uz/<code> preview link, carried so cold-start reels share it too
         public Integer topicId;   // nullable
         public String recId;      // recommendation_id of the page it arrived with
+        /**
+         * When this client received the page {@link #recId} names (epoch ms), 0 for an entry written
+         * before this field existed.
+         *
+         * <p>The id alone is not enough to attribute an event: the server drops the context behind it
+         * after {@code REC_TTL_SECONDS}, and this queue outlives that by days — an entry restored on a
+         * cold start used to replay a page id that had been dead since the previous session, which
+         * produced no duplicate keys at all. The age travels with the entry so the cold start can tell.
+         */
+        public long recAtMs;
         public String messageB64; // Base64 of SerializedData(message) — the playable payload
         public long documentId;   // secondary index for file lookups / dedup
         public long sizeBytes;    // document size, for the disk budget
@@ -88,8 +98,15 @@ public class SvipeReelQueue {
         return false;
     }
 
-    /** Append (or refresh in place) an entry, then trim to the count cap + byte budget. */
+    /**
+     * Append (or refresh in place) an entry, then trim to the count cap + byte budget.
+     *
+     * <p>Stamps the page age here rather than at the call site: every caller has the recommendation id
+     * and none of them has a reason to think about how long it stays usable, so the one place that
+     * cannot be forgotten is this one.
+     */
     public synchronized void enqueue(Entry e) {
+        stampPageAge(e, System.currentTimeMillis());
         dedupAppend(entries, e);
         trim(entries, SvipeQueuePlan.MAX_ENTRIES, SvipeQueuePlan.MAX_QUEUE_BYTES);
     }
@@ -116,6 +133,20 @@ public class SvipeReelQueue {
             if (e.channelId == channelId && e.messageId == messageId) return i;
         }
         return -1;
+    }
+
+    /**
+     * Give an entry the age of the recommendation page it came from, if it has none yet.
+     *
+     * <p>The register knows when the page arrived, which is older than "now" for every reel except the
+     * first of a page — and that difference is the whole point: a reel queued at the end of a long
+     * page must not read as freshly recommended. {@code nowMs} is the fallback for a page the register
+     * has forgotten, and for the ordinary case of an entry with no page at all.
+     */
+    public static void stampPageAge(Entry e, long nowMs) {
+        if (e != null && e.recAtMs <= 0) {
+            e.recAtMs = SvipeRecAttribution.mintedAt(e.recId, nowMs);
+        }
     }
 
     /** Remove any existing entry with the same channel:message, then append the new one at the tail. */
@@ -162,6 +193,11 @@ public class SvipeReelQueue {
                 e.shareUrl = o.isNull("su") ? null : o.optString("su", null);
                 e.topicId = o.isNull("t") ? null : o.optInt("t");
                 e.recId = o.isNull("rec") ? null : o.optString("rec", null);
+                e.recAtMs = o.optLong("rat");
+                // Hand the age back to the register, so an event about this reel is attributed only
+                // while the server can still answer for the page — and never after a cold start days
+                // later. A legacy entry has no stamp, reads as unknown, and goes out unattributed.
+                SvipeRecAttribution.remember(e.recId, e.recAtMs);
                 e.messageB64 = o.optString("b64", null);
                 e.documentId = o.optLong("doc");
                 e.sizeBytes = o.optLong("size");
@@ -184,6 +220,7 @@ public class SvipeReelQueue {
                 if (e.shareUrl != null) o.put("su", e.shareUrl);
                 if (e.topicId != null) o.put("t", (int) e.topicId);
                 if (e.recId != null) o.put("rec", e.recId);
+                if (e.recAtMs > 0) o.put("rat", e.recAtMs);
                 o.put("b64", e.messageB64);
                 o.put("doc", e.documentId);
                 o.put("size", e.sizeBytes);

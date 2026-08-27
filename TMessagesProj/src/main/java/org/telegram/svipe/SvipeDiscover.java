@@ -222,7 +222,7 @@ public class SvipeDiscover {
                 return;
             }
             ArrayList<Item> out = new ArrayList<>();
-            parseItems(res.optJSONArray("items"), recIdOf(res), out);
+            parseItems(res.optJSONArray("items"), recIdOf(account, res), out);
             Integer next = res.isNull("next_offset") ? null : Integer.valueOf(res.optInt("next_offset"));
             cb.onResult(out, next, null);
         });
@@ -380,7 +380,7 @@ public class SvipeDiscover {
                 return;
             }
             ArrayList<Item> out = new ArrayList<>();
-            parseItems(res.optJSONArray("items"), recIdOf(res), out);
+            parseItems(res.optJSONArray("items"), recIdOf(account, res), out);
             Integer next = res.isNull("next_offset") ? null : Integer.valueOf(res.optInt("next_offset"));
             cb.onResult(out, next, null);
         });
@@ -493,7 +493,11 @@ public class SvipeDiscover {
             ev.put("channel_id", channelId);
             ev.put("message_id", messageId);
             ev.put("event_type", eventType);
-            if (recId != null) ev.put("recommendation_id", recId);
+            // Attribution is only worth sending while the server still holds the page's context —
+            // a dead id produces no duplicate keys and hides that it produced none. See
+            // SvipeRecAttribution; this is the choke point for every surface outside ReelsActivity.
+            final String attributed = SvipeRecAttribution.attributableId(recId);
+            if (attributed != null) ev.put("recommendation_id", attributed);
             if (payload != null) ev.put("payload", payload);
             JSONArray events = new JSONArray();
             events.put(ev);
@@ -518,13 +522,114 @@ public class SvipeDiscover {
         });
     }
 
+    /** One event of a {@link #sendEvents} batch. Bare action/exposure shape — no measurement payload. */
+    public static class Event {
+        public final long channelId;
+        public final int messageId;
+        public final String eventType;
+        public final String recId;
+
+        public Event(long channelId, int messageId, String eventType, String recId) {
+            this.channelId = channelId;
+            this.messageId = messageId;
+            this.eventType = eventType;
+            this.recId = recId;
+        }
+    }
+
+    /**
+     * Post MANY events in ONE request.
+     *
+     * <p>The single-event form above is right for something a person did once; it is the wrong shape
+     * for exposure, where a screenful of the explore grid produces a dozen events at a time and one
+     * request each would be a request storm on every scroll. The wire contract already takes a batch
+     * — {@code {"events":[...]}} — so the only thing needed here is to stop throwing that away.
+     */
+    public static void sendEvents(int account, java.util.List<Event> events, EventCallback cb) {
+        if (events == null || events.isEmpty()) {
+            if (cb != null) cb.onDone(true);
+            return;
+        }
+        final JSONObject batch = new JSONObject();
+        try {
+            JSONArray arr = new JSONArray();
+            for (Event e : events) {
+                if (e == null || e.eventType == null) continue;
+                JSONObject ev = new JSONObject();
+                ev.put("channel_id", e.channelId);
+                ev.put("message_id", e.messageId);
+                ev.put("event_type", e.eventType);
+                final String attributed = SvipeRecAttribution.attributableId(e.recId);
+                if (attributed != null) ev.put("recommendation_id", attributed);
+                arr.put(ev);
+            }
+            if (arr.length() == 0) {
+                if (cb != null) cb.onDone(true);
+                return;
+            }
+            batch.put("events", arr);
+        } catch (Exception e) {
+            if (cb != null) cb.onDone(false);
+            return;
+        }
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                if (cb != null) cb.onDone(false);
+                return;
+            }
+            batchRequest(account, batch, token, false, cb);
+        });
+    }
+
+    private static void batchRequest(int account, JSONObject batch, String token, boolean retried, EventCallback cb) {
+        SvipeApi.post("/v1/events", batch, token, (res, code, err) -> {
+            if (code == 401 && !retried) {
+                SvipeAuth.invalidateAccessToken(account);
+                SvipeAuth.ensureToken(account, t2 -> {
+                    if (t2 == null) {
+                        if (cb != null) cb.onDone(false);
+                        return;
+                    }
+                    batchRequest(account, batch, t2, true, cb);
+                });
+                return;
+            }
+            if (cb != null) cb.onDone(code >= 200 && code < 300);
+        });
+    }
+
     /**
      * The recommendation id of a whole response page, or null. The reels feed sends one; the discover
      * and long-form responses do not (yet) — reading it here rather than assuming means the client
      * starts attributing their events the day the server adds the field.
+     *
+     * <p>Reading it is also MINTING it: a page's id is only usable while the server still holds the
+     * context behind it, so the moment it is parsed is the moment its clock starts. See
+     * {@link #notePage}.
      */
-    private static String recIdOf(JSONObject res) {
-        return res == null || res.isNull("recommendation_id") ? null : res.optString("recommendation_id", null);
+    private static String recIdOf(int account, JSONObject res) {
+        final String recId =
+                res == null || res.isNull("recommendation_id") ? null : res.optString("recommendation_id", null);
+        notePage(account, res, recId);
+        return recId;
+    }
+
+    /**
+     * Register a recommendation page the client just received: when it arrived, and how long the
+     * server says such a page lives.
+     *
+     * <p>Every surface that parses a page must call this, because an id the register never saw is
+     * treated as expired — that is what keeps a page id persisted to disk days ago from being
+     * replayed against a context that is long gone (see {@link SvipeRecAttribution}).
+     *
+     * @param res   the response, read for an optional {@code recommendation_ttl_seconds}; may be null
+     * @param recId the page id parsed out of it, or null when the response carries none
+     */
+    public static void notePage(int account, JSONObject res, String recId) {
+        if (res != null && !res.isNull("recommendation_ttl_seconds")) {
+            SvipeConfig.setRecTtlSeconds(account, res.optLong("recommendation_ttl_seconds", 0));
+        }
+        SvipeRecAttribution.remember(recId, System.currentTimeMillis());
     }
 
     /** Parse a {items:[FeedItem]} array into Items; rows without a username are skipped (can't resolve). */
