@@ -1,5 +1,7 @@
 package org.telegram.svipe;
 
+import org.json.JSONObject;
+
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -56,11 +58,19 @@ public final class SvipeRecAttribution {
     public static final long SAFETY_MARGIN_MS = 60_000L;
 
     /**
-     * How many pages stay in the register. A viewer who pages all evening mints one id per page, and
-     * an unbounded map would hold every one of them for the life of the process. The oldest entries
-     * are dropped first, and a dropped id simply reads as "not attributable" — the safe answer.
+     * How many pages stay in the register.
+     *
+     * <p>Sized against the TTL, not picked: the register only has to outlast the window in which an
+     * event about a page can still be attributed. That window is now the SERVER's five days rather
+     * than an hour, and a viewer who opens the app a dozen times a day mints a few hundred pages
+     * across it — so a bound built for the one-hour window would have started evicting pages that
+     * were still perfectly attributable, turning a live id into "unknown" and silently unattributing
+     * the event. An evicted id is refused rather than trusted, so the failure was safe and invisible,
+     * which is exactly why the bound is written down with its reasoning.
+     *
+     * <p>Costs roughly 160 KB full, against a queue that budgets 600 MB of video.
      */
-    static final int MAX_TRACKED_PAGES = 256;
+    static final int MAX_TRACKED_PAGES = 1024;
 
     /** recommendation_id -> when this client first saw the page (epoch ms). Access-ordered LRU. */
     private static final LinkedHashMap<String, Long> minted =
@@ -88,6 +98,30 @@ public final class SvipeRecAttribution {
         }
     }
 
+    /**
+     * The wire name of the server's TTL field, and the ONLY name accepted.
+     *
+     * <p>Named as a constant because this is a contract with another codebase and a near-miss reads
+     * as working code: an abbreviated guess simply finds nothing, the default silently stays, and the
+     * client quietly keeps refusing pages the server would still have answered for. Server side it is
+     * {@code DiscoverResponse.recommendation_ttl_seconds} (app/schemas/discover.py).
+     */
+    public static final String TTL_FIELD = "recommendation_ttl_seconds";
+
+    /**
+     * The TTL a response states, or 0 when it states none.
+     *
+     * <p>0 is the server's own default for the field and means "nothing to say" (an empty grid serves
+     * no recommendation), so it is not an error and must not overwrite a TTL already learned.
+     */
+    public static long ttlSecondsIn(JSONObject res) {
+        if (res == null || res.isNull(TTL_FIELD)) {
+            return 0L;
+        }
+        final long seconds = res.optLong(TTL_FIELD, 0L);
+        return seconds > 0 ? seconds : 0L;
+    }
+
     // ---- the register ----
 
     /**
@@ -101,6 +135,14 @@ public final class SvipeRecAttribution {
         }
         Long known = minted.get(recId);
         if (known == null || mintedAtMs < known) {
+            // Evict what is already dead before evicting by age: without this the LRU would drop the
+            // oldest LIVE page to make room while expired ones sat in the map doing nothing.
+            // Judged against THIS page's clock rather than the wall clock: the caller's time is the
+            // newest thing the register knows, and the queue replaying old pages at load must not be
+            // able to prune live ones just because its own stamps are old.
+            if (known == null && minted.size() >= MAX_TRACKED_PAGES) {
+                prune(mintedAtMs);
+            }
             minted.put(recId, mintedAtMs);
         }
     }

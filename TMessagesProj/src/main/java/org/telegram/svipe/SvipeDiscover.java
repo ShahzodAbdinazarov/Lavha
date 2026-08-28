@@ -1,6 +1,7 @@
 package org.telegram.svipe;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.FileLog;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -498,6 +499,8 @@ public class SvipeDiscover {
             // SvipeRecAttribution; this is the choke point for every surface outside ReelsActivity.
             final String attributed = SvipeRecAttribution.attributableId(recId);
             if (attributed != null) ev.put("recommendation_id", attributed);
+            FileLog.d("svipe: event " + eventType + " " + channelId + ":" + messageId
+                    + " rec=" + (recId == null ? "none" : attributed != null ? "live" : "STALE-dropped"));
             if (payload != null) ev.put("payload", payload);
             JSONArray events = new JSONArray();
             events.put(ev);
@@ -626,9 +629,7 @@ public class SvipeDiscover {
      * @param recId the page id parsed out of it, or null when the response carries none
      */
     public static void notePage(int account, JSONObject res, String recId) {
-        if (res != null && !res.isNull("recommendation_ttl_seconds")) {
-            SvipeConfig.setRecTtlSeconds(account, res.optLong("recommendation_ttl_seconds", 0));
-        }
+        SvipeConfig.setRecTtlSeconds(account, SvipeRecAttribution.ttlSecondsIn(res));
         SvipeRecAttribution.remember(recId, System.currentTimeMillis());
     }
 

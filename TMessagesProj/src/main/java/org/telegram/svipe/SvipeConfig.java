@@ -94,8 +94,13 @@ public class SvipeConfig {
         }
         SvipeRecAttribution.setTtlSeconds(seconds);
         try {
-            MessagesController.getMainSettings(account).edit()
-                    .putLong(PREF_REC_TTL_SECONDS, seconds).apply();
+            final android.content.SharedPreferences prefs = MessagesController.getMainSettings(account);
+            if (prefs.getLong(PREF_REC_TTL_SECONDS, -1) == seconds) {
+                return;   // unchanged: every response states it, and one line per page is noise
+            }
+            prefs.edit().putLong(PREF_REC_TTL_SECONDS, seconds).apply();
+            org.telegram.messenger.FileLog.d("svipe: recommendation TTL from the server = "
+                    + seconds + "s (" + (seconds / 3600) + "h)");
         } catch (Exception e) {
             // best-effort
         }

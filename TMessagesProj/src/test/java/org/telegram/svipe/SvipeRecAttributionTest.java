@@ -2,6 +2,7 @@ package org.telegram.svipe;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -137,6 +138,41 @@ public class SvipeRecAttributionTest {
         // The newest survive; an evicted one simply reads as unknown, which is the safe answer.
         assertEquals("rec-" + (minted - 1), SvipeRecAttribution.attributableId("rec-" + (minted - 1), now));
         assertNull(SvipeRecAttribution.attributableId("rec-0", now));
+    }
+
+    @Test
+    public void aFiveDayTtlKeepsHundredsOfPagesAttributable() {
+        // The register has to outlast the window, and the window is now the server's five days. A
+        // bound built for the old one-hour window would evict pages that are still perfectly
+        // attributable — a silent loss, because an evicted id is refused rather than trusted.
+        SvipeRecAttribution.setTtlSeconds(432000L);
+        final long start = 1_800_000_000_000L;
+        final int pages = 600;   // a dozen sessions a day across a five-day window
+        assertTrue("this test is only meaningful above the old bound", pages > 256);
+        for (int i = 0; i < pages; i++) {
+            SvipeRecAttribution.remember("rec-" + i, start + i * 1000L);
+        }
+        final long fourDaysLater = start + 4L * 86400_000L;
+        for (int i = 0; i < pages; i++) {
+            assertNotNull("page " + i + " should still attribute",
+                    SvipeRecAttribution.attributableId("rec-" + i, fourDaysLater));
+        }
+    }
+
+    @Test
+    public void aFullRegisterEvictsDeadPagesBeforeLiveOnes() {
+        final long start = 1_800_000_000_000L;
+        for (int i = 0; i < SvipeRecAttribution.MAX_TRACKED_PAGES; i++) {
+            SvipeRecAttribution.remember("dead-" + i, start + i);
+        }
+        assertEquals(SvipeRecAttribution.MAX_TRACKED_PAGES, SvipeRecAttribution.trackedPages());
+        // Two hours on, with the default one-hour TTL, everything above is dead. The next page must
+        // make room out of THAT rather than out of the oldest still-live entry.
+        final long muchLater = start + 2 * HOUR_MS;
+        SvipeRecAttribution.remember("live", muchLater);
+        assertEquals("live", SvipeRecAttribution.attributableId("live", muchLater));
+        assertNull(SvipeRecAttribution.attributableId("dead-0", muchLater));
+        assertTrue(SvipeRecAttribution.trackedPages() < SvipeRecAttribution.MAX_TRACKED_PAGES);
     }
 
     @Test
