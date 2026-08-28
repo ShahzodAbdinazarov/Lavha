@@ -3,7 +3,6 @@ package org.telegram.svipe;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.DownloadController;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
@@ -12,7 +11,6 @@ import org.telegram.messenger.Utilities;
 import org.telegram.svipe.video.SvipePublicUrl;
 import org.telegram.svipe.video.SvipeRefResolver;
 import org.telegram.svipe.video.SvipeVideoLadder;
-import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.Components.VideoPlayer;
 
 import java.util.ArrayList;
@@ -77,15 +75,14 @@ public final class SvipeReelWarmer {
         if (started) { done.run(); return; }
         started = true;
         if (!UserConfig.getInstance(account).isClientActivated()) { done.run(); return; }
-        // App start is the earliest this can be done, and it must happen before the queue below hands
-        // its restored pages to the attribution register: the TTL decides which of them may still
-        // attribute an event.
-        SvipeConfig.applyRecTtl(account);
         // The queue blob and the watched ledger are parsed off the UI thread — they are the two
         // biggest JSON blobs this app keeps in preferences, and this runs during app start, when
         // the main thread has better things to do (the reels cold start reads them the same way).
         Utilities.globalQueue.postRunnable(() -> {
             try {
+                // Adopt the TTL the server last stated, here rather than on the main thread: it is a
+                // preferences read like the two below it, and app start is the wrong place to add one.
+                SvipeConfig.applyRecTtl(account);
                 // A returning user already has reels on disk and their cold start is instant — leave
                 // their bandwidth alone. This exists for the empty case, which is where it hurts.
                 // Counted the way the cold start counts them — by whether the FILE is really there.
@@ -268,16 +265,19 @@ public final class SvipeReelWarmer {
     }
 
     /**
-     * Resolve the first few items one at a time — serial on purpose, to stay off the flood ceiling.
+     * Mint a sessionless URL for the first few items, one at a time — serial on purpose, to stay off
+     * the flood ceiling — and nothing else.
      *
-     * <p>Skipped entirely for a reel that carries a public URL: it can already be played, and the
-     * only reason to resolve it is the action rail, which the player fills behind the video when the
-     * user actually reaches it. Warming a page used to cost one contacts.resolveUsername per head
-     * item before anything was on screen; now it costs none for the reels that do not need it.
+     * <p>This used to fall back to an MTProto resolve for any head item t.me had nothing for, and
+     * that fallback is gone. Warming happens at app start, for a tab the user has not opened, on a
+     * reel they have not reached: it is speculation by construction, and contacts.resolveUsername is
+     * the one call this app cannot speculate with. A reel with no public URL now resolves at the
+     * moment it is played (ReelsActivity.playPosition), which costs the same two round-trips one
+     * swipe later and only when somebody is actually looking at it.
      *
-     * <p>The URL may still be in the air from {@link #mintHead} when this reaches an item, so ask
-     * for it again here rather than reading the field: that call joins the in-flight fetch instead
-     * of starting a second one, and an item that gets a URL never pays for the resolve at all.
+     * <p>The URL may still be in the air from {@link #mintHead} when this reaches an item, so ask for
+     * it again here rather than reading the field: that call joins the in-flight fetch instead of
+     * starting a second one.
      */
     private static void resolveHead(final int account, final Warm w, final int index, final Runnable done) {
         if (index >= RESOLVE_AHEAD || index >= w.items.size()) {
@@ -296,44 +296,12 @@ public final class SvipeReelWarmer {
                     ref.width = media.width;
                     ref.height = media.height;
                 }
-                resolveHead(account, w, index + 1, done);
-                return;
+            } else {
+                FileLog.d("svipe: warm has no public url for @" + ref.username + "/" + ref.messageId
+                        + " — leaving it to resolve at play time");
             }
-            SvipeRefResolver.resolve(account, ref, () -> {
-                if (index == 0) preloadHead(account, ref);
-                resolveHead(account, w, index + 1, done);
-            }, null, true);   // warm-up: nothing is on screen waiting, so it queues behind the user
+            resolveHead(account, w, index + 1, done);
         });
-    }
-
-    /**
-     * Telegram's head-preload (cacheType 10): ~2MB plus the moov atom, at LOW priority. Enough for a
-     * first frame the moment the tab opens, and every byte is reused when the player streams the
-     * same file — nothing is downloaded twice and no full file is pulled behind the user's back.
-     */
-    private static void preloadHead(int account, SvipeRefResolver.VideoRef ref) {
-        try {
-            if (ref.mo == null) return;
-            if (!DownloadController.getInstance(account).canPreloadStories()) return;
-            ArrayList<VideoPlayer.Quality> qualities = SvipeVideoLadder.qualitiesFor(account, ref.mo);
-            if (qualities != null) {
-                VideoPlayer.VideoUri target = SvipeVideoLadder.targetRendition(qualities);
-                if (target != null && target.document != null && !target.isCached()) {
-                    // The rung's HLS manifest is fetched synchronously at prepare time, so having it
-                    // on disk is what actually makes the adaptive start instant.
-                    if (target.manifestDocument != null && !target.isManifestCached()) {
-                        FileLoader.getInstance(account).loadFile(target.manifestDocument, ref.mo, FileLoader.PRIORITY_LOW, 0);
-                    }
-                    FileLoader.getInstance(account).loadFile(target.document, ref.mo, FileLoader.PRIORITY_LOW, 10);
-                }
-                return;
-            }
-            TLRPC.Document doc = ref.mo.getDocument();
-            if (doc == null || SvipeVideoLadder.isLongForm(doc)) return;
-            FileLoader.getInstance(account).loadFile(doc, ref.mo, FileLoader.PRIORITY_LOW, 10);
-        } catch (Exception e) {
-            FileLog.e(e);
-        }
     }
 
     /**

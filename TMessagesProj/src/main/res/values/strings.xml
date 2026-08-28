@@ -11128,6 +11128,7 @@
     <string name="SvipeReelsComment">Comment</string>
     <string name="SvipeReelsSubscribe">Subscribe</string>
     <string name="SvipeReelsSubscribed">Subscribed ✓</string>
+    <string name="SvipeReelsActionUnavailable">This post could not be loaded. Try again in a moment.</string>
 
     <!-- Svipe music & reels: history / most-listened / blocked channels / search history -->
     <string name="SvipeMostListened">Most listened</string>

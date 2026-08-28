@@ -170,6 +170,7 @@
     <string name="SvipeReelsComment">Izoh</string>
     <string name="SvipeReelsSubscribe">Obuna</string>
     <string name="SvipeReelsSubscribed">Obuna ✓</string>
+    <string name="SvipeReelsActionUnavailable">Bu post yuklanmadi. Birozdan keyin qayta urining.</string>
 
     <!-- Svipe music & reels: history / most-listened / blocked channels / search history -->
     <string name="SvipeMostListened">Ko\'p tinglangan</string>

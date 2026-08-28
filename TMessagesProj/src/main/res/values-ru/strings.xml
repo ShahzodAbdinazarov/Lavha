@@ -435,6 +435,7 @@
     <string name="SvipeReelsComment">Комментарий</string>
     <string name="SvipeReelsSubscribe">Подписаться</string>
     <string name="SvipeReelsSubscribed">Вы подписаны ✓</string>
+    <string name="SvipeReelsActionUnavailable">Не удалось загрузить эту запись. Попробуйте через мгновение.</string>
 
     <!-- Svipe music & reels: history / most-listened / blocked channels / search history -->
     <string name="SvipeMostListened">Часто прослушиваемое</string>

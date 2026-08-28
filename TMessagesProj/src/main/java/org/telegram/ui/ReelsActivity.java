@@ -60,9 +60,11 @@ import org.telegram.svipe.SvipeSavedChannels;
 import org.telegram.svipe.SvipeQueuePlan;
 import org.telegram.svipe.SvipeRecAttribution;
 import org.telegram.svipe.SvipeReelQueue;
+import org.telegram.svipe.SvipeReelSkipPolicy;
 import org.telegram.svipe.SvipeReelWarmer;
 import org.telegram.svipe.SvipeWatchedSet;
 import org.telegram.svipe.SvipeWatchEvent;
+import org.telegram.svipe.video.SvipeChannelAvatar;
 import org.telegram.svipe.video.SvipePublicUrl;
 import org.telegram.svipe.video.SvipeRefResolver;
 import org.telegram.svipe.video.SvipeVideoLadder;
@@ -345,6 +347,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         int durationMs;       // server-known length; the watch classification needs it before a resolve
         final java.util.ArrayList<Runnable> resolveCallbacks = new java.util.ArrayList<>(); // waiters for an in-flight resolve — never dropped
         int resolveAttempts;  // bounded retry counter for transient resolve failures
+        boolean tapActionPending; // a tapped control is waiting on this reel's on-demand resolve
         boolean preloadStarted;                          // a head-preload was requested
         int preloadPriority = FileLoader.PRIORITY_LOW;   // set by prefetchAround before resolve
         boolean preloadBypassGate;                       // next-in-line skips the data-saving gate
@@ -489,11 +492,14 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 int pos = currentPosition;
                 if (pos < 0 || pos >= items.size()) pos = layoutManager.findFirstVisibleItemPosition();
                 if (pos < 0 || pos >= items.size()) return false;
-                FeedItem it = items.get(pos);
-                ReelsHolder h = holderAt(pos);
-                if (it != null && it.mo != null && h != null) {
-                    setLike(it, h, true, true);
+                final FeedItem it = items.get(pos);
+                final ReelsHolder h = holderAt(pos);
+                if (it != null && h != null) {
+                    // The heart flies immediately — a double tap must feel instant even when the
+                    // message behind the reel has not been fetched yet — and the reaction is sent
+                    // when it arrives (requireMessage resolves only because the user just asked).
                     showHeartBurst((FrameLayout) h.itemView, e.getX(), e.getY());
+                    requireMessage(it, h.likeIcon, () -> setLike(it, h, true, true));
                 }
                 return false;
             }
@@ -1455,28 +1461,22 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             impression.put("feed_position", pos);
             sendEvent("IMPRESSION", item, impression);
         } catch (Exception ignore) {}
+        updateActions(pos); // whatever the feed already knows, drawn before anything is asked for
         if (item.mo != null) {
-            // Queue-restored items have mo but no chat — play offline NOW, fill chat for the rail later.
+            // Queue-restored items have mo but no chat. Play offline NOW; the chat is the rail's
+            // avatar/name/follow and nothing else, so it is fetched when a control is tapped rather
+            // than speculatively here (see requireChat).
             startPlayback(item.mo, item.mo.getDocument(), pos, item);
-            updateActions(pos);
-            if (item.chat == null) {
-                final int fpos = pos;
-                resolveItem(item, () -> updateActions(fpos)); // background enrich for the action rail
-            }
         } else if (hasPlayUrl(item)) {
             // Nothing resolved, and nothing needs to be: the backend attached a plain https URL for
             // this reel's bytes, so playback starts NOW and MTProto never enters the watching path.
-            // The resolve still runs — the action rail needs a message to show likes, comments and a
-            // channel — but it runs BEHIND the video instead of in front of it.
+            //
+            // And nothing resolves BEHIND it either. It used to — "the action rail needs a message
+            // to show likes, comments and a channel" — and that background resolve was the single
+            // worst thing on this screen: it spent the flood-limited resolveUsername budget on every
+            // reel that scrolled past, and when it failed it dragged the viewer off a video that was
+            // playing perfectly. The rail's controls resolve on their own tap now (requireMessage).
             startPlayback(null, null, pos, item);
-            final int fpos = pos;
-            resolveItem(item, () -> {
-                updateActions(fpos);
-                // The URL may have failed while the resolve was in flight (an expired token 403s).
-                if (currentPosition == fpos && item.mo != null && currentPlayer == null) {
-                    startPlayback(item.mo, item.mo.getDocument(), fpos, item);
-                }
-            });
         } else {
             final int fpos = pos;
             // Two routes to a first frame, started together, and whichever gets home first wins.
@@ -1484,10 +1484,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             // The embed page mints an https URL for this reel with no session at all — that is the
             // cheap way in, and on a cold start it is usually the fast one too. But it needs a
             // network that reaches t.me, which is not the same network as the one that reaches
-            // Telegram. So the MTProto resolve runs BESIDE it rather than behind it: the action rail
-            // needs the message either way, and where t.me is unreachable it is the only thing that
-            // will ever produce a frame. Both start-playback paths guard on {@code currentPlayer},
-            // so the loser is a no-op rather than a second player.
+            // Telegram. So the MTProto resolve runs BESIDE it rather than behind it — and this is
+            // the ONE resolve left on the watching path, because here it is not enriching anything:
+            // where t.me has nothing (private post, over the embed ceiling, t.me unreachable) it is
+            // the only thing that will ever produce a frame, which is also why its failure is the
+            // only resolve failure allowed to end the reel. Both start-playback paths guard on
+            // {@code currentPlayer}, so the loser is a no-op rather than a second player.
             mintPlayUrl(item, null);
             resolveItem(item, () -> {
                 updateActions(fpos);
@@ -1608,35 +1610,108 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 }, RESOLVE_RETRY_DELAY_MS);
             } else {
                 SvipeRefResolver.drainCallbacks(item); // give up cleanly so no queued play intent leaks
-                svipeSkipDeadReel(item);
+                // A failed resolve is NOT a failed playback, and this is where the two used to be
+                // confused. The resolve only ends the reel when the resolve WAS the way in: this is
+                // the current page, nothing is playing, and there is no sessionless URL to fall back
+                // on. Anything else — a reel streaming over https, a reel the viewer has left, a
+                // resolve kicked off by a tap on the like button — leaves the pager exactly where it
+                // is. svipeSkipDeadReel re-checks all of it against the policy anyway.
+                final boolean wasTheOnlyRoute = idx == currentPosition
+                        && item.mo == null && !hasPlayUrl(item) && currentPlayer == null;
+                svipeSkipDeadReel(item, retryable ? "resolve_failed_transient" : "resolve_failed_permanent",
+                        wasTheOnlyRoute);
             }
         });
     }
 
     /**
-     * Move off a reel that can never start. Giving up used to just stop the spinner, which left the
-     * user parked on a frame that would never play — the "stuck reel" they fix by hand every time by
-     * swiping past it and back. The feed has hundreds more, so the honest response to "this one
-     * cannot be resolved" is the next one.
+     * Move off a reel that can never be shown. Giving up used to just stop the spinner, which left
+     * the user parked on a frame that would never play — the "stuck reel" they fix by hand every time
+     * by swiping past it and back. The feed has hundreds more, so the honest response to "this one
+     * cannot be PLAYED" is the next one.
      *
-     * <p>Only for the reel actually on screen, only while it still has no message, and only forward:
-     * a reel that resolves late is not disturbed, and the last item is left alone so a failure at the
-     * end of the feed cannot fight the pager.
+     * <p>Cannot be played, not cannot be resolved. The guard here used to read {@code item.mo != null}
+     * and nothing else, which was true enough while MTProto was the only route to a frame and became
+     * a bug the day the sessionless https route landed: a reel streaming happily off the CDN, with a
+     * background resolve that failed, was scrolled out from under the viewer — and always the same
+     * reel, because the two permanent resolve verdicts (message gone, "not a video document") are
+     * properties of the item and never change. The whole decision now lives in
+     * {@link SvipeReelSkipPolicy}, where it can be tested, and every outcome — skip or veto — writes
+     * one line naming its reason, so the next report from a device says the cause and not the symptom.
+     *
+     * @param cause          what asked, for the log
+     * @param playbackFailed true only when a real playback route was tried and lost
      */
-    private void svipeSkipDeadReel(FeedItem item) {
+    private void svipeSkipDeadReel(FeedItem item, String cause, boolean playbackFailed) {
+        if (item == null) return;
         final int idx = items.indexOf(item);
-        if (idx < 0 || idx != currentPosition || item.mo != null) {
-            return;
-        }
-        if (idx + 1 >= items.size()) {
+        final int verdict = SvipeReelSkipPolicy.decide(
+                idx >= 0 && idx == currentPosition,
+                item.mo != null,
+                hasPlayUrl(item),
+                currentPlayer != null,
+                playbackFailed,
+                idx >= 0 && idx + 1 < items.size());
+        if (verdict == SvipeReelSkipPolicy.LOAD_MORE) {
+            FileLog.d("svipe: dead reel at " + idx + " cause=" + cause + " — end of feed, loading more");
             loadMore();     // nothing to move to yet; the next page may bring one
             return;
         }
-        FileLog.d("svipe: skipping unresolvable reel at " + idx);
+        if (verdict != SvipeReelSkipPolicy.SKIP) {
+            FileLog.d("svipe: NOT skipping reel at " + idx + " cause=" + cause
+                    + " — " + SvipeReelSkipPolicy.reasonName(verdict));
+            return;
+        }
+        FileLog.d("svipe: skipping dead reel at " + idx + " cause=" + cause
+                + " reason=" + SvipeReelSkipPolicy.reasonName(verdict));
         layoutManager.smoothScrollToPosition(listView, null, idx + 1);
     }
 
-    /** Resolve (if needed) and start the reel at {@code pos} — recovers a reel stuck before playback. */
+    /**
+     * Get the reel at {@code pos} playing again, cheapest route first.
+     *
+     * <p>The recovery paths (stall watchdog, the no-player checker, the reconnect re-kick) all used
+     * to jump straight to {@link #resolveAndPlay}, which meant every stall on this screen was paid
+     * for in resolveUsername — the one call that has twice taken this app down. But a stall is
+     * usually a dead CDN token, and the answer to a dead token is another token, not a session. So:
+     * re-mint first (one 17 KB page, no session), and fall through to MTProto only when t.me has
+     * nothing left to give. Re-minting is not resolving.
+     *
+     * <p>{@link SvipePublicUrl#invalidate} matters here — the mint cache holds a hit for ten minutes,
+     * so without evicting the URL we just withdrew, "re-mint" would hand back the same dead one.
+     */
+    private void remintAndPlay(final int pos) {
+        if (pos < 0 || pos >= items.size()) return;
+        final FeedItem item = items.get(pos);
+        if (item.mo != null) {           // nothing to mint for — MTProto already has what it needs
+            resolveAndPlay(pos);
+            return;
+        }
+        ReelsHolder holder = holderAt(pos);
+        if (holder != null) holder.showLoading(true);
+        SvipePublicUrl.invalidate(item.username, item.messageId);
+        item.playUrl = null;
+        mintPlayUrl(item, () -> {
+            if (currentPosition != pos) return;
+            if (hasPlayUrl(item)) {
+                // mintPlayUrl started it already if nothing else had; if something did, leave it be.
+                FileLog.d("svipe: re-minted public url for pos=" + pos + " — no resolve needed");
+                if (currentPlayer == null) startPlayback(null, null, pos, item);
+                return;
+            }
+            // t.me has nothing for this post (private, over the embed ceiling, or unreachable). Now
+            // MTProto is genuinely the only way to a frame, so the resolve here is play-time, not
+            // speculative — and if it fails, THAT is a real playback failure.
+            FileLog.d("svipe: no public url for pos=" + pos + " — falling back to MTProto resolve");
+            resolveAndPlay(pos);
+        });
+    }
+
+    /**
+     * Resolve and start the reel at {@code pos}. The resolve is the PLAYBACK route here — this is
+     * only ever called for a reel with no player and no usable URL — so its failure is a genuine
+     * playback failure and skipping is the right answer. Never call it to fill a rail.
+     */
     private void resolveAndPlay(final int pos) {
         if (pos < 0 || pos >= items.size()) return;
         final FeedItem item = items.get(pos);
@@ -1674,15 +1749,16 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 continue;
             }
             if (it.mo == null) {
-                // The sessionless URL first, while the current reel plays. It costs one 17 KB page
-                // and no session, and a reel that has one needs no resolve at all to start — so by
-                // the time the swipe lands it is already in hand. Only when the embed page has
-                // nothing for it (over the ~20 MB ceiling, previews off, t.me unreachable) does this
-                // reel fall back to the MTProto prefetch it used to get unconditionally.
-                final FeedItem fit = it;
-                mintPlayUrl(fit, () -> {
-                    if (!hasPlayUrl(fit)) resolveItem(fit, null); // resolveItem head-preloads itself
-                });
+                // The sessionless URL, and ONLY the sessionless URL. It costs one 17 KB page and no
+                // session, and a reel that has one needs no resolve at all to start — so by the time
+                // the swipe lands it is already in hand.
+                //
+                // What used to sit under this: when the embed page had nothing, the reel fell back to
+                // an MTProto prefetch. That is read-ahead for a reel the viewer has not asked for and
+                // may never reach, paid in the flood-limited call — exactly the speculation this
+                // screen is not allowed to do any more. Such reels now resolve when they are played
+                // (playPosition's last branch), one swipe later and only if the swipe happens.
+                mintPlayUrl(it, null);
             } else {
                 preloadMedia(it);
             }
@@ -1766,11 +1842,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 }
                 // Already asked and still unanswered — whoever asked owns the re-entry.
                 if (SvipePublicUrl.inFlight(it.username, it.messageId)) continue;
-                // Answered with nothing: over the ceiling, previews off, or t.me unreachable. This
-                // reel is MTProto's, and the cushion is the right place for it.
+                // Answered with nothing: over the ceiling, previews off, or t.me unreachable.
             }
             if (it.mo == null) {
-                resolveItem(it, () -> ensureFullDownloadsAhead(currentPosition)); // retry once resolved
+                // …and the cushion does NOT get to pay for a resolve to fix that. Pre-downloading a
+                // reel for a cold start that may never happen is the least urgent thing this screen
+                // does, and resolveUsername is the scarcest thing it has. The reel keeps its place in
+                // the feed and resolves at play time if the viewer ever reaches it.
                 continue;
             }
             // The queue stores ONE file per reel: the target rendition when a ladder exists (~720p,
@@ -2053,17 +2131,17 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     // we hand it out. Drop it and let the ordinary path take over, so a stale token
                     // costs one reload rather than a reel that never starts.
                     if (viaUrl && currentPosition == pos && currentPlayer == boundPlayer) {
-                        FileLog.d("svipe: public url failed pos=" + pos + " — falling back to MTProto");
+                        FileLog.d("svipe: public url failed pos=" + pos + " — re-minting, then MTProto");
                         item.playUrl = null;
                         releaseCurrentPlayer();
                         if (item.mo != null) {
                             startPlayback(item.mo, item.mo.getDocument(), pos, item);
                         } else {
-                            resolveItem(item, () -> {
-                                if (currentPosition == pos && item.mo != null && currentPlayer == null) {
-                                    startPlayback(item.mo, item.mo.getDocument(), pos, item);
-                                }
-                            });
+                            // A fresh token first — an expired one is the common case here and the
+                            // cheap fix for it is another token, not a session. remintAndPlay falls
+                            // through to the resolve only when t.me has nothing left, and THAT
+                            // resolve failing is a real playback failure (there is no other route).
+                            remintAndPlay(pos);
                         }
                     }
                 }
@@ -2355,8 +2433,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         // cannot pick the same dead one, and so a reel whose ONLY route it was goes and gets a
         // message instead of falling out at the check below.
         if (hasPlayUrl(item) && "public_url".equals(playbackSource)) {
-            FileLog.d("svipe: public url stalled pos=" + pos + " — dropping it for MTProto");
+            FileLog.d("svipe: public url stalled pos=" + pos + " — dropping it and re-minting");
             item.playUrl = null;
+            // Evict the mint cache too, or the re-mint below is handed back the same dead URL for
+            // the rest of its ten-minute hit window.
+            SvipePublicUrl.invalidate(item.username, item.messageId);
         }
         if (item.mo == null) {
             stuckRecoveryAttempts++;
@@ -2364,10 +2445,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             currentReelFirstFrame = false;
             pendingSeekToMs = 0;
             FileLog.d("svipe: recovering stuck reel pos=" + pos + " attempt=" + stuckRecoveryAttempts
-                    + " cause=" + cause + " — no message yet, resolving");
+                    + " cause=" + cause + " — no message yet, re-minting");
             releaseCurrentPlayer();
             releaseNextPlayer();
-            resolveAndPlay(pos);
+            // A fresh sessionless URL, and MTProto only if there is none. The stall is nearly always
+            // a dead CDN token; paying resolveUsername for one was the old reflex and the wrong one.
+            remintAndPlay(pos);
             return;
         }
         final TLRPC.Document doc = item.mo.getDocument();
@@ -2486,7 +2569,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 if (currentPlayer == null && !userPaused
                         && System.currentTimeMillis() - lastStuckRecoveryMs >= STUCK_REBUILD_DELAY_MS + STUCK_TICK_MS) {
                     FileLog.d("svipe: no player after page change — re-kicking pos=" + pos);
-                    resolveAndPlay(pos); // resolves if needed, then startPlayback (guards inside)
+                    remintAndPlay(pos); // URL first, resolve only if t.me has nothing (guards inside)
                 }
                 AndroidUtilities.runOnUIThread(this, PLAYBACK_START_DEADLINE_MS);
             }
@@ -2539,9 +2622,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             return;
         }
         if (item.mo == null) {
-            resolveItem(item, () -> {
-                if (currentPosition + 1 == pos && nextPlayer == null) prepareNextPlayer(pos);
-            });
+            // t.me had nothing for this one. There is no next player then, and there is no resolve
+            // either: buffering ahead is a convenience, and a convenience does not get to spend the
+            // flood budget on a reel the viewer has not reached. It resolves when it is played.
+            FileLog.d("svipe: no public url for next reel pos=" + pos + " — not pre-buffering it");
             return;
         }
         try {
@@ -2649,17 +2733,38 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (h == null) return false;
         FeedItem it = itemFor(h);
         if (it == null) return false;
-        if (pointInView(h.likeIcon, e) || pointInView(h.likeCount, e)) { toggleLike(it, h); return true; }
-        if (pointInView(h.commentIcon, e) || pointInView(h.commentCount, e)) {
-            // "Izoh" (0) posts consume the tap but do nothing (no comments thread to open).
-            if (it.mo != null && it.mo.getRepliesCount() > 0) openCommentsSheet(it);
+        // Every one of these needs a MessageObject or a Chat that the reel may not have: nothing is
+        // resolved until a reel is touched, so the tap itself is what pays for the round-trips. The
+        // tapped control dims while it waits (requireRef); the video never stops.
+        final FeedItem fit = it;
+        final ReelsHolder fh = h;
+        if (pointInView(h.likeIcon, e) || pointInView(h.likeCount, e)) {
+            requireMessage(it, h.likeIcon, () -> toggleLike(fit, fh));
             return true;
         }
+        if (pointInView(h.commentIcon, e) || pointInView(h.commentCount, e)) {
+            // Unresolved: the tap loads the message and opens the sheet if there IS a thread. Once
+            // resolved, "Comment" (0) posts consume the tap and do nothing — there is no thread.
+            requireMessage(it, h.commentIcon, () -> {
+                if (fit.mo != null && fit.mo.getRepliesCount() > 0) openCommentsSheet(fit);
+            });
+            return true;
+        }
+        // Share works with no message at all (it falls back to the link), so it never blocks on one.
         if (pointInView(h.shareIcon, e) || pointInView(h.shareCount, e)) { share(it); return true; }
-        if (pointInView(h.saveIcon, e) || pointInView(h.saveLabel, e)) { saveReel(it); return true; }
+        if (pointInView(h.saveIcon, e) || pointInView(h.saveLabel, e)) {
+            requireMessage(it, h.saveIcon, () -> saveReel(fit));
+            return true;
+        }
         if (pointInView(h.moreIcon, e)) { showMore(it, h); return true; }
-        if (pointInView(h.followBtn, e)) { toggleFollow(it, h); return true; }
-        if (pointInView(h.avatar, e) || pointInView(h.channelName, e)) { openComments(it); return true; }
+        if (pointInView(h.followBtn, e)) {
+            requireChat(it, h.followBtn, () -> toggleFollow(fit, fh));
+            return true;
+        }
+        if (pointInView(h.avatar, e) || pointInView(h.channelName, e)) {
+            requireChat(it, h.channelName, () -> openComments(fit));
+            return true;
+        }
         if (pointInView(h.title, e)) {
             h.titleExpanded = !h.titleExpanded;
             h.title.setMaxLines(h.titleExpanded ? 100 : 2);
@@ -2943,6 +3048,68 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         return null;
     }
 
+    /**
+     * The one place a resolve is allowed to start: a control the user has just touched.
+     *
+     * <p>Reels play over plain https now, with no MessageObject behind them, so the rail's controls —
+     * like, comment, save, report — have nothing to act on until somebody asks for one. The screen
+     * used to answer that by resolving every reel the moment it appeared, which spent the
+     * flood-limited resolveUsername on reels nobody touched and, when it failed, scrolled the viewer
+     * off a video that was playing. So the resolve moved here: it costs the two round-trips only for
+     * the reel and the button a person actually pressed, and its failure costs that button and
+     * nothing else.
+     *
+     * <p>{@code control} is dimmed while the round-trips are in the air — the loading state belongs
+     * to the tapped control, not to the video, which must keep playing throughout.
+     *
+     * @param needsChat true for actions that want the CHANNEL (follow, open channel) rather than the
+     *                  message; the resolver fetches whichever half is missing.
+     */
+    private void requireRef(final FeedItem item, final View control, final boolean needsChat,
+                            final Runnable action) {
+        if (item == null || action == null) return;
+        final boolean have = needsChat ? item.chat != null : item.mo != null;
+        if (have) {
+            action.run();
+            return;
+        }
+        if (item.username == null || item.username.isEmpty()) return;
+        // One tap at a time per reel. NOT a check on item.resolving: when a play-time resolve is
+        // already in the air the tap should ride along on it (SvipeRefResolver queues the callback),
+        // which is exactly what a second resolveItem does. What must not happen is the same button
+        // queueing its action twice — two queued like-toggles cancel each other out.
+        if (item.tapActionPending) return;
+        item.tapActionPending = true;
+        FileLog.d("svipe: on-demand resolve (tapped control) for " + item.channelId + ":" + item.messageId
+                + " needsChat=" + needsChat);
+        if (control != null) control.setAlpha(0.35f);
+        resolveItem(item, () -> {
+            item.tapActionPending = false;
+            if (control != null) control.setAlpha(1f);
+            final int idx = items.indexOf(item);
+            if (idx >= 0) updateActions(idx);
+            if (needsChat ? item.chat != null : item.mo != null) {
+                action.run();
+            } else {
+                // The resolve is the only thing that failed; the reel keeps playing behind the toast.
+                try {
+                    BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip,
+                            getString(R.string.SvipeReelsActionUnavailable)).show();
+                } catch (Exception ignore) {}
+            }
+        });
+    }
+
+    /** {@link #requireRef} for the actions that need the message. */
+    private void requireMessage(FeedItem item, View control, Runnable action) {
+        requireRef(item, control, false, action);
+    }
+
+    /** {@link #requireRef} for the actions that need the channel. */
+    private void requireChat(FeedItem item, View control, Runnable action) {
+        requireRef(item, control, true, action);
+    }
+
     private void toggleLike(FeedItem item, ReelsHolder holder) {
         if (item == null || item.mo == null) return;
         setLike(item, holder, !item.liked, false);
@@ -3076,13 +3243,15 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 .setGravity(Gravity.RIGHT)
                 .add(R.drawable.msg_share, "Ulashish", () -> share(item))
                 .add(R.drawable.msg_copy, getString(R.string.CopyLink), () -> copyLink(item))
-                .add(R.drawable.msg_channel, getString(R.string.SvipeReelsGoToChannel), () -> openComments(item))
+                .add(R.drawable.msg_channel, getString(R.string.SvipeReelsGoToChannel),
+                        () -> requireChat(item, null, () -> openComments(item)))
                 .add(R.drawable.msg2_block2, getString(R.string.SvipeReelsNotInterested), () -> {
                     sendEvent("NOT_INTERESTED", item);
                     BulletinFactory.of(this).createSimpleBulletin(R.raw.chats_infotip, getString(R.string.SvipeReelsLessLikeThis)).show();
                 })
                 .add(R.drawable.msg_disable, getString(R.string.SvipeReelsBlockChannel), () -> blockChannel(item, h))
-                .add(R.drawable.msg_report, "Shikoyat", true, () -> reportMessage(item))
+                .add(R.drawable.msg_report, "Shikoyat", true,
+                        () -> requireMessage(item, null, () -> reportMessage(item)))
                 .show();
     }
 
@@ -3168,16 +3337,43 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         if (holder != null) holder.setFollowing(!item.chat.left);
     }
 
+    /**
+     * The channel picture, from whichever source can supply one WITHOUT a resolve.
+     *
+     * A resolved chat carries a real photo and Telegram's own loader draws it. Everything else — a
+     * chat with no photo, and the unresolved item, which is now the ordinary case since the rail
+     * stopped resolving speculatively — falls to the public t.me page, which serves that same
+     * picture over plain HTTPS with no session and no access_hash. The coloured letter is only the
+     * placeholder underneath, never the final answer.
+     *
+     * One method rather than three call sites, because the two branches must agree about detaching:
+     * cells are recycled, and a view still attached to a pending web load would draw the previous
+     * channel's face onto this one.
+     */
+    private void bindAvatar(ReelsHolder h, FeedItem item) {
+        if (item.chat != null && item.chat.photo != null) {
+            SvipeChannelAvatar.detach(h.avatar);
+            h.avatar.setForUserOrChat(item.chat, new AvatarDrawable(item.chat));
+            return;
+        }
+        AvatarDrawable ad = new AvatarDrawable();
+        ad.setInfo(0, item.chat != null && item.chat.title != null ? item.chat.title : item.username, null);
+        SvipeChannelAvatar.apply(h.avatar, item.username, ad);
+    }
+
     private void updateActions(int pos) {
         ReelsHolder h = holderAt(pos);
         if (h == null || pos < 0 || pos >= items.size()) return;
         FeedItem item = items.get(pos);
         if (item.chat != null) {
-            h.avatar.setForUserOrChat(item.chat, new AvatarDrawable(item.chat));
+            bindAvatar(h, item);
             h.channelName.setText(item.chat.title != null ? item.chat.title : ("@" + item.username));
             h.setVerified(item.chat.verified);
             h.setFollowing(ChatObject.isInChat(item.chat));
         }
+        // No else: onBindViewHolder already draws the unresolved rail from what the feed knows (the
+        // @handle and a letter avatar), and no chat is fetched until a control is tapped, so that is
+        // now the state a reel legitimately sits in rather than a gap waiting to be filled.
         if (item.mo != null) {
             h.setLikeCount(item.likeCount);
             h.setLiked(item.liked);
@@ -3232,6 +3428,8 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             // duplicate keys and only makes an unattributed event look attributed.
             final String attributed = SvipeRecAttribution.attributableId(item.recId);
             if (attributed != null) ev.put("recommendation_id", attributed);
+            FileLog.d("svipe: event " + type + " " + item.channelId + ":" + item.messageId
+                    + " rec=" + (item.recId == null ? "none" : attributed != null ? "live" : "STALE-dropped"));
             if (payload != null) ev.put("payload", payload);
             JSONArray a = new JSONArray();
             a.put(ev);
@@ -3536,13 +3734,17 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     loadMore(); // an append failed offline — finish it without resetting the pager
                 }
             }
-            // A current reel whose resolve failed while offline recovers the moment the link returns.
+            // A current reel that never started while offline recovers the moment the link returns.
+            // Note the {@code currentPlayer == null} guard: a reel that IS playing is left alone, so
+            // a reconnect can never disturb a video somebody is watching.
             if (state == ConnectionsManager.ConnectionStateConnected
                     && currentPosition >= 0 && currentPosition < items.size()) {
                 FeedItem cur = items.get(currentPosition);
                 if (cur.mo == null && !cur.resolving && currentPlayer == null) {
                     cur.resolveAttempts = 0; // fresh retry budget now that we are back online
-                    resolveAndPlay(currentPosition);
+                    // The link came back, so the cheap route is worth another try before the
+                    // expensive one: re-mint, and resolve only if t.me still has nothing.
+                    remintAndPlay(currentPosition);
                 }
             }
         } else if (id == NotificationCenter.fileLoaded) {
@@ -3955,14 +4157,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             h.title.setMaxLines(2);
             h.setTitle(item.mo != null ? captionOf(item.mo) : null);
             if (item.chat != null) {
-                h.avatar.setForUserOrChat(item.chat, new AvatarDrawable(item.chat));
+                bindAvatar(h, item);
                 h.channelName.setText(item.chat.title != null ? item.chat.title : ("@" + item.username));
                 h.setVerified(item.chat.verified);
                 h.setFollowing(ChatObject.isInChat(item.chat));
             } else {
-                AvatarDrawable ad = new AvatarDrawable();
-                ad.setInfo(0, item.username, null);
-                h.avatar.setImageDrawable(ad);
+                bindAvatar(h, item);
                 h.setVerified(false);
                 h.setFollowing(false);
             }
