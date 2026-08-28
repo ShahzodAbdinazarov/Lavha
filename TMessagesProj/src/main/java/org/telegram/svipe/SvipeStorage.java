@@ -38,16 +38,27 @@ public final class SvipeStorage {
     /** Archived profile photos (SvipeAvatarStore). Re-fetchable: the server keeps the archive too. */
     private static final String AVATARS_DIR = "svipe_avatars";
 
+    /**
+     * Channel avatars and video posters scraped from public t.me pages
+     * ({@link org.telegram.svipe.video.SvipeWebImage}). Pure cache — every byte can be fetched again
+     * from a public page — so it belongs here rather than beside {@code svipe_msg_archive}, and it
+     * keeps its own 32 MB / 7-day budget on top of whatever the keep-media setting says.
+     */
+    private static final String WEB_IMAGES_DIR =
+            org.telegram.svipe.video.SvipeWebImage.DIR_NAME;
+
     /** The directories this class owns. Missing ones are included — they simply measure zero. */
     public static File[] dirs() {
-        final ArrayList<File> out = new ArrayList<>(2);
-        try {
-            final File avatars = ApplicationLoader.getFilesDirFixed(AVATARS_DIR);
-            if (avatars != null) {
-                out.add(avatars);
+        final ArrayList<File> out = new ArrayList<>(3);
+        for (String name : new String[]{AVATARS_DIR, WEB_IMAGES_DIR}) {
+            try {
+                final File dir = ApplicationLoader.getFilesDirFixed(name);
+                if (dir != null) {
+                    out.add(dir);
+                }
+            } catch (Throwable t) {
+                FileLog.e(t);
             }
-        } catch (Throwable t) {
-            FileLog.e(t);
         }
         final File updates = SvipeUpdater.updatesDir();
         if (updates != null) {
@@ -79,13 +90,15 @@ public final class SvipeStorage {
      * background queue, so it must block rather than schedule.
      */
     public static void clear() {
-        try {
-            final File avatars = ApplicationLoader.getFilesDirFixed(AVATARS_DIR);
-            if (avatars != null) {
-                deleteContents(avatars);
+        for (String name : new String[]{AVATARS_DIR, WEB_IMAGES_DIR}) {
+            try {
+                final File dir = ApplicationLoader.getFilesDirFixed(name);
+                if (dir != null) {
+                    deleteContents(dir);
+                }
+            } catch (Throwable t) {
+                FileLog.e(t);
             }
-        } catch (Throwable t) {
-            FileLog.e(t);
         }
         // The updates directory has a live writer, so it is emptied by its owner rather than from
         // here: an in-flight download's file is written incrementally and unlinking it mid-write

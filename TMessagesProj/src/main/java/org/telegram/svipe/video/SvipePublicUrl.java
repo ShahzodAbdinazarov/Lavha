@@ -2,12 +2,7 @@ package org.telegram.svipe.video;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
-import org.telegram.messenger.Utilities;
 
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -69,9 +64,6 @@ public final class SvipePublicUrl {
     /** What the embed widget will not serve. Callers with a document in hand can skip the fetch. */
     public static final long CEILING_BYTES = 20L * 1024 * 1024;
 
-    /** The embed serves the {@code <video>} tag to browsers only. */
-    private static final String BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
     private static final Pattern VIDEO_SRC = Pattern.compile(
             "<video[^>]+\\bsrc=\"([^\"]+\\.mp4[^\"]*)\"", Pattern.CASE_INSENSITIVE);
     /** The widget frames the video in a box whose padding IS its aspect ratio. */
@@ -102,10 +94,6 @@ public final class SvipePublicUrl {
 
     /** Enough to cover the whole ahead-window plus everything the warm-up minted; ~17 KB per page. */
     private static final int CACHE_ENTRIES = 256;
-    /** The embed page measured 17 KB. Anything an order of magnitude past that is not it. */
-    private static final int MAX_BODY_BYTES = 512 * 1024;
-    private static final int CONNECT_TIMEOUT_MS = 8000;
-    private static final int READ_TIMEOUT_MS = 8000;
 
     private static class Answer {
         Media media;        // null = nothing to play
@@ -123,33 +111,6 @@ public final class SvipePublicUrl {
             };
     /** Callers waiting on a fetch that is already in the air, keyed the same way as the cache. */
     private static final HashMap<String, ArrayList<Callback>> pending = new HashMap<>();
-
-    /**
-     * Three threads. The window this serves is small — the reel on screen plus the two or three
-     * ahead of it — and single-flight already collapses the common duplicate, so the only thing more
-     * threads would buy is contention for the same radio. Three is enough that a viewer's own reel
-     * never queues behind the whole prefetch window. Daemon and below normal priority: this can
-     * neither hold the process open nor outrank what is being drawn.
-     *
-     * <p>No artificial pacing, unlike the backend's copy of this: that one grinds a quarter-million
-     * rows and must not look like an attack on t.me. A person watching reels asks for one page per
-     * reel, which is exactly what their browser would do.
-     */
-    private static final java.util.concurrent.ExecutorService NET = buildPool();
-
-    private static java.util.concurrent.ExecutorService buildPool() {
-        java.util.concurrent.ThreadPoolExecutor pool = new java.util.concurrent.ThreadPoolExecutor(
-                3, 3, 30L, java.util.concurrent.TimeUnit.SECONDS,
-                new java.util.concurrent.LinkedBlockingQueue<>(),
-                r -> {
-                    Thread t = new Thread(r, "svipe-embed");
-                    t.setDaemon(true);
-                    t.setPriority(Thread.MIN_PRIORITY + 2);
-                    return t;
-                });
-        pool.allowCoreThreadTimeOut(true);
-        return pool;
-    }
 
     private SvipePublicUrl() {}
 
@@ -171,6 +132,23 @@ public final class SvipePublicUrl {
             Answer e = cache.get(key);
             if (e == null || System.currentTimeMillis() - e.atMs >= ttlOf(e)) return null;
             return e.media;
+        }
+    }
+
+    /**
+     * Forget the answer we hold for this post, so the next {@link #resolve} really goes and asks.
+     *
+     * <p>For the one case the TTL cannot see: a URL we minted and handed out turned out to be dead
+     * (the CDN token expired between mint and play, or the CDN simply stopped answering and the
+     * stall watchdog withdrew it). Without this, "re-mint" hands back the same dead URL for the rest
+     * of the ten-minute hit window, and a reel whose only route it was looks unplayable when it is
+     * one fetch away from playing.
+     */
+    public static void invalidate(String username, int messageId) {
+        String key = keyOf(username, messageId);
+        if (key == null) return;
+        synchronized (cache) {
+            cache.remove(key);
         }
     }
 
@@ -244,47 +222,22 @@ public final class SvipePublicUrl {
     }
 
     private static void submit(Runnable work) {
-        try {
-            NET.execute(work);
-        } catch (Throwable t) {
-            // A rejected task must still run rather than vanish, or its waiters wait forever.
-            FileLog.e(t);
-            Utilities.globalQueue.postRunnable(work);
-        }
+        SvipeTme.submit(work);
     }
 
     private static void fetch(String key, String username, int messageId) {
         final long t0 = System.currentTimeMillis();
-        HttpURLConnection conn = null;
-        boolean failed = false;
-        String html = null;
-        try {
-            URL url = new URL("https://t.me/" + username + "/" + messageId + "?embed=1");
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setInstanceFollowRedirects(true);
-            conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
-            conn.setReadTimeout(READ_TIMEOUT_MS);
-            conn.setRequestProperty("User-Agent", BROWSER_UA);
-            conn.setRequestProperty("Accept", "text/html");
-            int code = conn.getResponseCode();
-            if (code >= 200 && code < 300) {
-                html = readBody(conn.getInputStream());
-            } else {
-                // 404 is a real answer about the post (deleted, or the channel went private), not a
-                // network failure — remembered as a miss so the window stops asking.
-                FileLog.d("svipe: embed " + key + " -> HTTP " + code);
-            }
-        } catch (Exception e) {
-            failed = true;
+        // 404 is a real answer about the post (deleted, or the channel went private), not a network
+        // failure — {@code answered} is what keeps the two apart, and a miss stops the window asking.
+        final SvipeTme.Page page = SvipeTme.html(
+                "https://t.me/" + username + "/" + messageId + "?embed=1");
+        final boolean failed = !page.answered;
+        final String html = page.body;
+        if (failed) {
             FileLog.d("svipe: embed " + key + " failed in " + (System.currentTimeMillis() - t0)
-                    + "ms: " + e);
-        } finally {
-            // Not disconnect() on the happy path: HttpURLConnection keeps the socket alive for the
-            // next post on the same host, and every reel in the window is on that same host.
-            if (conn != null && failed) {
-                try { conn.disconnect(); } catch (Exception ignore) {}
-            }
+                    + "ms");
+        } else if (html == null) {
+            FileLog.d("svipe: embed " + key + " -> HTTP " + page.code);
         }
         Media media = html != null ? parse(html) : null;
         Answer e = new Answer();
@@ -324,18 +277,6 @@ public final class SvipePublicUrl {
         return new Media(url, width, height);
     }
 
-    private static String readBody(InputStream is) throws Exception {
-        if (is == null) return null;
-        ByteArrayOutputStream bos = new ByteArrayOutputStream(32 * 1024);
-        byte[] buf = new byte[8192];
-        int n;
-        while ((n = is.read(buf)) != -1) {
-            bos.write(buf, 0, n);
-            if (bos.size() >= MAX_BODY_BYTES) break;
-        }
-        is.close();
-        return new String(bos.toByteArray(), "UTF-8");
-    }
 
     private static void drain(String key, Media media) {
         final ArrayList<Callback> waiters;

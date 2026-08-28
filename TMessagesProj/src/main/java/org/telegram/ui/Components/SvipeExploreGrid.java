@@ -25,6 +25,7 @@ import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
@@ -1718,6 +1719,12 @@ public class SvipeExploreGrid extends RecyclerListView {
         }
         final ArrayList<SvipeDiscover.Event> batch = new ArrayList<>(exposureOutbox);
         exposureOutbox.clear();
+        int attributed = 0;
+        for (SvipeDiscover.Event e : batch) {
+            if (e.recId != null) attributed++;
+        }
+        FileLog.d("svipe: grid exposure " + batch.size() + " IMPRESSION(s), " + attributed
+                + " attributed to a live page");
         SvipeDiscover.sendEvents(account, batch, null);
     }
 
@@ -2101,12 +2108,19 @@ public class SvipeExploreGrid extends RecyclerListView {
             if (gi.resolved || gi.resolving || gi.ref.username == null || gi.ref.username.isEmpty()) {
                 continue;
             }
-            // A 3-up tile is a picture and nothing else, and the backend now sends the picture. So
-            // there is nothing left to ask Telegram for until the user actually taps one — which is
-            // the point: a page of 60 tiles used to buy a dozen channels the moment it arrived,
-            // entirely on behalf of videos nobody had chosen to play. The full-width cards still
-            // resolve, because their title and view count come off the message itself.
-            if (!gi.wide && gi.ref.posterUrl != null && !gi.ref.posterUrl.isEmpty()) {
+            // A 3-up tile is a picture and nothing else, and the device now fetches that picture
+            // itself off the channel's public page (SvipePosterSource). So there is nothing left to
+            // ask Telegram for until the user actually taps one — which is the point: a page of 60
+            // tiles used to buy a dozen channels the moment it arrived, entirely on behalf of videos
+            // nobody had chosen to play. The full-width cards still resolve, because their title and
+            // view count come off the message itself.
+            //
+            // This used to be conditional on the backend having sent a posterUrl. It no longer can
+            // be: with the server-side poster pipeline retired that field is null for everything, and
+            // a tile that fell back to resolving would put the whole flood spend straight back. When
+            // the public page has no frame for a post — a photo post, previews off — the tile keeps
+            // the inline blur it already had, which is exactly what it had before either way.
+            if (!gi.wide) {
                 continue;
             }
             final String u = gi.ref.username.toLowerCase();

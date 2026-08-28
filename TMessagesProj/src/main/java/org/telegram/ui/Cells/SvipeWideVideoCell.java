@@ -202,17 +202,26 @@ public class SvipeWideVideoCell extends LinearLayout {
         bindThumb(thumb, mo, true, ref);
 
         final TLRPC.Chat chat = chatFor(account, ref, chatHint);
-        if (chat != null) {
+        if (chat != null && chat.photo != null) {
+            // Already resolved and Telegram handed us the photo with it — nothing to fetch.
+            org.telegram.svipe.video.SvipeChannelAvatar.detach(avatar);
             avatar.setForUserOrChat(chat, new AvatarDrawable(chat));
         } else {
-            // Not resolved yet: a letter avatar off the @username, so the row never shows a hole.
+            // Not resolved (or resolved without a photo attached). A letter avatar off the @username
+            // so the row never shows a hole — and then the channel's REAL picture, read straight off
+            // its public t.me page, with no contacts.resolveUsername behind it. That call is the
+            // flood budget the whole app lives on, and a picture was never worth spending it: the
+            // grid and the reels bar drew a coloured letter not because the avatar was missing but
+            // because it was behind a resolve.
+            //
             // The channel's real NAME, when a link preview has already told us one — the letter
             // avatar is then drawn from that instead of from the handle (SvipeWebRef#channelTitle).
             final String known = ref == null ? null
                     : org.telegram.svipe.video.SvipeWebRef.channelTitle(ref.channelId);
             AvatarDrawable ad = new AvatarDrawable();
             ad.setInfo(0, known != null ? known : (ref != null ? ref.username : null), null);
-            avatar.setImageDrawable(ad);
+            org.telegram.svipe.video.SvipeChannelAvatar.apply(
+                    avatar, ref != null ? ref.username : null, ad);
         }
         title.setText(titleOverride != null ? titleOverride : captionOf(mo));
         meta.setText(metaOverride != null ? metaOverride : metaLine(account, ref, mo, chat));
@@ -233,6 +242,16 @@ public class SvipeWideVideoCell extends LinearLayout {
      *            hundred bytes that came with the list JSON — SvipeThumb) and, when the backend has
      *            one, a URL to a real frame of the video. Between them a card is a picture from the
      *            moment the JSON lands, whether or not it ever resolves.
+     *
+     *            <p><b>Where the real frame comes from now.</b> It used to be
+     *            {@code ref.posterUrl} — a presigned R2 link to a copy the backend had scraped off
+     *            {@code t.me/s/} and stored. The device reads that same public page itself now
+     *            ({@link org.telegram.svipe.video.SvipePosterSource}), so no frame makes a round trip
+     *            through our storage, and the backend's poster pipeline is retired behind
+     *            {@code LAVHA_POSTER_PIPELINE_ENABLED}. {@code posterUrl} is kept ONLY as a
+     *            transition fallback: it is null the moment that switch is off, and a build talking
+     *            to a server that still sends one should show it rather than fetch the same picture
+     *            twice.
      */
     public static void bindThumb(BackupImageView iv, MessageObject mo, boolean wide,
                                  SvipeDiscover.Item ref) {
@@ -243,9 +262,23 @@ public class SvipeWideVideoCell extends LinearLayout {
         // and taking it means the tile never has to resolve a channel at all. A full-width card
         // takes it only until the message lands, because that card is three times the width and
         // Telegram's own thumbnail is 1000 px — and it is resolving anyway, for its title.
-        if (poster != null && !poster.isEmpty() && (!wide || unresolved)) {
-            iv.setImage(ImageLocation.getForPath(poster), wide ? "720_720" : "240_240", blur, null);
-            return;
+        if (ref != null && (!wide || unresolved)) {
+            final String filter = wide ? "720_720" : "240_240";
+            // Ours first. A frame we already hold is painted in this frame, with no network at all,
+            // and its file name is stable so it survives every CDN token that ever expired.
+            if (org.telegram.svipe.video.SvipePosterSource.apply(
+                    iv, ref.username, ref.channelId, ref.messageId, filter, blur)) {
+                return;
+            }
+            if (poster != null && !poster.isEmpty()) {
+                // Transition only — see the javadoc. Painting this INSTEAD of waiting means a device
+                // on an old server never regresses, and it costs no extra transfer because the
+                // client fetch above has already registered its demand and will win next bind.
+                iv.setImage(ImageLocation.getForPath(poster), filter, blur, null);
+                return;
+            }
+            // Nothing yet. A resolved card still has Telegram's own thumbnail to fall through to;
+            // an unresolved one has only the blur, which holds the cell until the frame lands.
         }
         if (unresolved) {
             // Clear FIRST. A recycled cell still holds the last card's picture, and a blur that fails

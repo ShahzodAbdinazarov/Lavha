@@ -515,19 +515,33 @@ public class SvipeGuestReelsActivity extends BaseFragment {
 
             // The cover is our stored poster rather than a Telegram thumbnail: a guest has no way to
             // ask Telegram for one, and this is the picture the share page already uses.
-            if (item.posterUrl != null && !item.posterUrl.isEmpty()) {
+            // The cover frame, read off the channel's public page by this device
+            // (SvipePosterSource). It used to be OUR stored copy in R2 — item.posterUrl — because a
+            // guest has no way to ask Telegram for a thumbnail; reading the public page needs no
+            // session either, and so needs no copy. posterUrl is kept only as a transition fallback
+            // for a build talking to a server that still fills it; it is empty once the backend's
+            // LAVHA_POSTER_PIPELINE_ENABLED is off.
+            if (org.telegram.svipe.video.SvipePosterSource.apply(
+                    h.cover, item.username, item.channelId, item.messageId, "360_640", null)) {
+                h.cover.setVisibility(View.VISIBLE);
+            } else if (item.posterUrl != null && !item.posterUrl.isEmpty()) {
                 h.cover.setImage(ImageLocation.getForPath(item.posterUrl), "360_640",
                         (android.graphics.drawable.Drawable) null, (Object) null);
                 h.cover.setVisibility(View.VISIBLE);
             } else {
+                // Nothing yet; the frame arrives from the page fetch and paints itself in.
                 h.cover.setImageDrawable(null);
-                h.cover.setVisibility(View.GONE);
+                h.cover.setVisibility(View.VISIBLE);
             }
 
             h.channelName.setText(item.username != null && !item.username.isEmpty()
                     ? "@" + item.username : "");
-            h.avatar.setImageDrawable(new SvipeCharDrawable(
-                    item.username != null && !item.username.isEmpty()
+            // The channel's real picture, read off its public t.me page on this device. A guest has
+            // no Telegram session at all, so until now this was a coloured letter and could never be
+            // anything else — the avatar was not missing, it was behind a resolve a guest cannot make.
+            // The letter stays as the placeholder underneath, for a channel that genuinely has none.
+            org.telegram.svipe.video.SvipeChannelAvatar.apply(h.avatar, item.username,
+                    new SvipeCharDrawable(item.username != null && !item.username.isEmpty()
                             ? item.username.substring(0, 1).toUpperCase() : "?"));
             h.setVerified(false);
             h.setTitle(item.caption);
