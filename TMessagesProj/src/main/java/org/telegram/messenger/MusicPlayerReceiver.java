@@ -70,6 +70,16 @@ public class MusicPlayerReceiver extends BroadcastReceiver {
                 case MusicPlayerService.NOTIFY_PREVIOUS:
                     MediaController.getInstance().playPreviousMessage();
                     break;
+                // Svipe: the two buttons that replace shuffle/repeat while one of OUR catalog songs
+                // is playing. Same calls the song page makes — one source of truth for the opinion.
+                case MusicPlayerService.NOTIFY_LIKE:
+                    org.telegram.svipe.SvipeNowPlaying.toggleLike(UserConfig.selectedAccount,
+                            MediaController.getInstance().getPlayingMessageObject());
+                    break;
+                case MusicPlayerService.NOTIFY_DISLIKE:
+                    org.telegram.svipe.SvipeNowPlaying.toggleDislike(UserConfig.selectedAccount,
+                            MediaController.getInstance().getPlayingMessageObject());
+                    break;
                 case MusicPlayerService.NOTIFY_REPEAT:
                     SharedConfig.setRepeatMode((SharedConfig.repeatMode + 1) % 3);
                     break;

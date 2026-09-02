@@ -59,6 +59,10 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
     public static final String NOTIFY_SEEK = "org.telegram.android.musicplayer.seek";
     public static final String NOTIFY_REPEAT = "org.telegram.android.musicplayer.repeat";
     public static final String NOTIFY_SHUFFLE = "org.telegram.android.musicplayer.shuffle";
+    // Svipe: like/dislike, offered INSTEAD of shuffle/repeat while a catalog song is playing — see
+    // SvipeNowPlaying for why the two sets cannot both be shown.
+    public static final String NOTIFY_LIKE = "org.telegram.android.musicplayer.svipe.like";
+    public static final String NOTIFY_DISLIKE = "org.telegram.android.musicplayer.svipe.dislike";
 
     private static final int ID_NOTIFICATION = 5;
 
@@ -108,6 +112,11 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
             NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.httpFileDidLoad);
             NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.fileLoaded);
         }
+        // Svipe: the like/dislike buttons draw a STATE, so they have to be redrawn when that state
+        // changes — including when it changes somewhere else entirely (the song page, another device
+        // whose set arrived on sync). Global, like the two sets themselves.
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeFavouritesChanged);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeMusicDislikesChanged);
         imageReceiver = new ImageReceiver(null);
         imageReceiver.setDelegate((imageReceiver, set, thumb, memCache) -> {
             if (set && !TextUtils.isEmpty(loadingFilePath)) {
@@ -205,7 +214,16 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
 
                 @Override
                 public void onCustomAction(String action, android.os.Bundle extras) {
-                    if (NOTIFY_REPEAT.equals(action)) {
+                    if (NOTIFY_LIKE.equals(action) || NOTIFY_DISLIKE.equals(action)) {
+                        // Same two calls the song page makes, so the notification, the mini player and
+                        // the page can never disagree about what this user said.
+                        MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+                        if (NOTIFY_LIKE.equals(action)) {
+                            org.telegram.svipe.SvipeNowPlaying.toggleLike(UserConfig.selectedAccount, playing);
+                        } else {
+                            org.telegram.svipe.SvipeNowPlaying.toggleDislike(UserConfig.selectedAccount, playing);
+                        }
+                    } else if (NOTIFY_REPEAT.equals(action)) {
                         SharedConfig.setRepeatMode((SharedConfig.repeatMode + 1) % 3);
                         updateRepeatMode();
                         if (AudioPlayerAlert.instance != null) {
@@ -449,6 +467,19 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
             PendingIntent pendingSeek = PendingIntent.getBroadcast(getApplicationContext(), 0, new Intent(NOTIFY_SEEK).setComponent(new ComponentName(this, MusicPlayerReceiver.class)), fixIntentFlags(PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_CANCEL_CURRENT));
             PendingIntent pendingRepeat = PendingIntent.getBroadcast(getApplicationContext(), 0, new Intent(NOTIFY_REPEAT).setComponent(new ComponentName(this, MusicPlayerReceiver.class)), fixIntentFlags(PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_CANCEL_CURRENT));
             PendingIntent pendingShuffle = PendingIntent.getBroadcast(getApplicationContext(), 0, new Intent(NOTIFY_SHUFFLE).setComponent(new ComponentName(this, MusicPlayerReceiver.class)), fixIntentFlags(PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_CANCEL_CURRENT));
+            PendingIntent pendingLike = PendingIntent.getBroadcast(getApplicationContext(), 0, new Intent(NOTIFY_LIKE).setComponent(new ComponentName(this, MusicPlayerReceiver.class)), fixIntentFlags(PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_CANCEL_CURRENT));
+            PendingIntent pendingDislike = PendingIntent.getBroadcast(getApplicationContext(), 0, new Intent(NOTIFY_DISLIKE).setComponent(new ComponentName(this, MusicPlayerReceiver.class)), fixIntentFlags(PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_CANCEL_CURRENT));
+
+            // Svipe: is this one of OURS? A catalog song can be liked and refused; a voice note or an
+            // mp3 from a chat cannot, and a button that does nothing is worse than no button.
+            final int svipeAccount = UserConfig.selectedAccount;
+            final boolean svipeOurs = org.telegram.svipe.SvipeNowPlaying.isOurs(svipeAccount, messageObject);
+            final boolean svipeLiked = svipeOurs && org.telegram.svipe.SvipeNowPlaying.isLiked(svipeAccount, messageObject);
+            final boolean svipeDisliked = svipeOurs && org.telegram.svipe.SvipeNowPlaying.isDisliked(svipeAccount, messageObject);
+            final int svipeLikeIcon = svipeLiked ? R.drawable.media_like_active : R.drawable.media_like;
+            final int svipeDislikeIcon = svipeDisliked ? R.drawable.svipe_heart_off_active_24 : R.drawable.svipe_heart_off_24;
+            final String svipeLikeTitle = LocaleController.getString(svipeLiked ? R.string.SvipeMusicLiked : R.string.SvipeMusicLike);
+            final String svipeDislikeTitle = LocaleController.getString(svipeDisliked ? R.string.SvipeMusicUndislike : R.string.SvipeMusicDislike);
 
             Notification.MediaStyle mediaStyle = new Notification.MediaStyle().setMediaSession((android.media.session.MediaSession.Token) mediaSession.getSessionToken().getToken());
             if (messageObject.isMusic()) {
@@ -504,40 +535,58 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                     actions |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SKIP_TO_NEXT;
                 }
                 if (messageObject.isMusic()) {
-                    int shuffleIcon = SharedConfig.shuffleMusic ? R.drawable.player_new_shuffle : R.drawable.player_new_shuffle_off;
-                    playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                            NOTIFY_SHUFFLE, LocaleController.getString(R.string.ShuffleList), shuffleIcon).build());
+                    if (svipeOurs) {
+                        playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                                NOTIFY_LIKE, svipeLikeTitle, svipeLikeIcon).build());
+                    } else {
+                        int shuffleIcon = SharedConfig.shuffleMusic ? R.drawable.player_new_shuffle : R.drawable.player_new_shuffle_off;
+                        playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                                NOTIFY_SHUFFLE, LocaleController.getString(R.string.ShuffleList), shuffleIcon).build());
+                    }
                 }
                 playbackState.setState(isPlaying ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED,
                                 MediaController.getInstance().getPlayingMessageObject().audioProgressSec * 1000L,
                                 getPlaybackSpeed(isPlaying, messageObject))
                         .setActions(actions);
                 if (messageObject.isMusic()) {
-                    int repeatIcon;
-                    switch (SharedConfig.repeatMode) {
-                        case 1: repeatIcon = R.drawable.player_new_repeatall; break;
-                        case 2: repeatIcon = R.drawable.player_new_repeatone; break;
-                        default: repeatIcon = R.drawable.player_new_repeat_off; break;
+                    if (svipeOurs) {
+                        playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                                NOTIFY_DISLIKE, svipeDislikeTitle, svipeDislikeIcon).build());
+                    } else {
+                        int repeatIcon;
+                        switch (SharedConfig.repeatMode) {
+                            case 1: repeatIcon = R.drawable.player_new_repeatall; break;
+                            case 2: repeatIcon = R.drawable.player_new_repeatone; break;
+                            default: repeatIcon = R.drawable.player_new_repeat_off; break;
+                        }
+                        playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                                NOTIFY_REPEAT, LocaleController.getString(R.string.RepeatSong), repeatIcon).build());
                     }
-                    playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                            NOTIFY_REPEAT, LocaleController.getString(R.string.RepeatSong), repeatIcon).build());
                 }
                 final String playPauseTitle = isPlaying ? LocaleController.getString(R.string.AccActionPause) : LocaleController.getString(R.string.AccActionPlay);
                 if (messageObject.isMusic()) {
-                    int shuffleIcon = SharedConfig.shuffleMusic ? R.drawable.player_new_shuffle : R.drawable.player_new_shuffle_off;
-                    bldr.addAction(new Notification.Action.Builder(shuffleIcon, LocaleController.getString(R.string.ShuffleList), pendingShuffle).build());
+                    if (svipeOurs) {
+                        bldr.addAction(new Notification.Action.Builder(svipeLikeIcon, svipeLikeTitle, pendingLike).build());
+                    } else {
+                        int shuffleIcon = SharedConfig.shuffleMusic ? R.drawable.player_new_shuffle : R.drawable.player_new_shuffle_off;
+                        bldr.addAction(new Notification.Action.Builder(shuffleIcon, LocaleController.getString(R.string.ShuffleList), pendingShuffle).build());
+                    }
                     bldr.addAction(new Notification.Action.Builder(R.drawable.ic_action_previous, previousDescription, pendingPrev).build());
                 }
                 bldr.addAction(new Notification.Action.Builder(isPlaying ? R.drawable.ic_action_pause : R.drawable.ic_action_play, playPauseTitle, pendingPlaypause).build());
                 if (messageObject.isMusic()) {
                     bldr.addAction(new Notification.Action.Builder(R.drawable.ic_action_next, nextDescription, pendingNext).build());
-                    int repeatIcon;
-                    switch (SharedConfig.repeatMode) {
-                        case 1: repeatIcon = R.drawable.player_new_repeatall; break;
-                        case 2: repeatIcon = R.drawable.player_new_repeatone; break;
-                        default: repeatIcon = R.drawable.player_new_repeat_off; break;
+                    if (svipeOurs) {
+                        bldr.addAction(new Notification.Action.Builder(svipeDislikeIcon, svipeDislikeTitle, pendingDislike).build());
+                    } else {
+                        int repeatIcon;
+                        switch (SharedConfig.repeatMode) {
+                            case 1: repeatIcon = R.drawable.player_new_repeatall; break;
+                            case 2: repeatIcon = R.drawable.player_new_repeatone; break;
+                            default: repeatIcon = R.drawable.player_new_repeat_off; break;
+                        }
+                        bldr.addAction(new Notification.Action.Builder(repeatIcon, LocaleController.getString(R.string.RepeatSong), pendingRepeat).build());
                     }
-                    bldr.addAction(new Notification.Action.Builder(repeatIcon, LocaleController.getString(R.string.RepeatSong), pendingRepeat).build());
                 }
             }
 
@@ -849,10 +898,19 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
             NotificationCenter.getInstance(a).removeObserver(this, NotificationCenter.httpFileDidLoad);
             NotificationCenter.getInstance(a).removeObserver(this, NotificationCenter.fileLoaded);
         }
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeFavouritesChanged);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeMusicDislikesChanged);
     }
 
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
+        if (id == NotificationCenter.svipeFavouritesChanged || id == NotificationCenter.svipeMusicDislikesChanged) {
+            MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+            if (playing != null) {
+                createNotification(playing, false);
+            }
+            return;
+        }
         if (id == NotificationCenter.messagePlayingPlayStateChanged) {
             MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
             if (messageObject != null) {
