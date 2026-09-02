@@ -534,35 +534,12 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                 if (messageObject.isMusic()) {
                     actions |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SKIP_TO_NEXT;
                 }
-                if (messageObject.isMusic()) {
-                    if (svipeOurs) {
-                        playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                                NOTIFY_DISLIKE, svipeDislikeTitle, svipeDislikeIcon).build());
-                    } else {
-                        int shuffleIcon = SharedConfig.shuffleMusic ? R.drawable.player_new_shuffle : R.drawable.player_new_shuffle_off;
-                        playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                                NOTIFY_SHUFFLE, LocaleController.getString(R.string.ShuffleList), shuffleIcon).build());
-                    }
-                }
+                addLeadingMusicAction(playbackState, messageObject);
                 playbackState.setState(isPlaying ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED,
                                 MediaController.getInstance().getPlayingMessageObject().audioProgressSec * 1000L,
                                 getPlaybackSpeed(isPlaying, messageObject))
                         .setActions(actions);
-                if (messageObject.isMusic()) {
-                    if (svipeOurs) {
-                        playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                                NOTIFY_LIKE, svipeLikeTitle, svipeLikeIcon).build());
-                    } else {
-                        int repeatIcon;
-                        switch (SharedConfig.repeatMode) {
-                            case 1: repeatIcon = R.drawable.player_new_repeatall; break;
-                            case 2: repeatIcon = R.drawable.player_new_repeatone; break;
-                            default: repeatIcon = R.drawable.player_new_repeat_off; break;
-                        }
-                        playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                                NOTIFY_REPEAT, LocaleController.getString(R.string.RepeatSong), repeatIcon).build());
-                    }
-                }
+                addTrailingMusicAction(playbackState, messageObject);
                 final String playPauseTitle = isPlaying ? LocaleController.getString(R.string.AccActionPause) : LocaleController.getString(R.string.AccActionPlay);
                 if (messageObject.isMusic()) {
                     if (svipeOurs) {
@@ -781,6 +758,58 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
         }
     }
 
+    /**
+     * The music session's LEADING custom action: dislike for one of our catalog songs, shuffle for
+     * anything else. Its twin is {@link #addTrailingMusicAction}.
+     *
+     * <p>These exist because the playback state is built in TWO places — once with the notification,
+     * once on a seek — and the second one used to be a copy that only knew about shuffle and repeat.
+     * Dragging the seek bar therefore replaced the like/dislike pair with the stock buttons until
+     * something rebuilt the notification. A rule with two implementations is a rule that will drift
+     * again, so there is one now and both callers use it.
+     */
+    private void addLeadingMusicAction(PlaybackStateCompat.Builder pb, MessageObject messageObject) {
+        if (messageObject == null || !messageObject.isMusic()) {
+            return;
+        }
+        final int account = UserConfig.selectedAccount;
+        if (org.telegram.svipe.SvipeNowPlaying.isOurs(account, messageObject)) {
+            final boolean disliked = org.telegram.svipe.SvipeNowPlaying.isDisliked(account, messageObject);
+            pb.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                    NOTIFY_DISLIKE,
+                    LocaleController.getString(disliked ? R.string.SvipeMusicUndislike : R.string.SvipeMusicDislike),
+                    disliked ? R.drawable.svipe_heart_off_active_24 : R.drawable.svipe_heart_off_24).build());
+            return;
+        }
+        final int shuffleIcon = SharedConfig.shuffleMusic ? R.drawable.player_new_shuffle : R.drawable.player_new_shuffle_off;
+        pb.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                NOTIFY_SHUFFLE, LocaleController.getString(R.string.ShuffleList), shuffleIcon).build());
+    }
+
+    /** The TRAILING one: like for our catalog songs, repeat for everything else. */
+    private void addTrailingMusicAction(PlaybackStateCompat.Builder pb, MessageObject messageObject) {
+        if (messageObject == null || !messageObject.isMusic()) {
+            return;
+        }
+        final int account = UserConfig.selectedAccount;
+        if (org.telegram.svipe.SvipeNowPlaying.isOurs(account, messageObject)) {
+            final boolean liked = org.telegram.svipe.SvipeNowPlaying.isLiked(account, messageObject);
+            pb.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                    NOTIFY_LIKE,
+                    LocaleController.getString(liked ? R.string.SvipeMusicLiked : R.string.SvipeMusicLike),
+                    liked ? R.drawable.media_like_active : R.drawable.media_like).build());
+            return;
+        }
+        int repeatIcon;
+        switch (SharedConfig.repeatMode) {
+            case 1: repeatIcon = R.drawable.player_new_repeatall; break;
+            case 2: repeatIcon = R.drawable.player_new_repeatone; break;
+            default: repeatIcon = R.drawable.player_new_repeat_off; break;
+        }
+        pb.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                NOTIFY_REPEAT, LocaleController.getString(R.string.RepeatSong), repeatIcon).build());
+    }
+
     private void updatePlaybackState(long seekTo) {
         if (Build.VERSION.SDK_INT < 21) {
             return;
@@ -800,24 +829,13 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
             MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
             if (messageObject != null && messageObject.isMusic()) {
                 actions |= PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SKIP_TO_NEXT;
-                int shuffleIcon = SharedConfig.shuffleMusic ? R.drawable.player_new_shuffle : R.drawable.player_new_shuffle_off;
-                playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                        NOTIFY_SHUFFLE, LocaleController.getString(R.string.ShuffleList), shuffleIcon).build());
             }
+            addLeadingMusicAction(playbackState, messageObject);
             playbackState.setState(isPlaying ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED,
                             seekTo,
                             getPlaybackSpeed(isPlaying, messageObject))
                     .setActions(actions);
-            if (messageObject != null && messageObject.isMusic()) {
-                int repeatIcon;
-                switch (SharedConfig.repeatMode) {
-                    case 1: repeatIcon = R.drawable.player_new_repeatall; break;
-                    case 2: repeatIcon = R.drawable.player_new_repeatone; break;
-                    default: repeatIcon = R.drawable.player_new_repeat_off; break;
-                }
-                playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                        NOTIFY_REPEAT, LocaleController.getString(R.string.RepeatSong), repeatIcon).build());
-            }
+            addTrailingMusicAction(playbackState, messageObject);
         }
         mediaSession.setPlaybackState(playbackState.build());
     }

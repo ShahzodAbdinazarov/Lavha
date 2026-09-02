@@ -91,17 +91,7 @@ public final class SvipeMusicFavourites {
      * everything the catalog has resolved (the queue may since have been replaced).
      */
     private static long songIdFor(MessageObject mo, long dialogId, int realId) {
-        SvipeMusicQueue active = SvipeMusicQueue.getActive();
-        if (active != null) {
-            SvipeMusic.Track t = active.trackFor(mo);
-            if (t != null && t.songId != 0) {
-                return t.songId;
-            }
-        }
-        if (dialogId < 0 && realId != 0) {
-            return SvipeMusicQueue.cachedSongId(-dialogId, realId);
-        }
-        return 0;
+        return SvipeMusicQueue.songIdFor(mo, dialogId, realId);
     }
 
     /**

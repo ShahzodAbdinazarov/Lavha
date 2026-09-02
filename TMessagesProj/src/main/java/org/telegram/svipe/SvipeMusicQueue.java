@@ -160,6 +160,39 @@ public class SvipeMusicQueue extends MessagesController.SavedMusicList {
         return installing;
     }
 
+    /**
+     * The catalog song behind a playing message — the tolerant lookup, and the one every caller
+     * should use.
+     *
+     * <p>{@link #getActive()} answers null for a moment on every track change: it only recognises the
+     * queue once {@code MediaController.currentSavedMusicList} points at it, and between installing a
+     * playlist and that field being adopted there is a window where the app knows perfectly well what
+     * is playing and this class says "not mine". Anything drawing STATE from the answer — the heart in
+     * the mini player, the like/dislike buttons in the notification — flickers back to its
+     * not-our-song look for exactly that window. So the queue we last installed is consulted too, and
+     * every answer is remembered per (channel, message) so a later miss cannot un-know it.
+     */
+    public static synchronized long songIdFor(MessageObject mo, long dialogId, int realId) {
+        if (mo == null) {
+            return 0;
+        }
+        SvipeMusicQueue q = getActive();
+        if (q == null) {
+            q = activeQueue;   // mid-swap: the list is ours, the controller has just not adopted it yet
+        }
+        if (q != null) {
+            final SvipeMusic.Track t = q.trackFor(mo);
+            if (t != null && t.songId != 0) {
+                cacheSongId(t);
+                return t.songId;
+            }
+        }
+        if (dialogId < 0 && realId != 0) {
+            return cachedSongId(-dialogId, realId);
+        }
+        return 0;
+    }
+
     public SvipeMusic.Track trackFor(MessageObject mo) {
         if (mo == null) {
             return null;
