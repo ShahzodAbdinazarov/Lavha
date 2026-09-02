@@ -14,3 +14,8 @@
    - Barcha ish **devda** bajariladi va devda o'lchanadi. Prodga chiqarish alohida qaror va u faqat mendan keladi.
    - Prodda biror narsa qilish kerak deb hisoblasang: nima qilish kerakligini, nega kerakligini va xavfini ayt — keyin **to'xta va kut**.
    - Bu qoida "ruxsat berilgan rejim"da ham, shoshilinch holatda ham kuchda: prod tushib qolsa ham avval menga ayt.
+
+6. **Prodga chiqarish backend va mobil ilovada BOSHQACHA ishlaydi — ularni bir xil deb o'ylama.**
+   - **Backend:** prod = `main` branch. Chiqarish `dev` → `main` merge + push (CI `deploy_prod` o'zi deploy qiladi). ⚠️ ff-merge yangi pipeline yaratmaydi (SHA bir xil) — GitLab API bilan `POST /projects/83095280/pipeline?ref=main` qilib qo'lda trigger qil.
+   - **Mobil:** prod = **reliz**, ya'ni build + imzo + Play/`.web` publish. Branch merge emas. Ish `dev`da boradi va `dev`da qoladi.
+   - **`master` branch mobil repoda faqat bitta narsa uchun bor: upstream (DrKLO/Telegram) o'zgarishini qabul qilish.** Upstreamdan yangilanish kelmagunicha `master` bizga umuman kerak emas — unga merge qilma, undan branch ochma, uni "prod" deb o'ylama. Upstream update kelganda: upstream → `master` → `dev`.
