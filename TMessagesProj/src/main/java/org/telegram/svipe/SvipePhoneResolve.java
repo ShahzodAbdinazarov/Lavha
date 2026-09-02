@@ -82,6 +82,11 @@ public final class SvipePhoneResolve {
             return;                         // asked before; the answer is already on disk
         }
         if (System.currentTimeMillis() < prefs().getLong(KEY_FLOOD_UNTIL, 0)) {
+            // Billed with NO subject, here and below: the subject would be a phone number, and the
+            // ledger records what a call cost the account, never who was on the other end of it.
+            SvipeLimitLog.denied(account, SvipeLimitLog.RESOLVE_PHONE, SvipeLimitLog.PHONE_LOOKUP,
+                    false, (int) ((prefs().getLong(KEY_FLOOD_UNTIL, 0) - System.currentTimeMillis())
+                            / 1000), null, "numbers");
             return;                         // inside a wait: asking again is what extends it
         }
         synchronized (inFlight) {
@@ -97,6 +102,8 @@ public final class SvipePhoneResolve {
                 inFlight.remove(digits);
             }
             if (error != null) {
+                SvipeLimitLog.failed(account, SvipeLimitLog.RESOLVE_PHONE,
+                        SvipeLimitLog.PHONE_LOOKUP, error, null, "numbers");
                 if (error.text != null && error.text.startsWith("FLOOD_WAIT")) {
                     // Remember the window rather than discovering it again with the next row.
                     long seconds = Utilities.parseInt(error.text);
@@ -109,6 +116,8 @@ public final class SvipePhoneResolve {
                 store(digits, 0);
                 return;
             }
+            SvipeLimitLog.ok(account, SvipeLimitLog.RESOLVE_PHONE, SvipeLimitLog.PHONE_LOOKUP,
+                    null, "numbers");
             long userId = 0;
             if (response instanceof TLRPC.TL_contacts_resolvedPeer) {
                 TLRPC.TL_contacts_resolvedPeer resolved = (TLRPC.TL_contacts_resolvedPeer) response;

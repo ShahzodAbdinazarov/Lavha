@@ -343,6 +343,8 @@ public class SvipeAuth {
         final String username = SvipeConfig.botUsername();
         long floodUntil = MessagesController.getMainSettings(account).getLong(SvipeConfig.PREF_AUTH_BOT_FLOOD_UNTIL, 0);
         if (floodUntil > System.currentTimeMillis()) {
+            SvipeLimitLog.denied(account, SvipeLimitLog.RESOLVE_USERNAME, SvipeLimitLog.AUTH_BOT,
+                    false, (int) ((floodUntil - System.currentTimeMillis()) / 1000), username, "auth");
             cb.run(0);
             return;
         }
@@ -360,8 +362,12 @@ public class SvipeAuth {
                     botId = rp.users.get(0).id;
                     rememberBotId(account, botId);
                 }
+                SvipeLimitLog.ok(account, SvipeLimitLog.RESOLVE_USERNAME, SvipeLimitLog.AUTH_BOT,
+                        username, "auth");
             } else if (error != null) {
                 FileLog.d("svipe: auth bot resolve failed: " + error.text);
+                SvipeLimitLog.failed(account, SvipeLimitLog.RESOLVE_USERNAME, SvipeLimitLog.AUTH_BOT,
+                        error, username, "auth");
                 rememberFloodWait(account, error.text);
             }
             cb.run(botId);

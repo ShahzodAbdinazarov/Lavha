@@ -2210,6 +2210,12 @@ public class SvipeExploreGrid extends RecyclerListView {
         final ConnectionsManager cm = ConnectionsManager.getInstance(account);
         if (org.telegram.svipe.SvipeChannelResolve.blocked(account)
                 || org.telegram.svipe.SvipeChannelResolve.exhausted(account)) {
+            org.telegram.svipe.SvipeLimitLog.denied(account,
+                    org.telegram.svipe.SvipeLimitLog.RESOLVE_USERNAME,
+                    org.telegram.svipe.SvipeLimitLog.GRID_TILE,
+                    !org.telegram.svipe.SvipeChannelResolve.blocked(account),
+                    org.telegram.svipe.SvipeChannelResolve.blockedForSeconds(account),
+                    org.telegram.svipe.SvipeLimitLog.subject(username, channelId), "search");
             for (GridItem gi : group) {
                 gi.resolving = false;
             }
@@ -2227,6 +2233,10 @@ public class SvipeExploreGrid extends RecyclerListView {
                 org.telegram.messenger.FileLog.d("svipe: grid resolve @" + username + " failed: "
                         + (error == null ? "shape" : error.text));
                 org.telegram.svipe.SvipeChannelResolve.noteError(account, error);
+                org.telegram.svipe.SvipeLimitLog.failed(account,
+                        org.telegram.svipe.SvipeLimitLog.RESOLVE_USERNAME,
+                        org.telegram.svipe.SvipeLimitLog.GRID_TILE, error,
+                        org.telegram.svipe.SvipeLimitLog.subject(username, channelId), "search");
                 for (GridItem gi : group) {
                     gi.resolving = false;
                 }
@@ -2247,6 +2257,10 @@ public class SvipeExploreGrid extends RecyclerListView {
                 return;
             }
             TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
+            org.telegram.svipe.SvipeLimitLog.ok(account,
+                    org.telegram.svipe.SvipeLimitLog.RESOLVE_USERNAME,
+                    org.telegram.svipe.SvipeLimitLog.GRID_TILE,
+                    org.telegram.svipe.SvipeLimitLog.subject(username, channelId), "search");
             // Persisted, so tomorrow's cold start draws this grid without a single resolve.
             org.telegram.svipe.SvipeChannelResolve.remember(account, rp);
             TLRPC.Chat chat = null;

@@ -135,6 +135,11 @@ public class SvipeMusicResolver {
         if (SvipeChannelResolve.blocked(account) || SvipeChannelResolve.exhausted(account)) {
             // Telegram is already making this account wait. Asking anyway is not merely useless: a
             // call inside an open flood window is what makes Telegram extend it.
+            final boolean budget = !SvipeChannelResolve.blocked(account);
+            SvipeLimitLog.denied(account, SvipeLimitLog.RESOLVE_USERNAME, SvipeLimitLog.MUSIC_PLAY,
+                    budget, SvipeChannelResolve.blockedForSeconds(account),
+                    SvipeLimitLog.subject(username, group.isEmpty() ? 0 : group.get(0).channelId),
+                    "music");
             done.run();
             return;
         }
@@ -147,9 +152,15 @@ public class SvipeMusicResolver {
             SvipeChannelResolve.sent();
             if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
                 SvipeChannelResolve.noteError(account, error);
+                SvipeLimitLog.failed(account, SvipeLimitLog.RESOLVE_USERNAME, SvipeLimitLog.MUSIC_PLAY,
+                        error, SvipeLimitLog.subject(username, group.isEmpty() ? 0 : group.get(0).channelId),
+                        "music");
                 done.run();
                 return;
             }
+            SvipeLimitLog.ok(account, SvipeLimitLog.RESOLVE_USERNAME, SvipeLimitLog.MUSIC_PLAY,
+                    SvipeLimitLog.subject(username, group.isEmpty() ? 0 : group.get(0).channelId),
+                    "music");
             TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
             // Persisted, not just cached in memory: this call is expensive enough that paying it
             // once per launch is what put the account in a flood window in the first place.
@@ -192,9 +203,13 @@ public class SvipeMusicResolver {
         }
         ConnectionsManager.getInstance(account).sendRequest(gm, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
             if (error != null || !(response instanceof TLRPC.messages_Messages)) {
+                SvipeLimitLog.failed(account, SvipeLimitLog.GET_MESSAGES, SvipeLimitLog.MUSIC_PLAY,
+                        error, SvipeLimitLog.subject(chat.username, chat.id), "music");
                 done.run();
                 return;
             }
+            SvipeLimitLog.ok(account, SvipeLimitLog.GET_MESSAGES, SvipeLimitLog.MUSIC_PLAY,
+                    SvipeLimitLog.subject(chat.username, chat.id), "music");
             TLRPC.messages_Messages mm = (TLRPC.messages_Messages) response;
             MessagesController mc = MessagesController.getInstance(account);
             mc.putUsers(mm.users, false);

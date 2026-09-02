@@ -405,6 +405,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         // Whatever the last run could not send comes back first — it costs one prefs read and it is
         // the only place the observation queue is ever loaded.
         org.telegram.svipe.SvipeObserved.restore();
+        org.telegram.svipe.SvipeLimitLog.restore();
         SvipeWarmup.enqueue("settings", (acc, done) -> { SvipeSettingsSync.pull(acc); done.run(); });
         // Not enqueue: the reels feed is what a person opens this app for, so it does not wait out
         // the settle delay. Measured 2026-08-17, that delay was 4.0 s of a 5.0 s wait for a request

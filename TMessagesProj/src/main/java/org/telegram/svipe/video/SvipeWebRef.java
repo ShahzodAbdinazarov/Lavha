@@ -169,7 +169,15 @@ public final class SvipeWebRef {
                 MessagesController.getInstance(account).putUsers(res.users, false);
                 MessagesController.getInstance(account).putChats(res.chats, false);
                 page = res.webpage;
+                org.telegram.svipe.SvipeLimitLog.ok(account,
+                        org.telegram.svipe.SvipeLimitLog.GET_WEB_PAGE,
+                        org.telegram.svipe.SvipeLimitLog.WEB_REF, username, "reels");
             } else if (error != null) {
+                // getWebPage is the cheap door — measured at 30 calls in 0.9 s with no flood — but it
+                // is still MTProto on the user's session, so it is billed here like everything else.
+                org.telegram.svipe.SvipeLimitLog.failed(account,
+                        org.telegram.svipe.SvipeLimitLog.GET_WEB_PAGE,
+                        org.telegram.svipe.SvipeLimitLog.WEB_REF, error, username, "reels");
                 FileLog.d("svipe: webpage @" + username + "/" + messageId + " failed: " + error.text);
             }
             final MessageObject mo = build(account, page, username, messageId, channelId);

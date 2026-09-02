@@ -244,11 +244,22 @@ public class SvipeRefResolver {
         if (org.telegram.svipe.SvipeChannelResolve.blocked(account)) {
             // Inside an open flood window. Asking again is what makes Telegram extend it.
             FileLog.d("svipe: resolve @" + username + " skipped, flood window open");
+            // Recorded even though no call goes out: this IS the limit being felt — the video the
+            // user is waiting on does not play, and a ledger of successes only would be blank here.
+            org.telegram.svipe.SvipeLimitLog.denied(
+                    account, org.telegram.svipe.SvipeLimitLog.RESOLVE_USERNAME,
+                    org.telegram.svipe.SvipeLimitLog.REEL_PLAY, false,
+                    org.telegram.svipe.SvipeChannelResolve.blockedForSeconds(account),
+                    org.telegram.svipe.SvipeLimitLog.subject(username, channelId), "reels");
             cb.run(null);
             return;
         }
         if (org.telegram.svipe.SvipeChannelResolve.exhausted(account)) {
             FileLog.d("svipe: resolve @" + username + " skipped, hourly budget spent");
+            org.telegram.svipe.SvipeLimitLog.denied(
+                    account, org.telegram.svipe.SvipeLimitLog.RESOLVE_USERNAME,
+                    org.telegram.svipe.SvipeLimitLog.REEL_PLAY, true, 0,
+                    org.telegram.svipe.SvipeLimitLog.subject(username, channelId), "reels");
             cb.run(null);
             return;
         }
@@ -289,8 +300,16 @@ public class SvipeRefResolver {
                     if (chat == null && !rp.chats.isEmpty()) chat = rp.chats.get(0);
                 }
                 if (chat != null) cacheFor(account).put(username, chat);
+                org.telegram.svipe.SvipeLimitLog.ok(account,
+                        org.telegram.svipe.SvipeLimitLog.RESOLVE_USERNAME,
+                        org.telegram.svipe.SvipeLimitLog.REEL_PLAY,
+                        org.telegram.svipe.SvipeLimitLog.subject(username, channelId), "reels");
             } else if (error != null) {
                 org.telegram.svipe.SvipeChannelResolve.noteError(account, error);
+                org.telegram.svipe.SvipeLimitLog.failed(account,
+                        org.telegram.svipe.SvipeLimitLog.RESOLVE_USERNAME,
+                        org.telegram.svipe.SvipeLimitLog.REEL_PLAY, error,
+                        org.telegram.svipe.SvipeLimitLog.subject(username, channelId), "reels");
                 FileLog.d("svipe: resolve @" + username + " failed: " + error.text);
             }
             drainResolve(key, chat);
@@ -457,8 +476,16 @@ public class SvipeRefResolver {
         gm.id.add(ref.messageId());
         ConnectionsManager.getInstance(account).sendRequest(gm, (resp, err) -> {
             if (err != null || !(resp instanceof TLRPC.messages_Messages)) {
+                org.telegram.svipe.SvipeLimitLog.failed(account,
+                        org.telegram.svipe.SvipeLimitLog.GET_MESSAGES,
+                        org.telegram.svipe.SvipeLimitLog.RAIL_ENRICH, err,
+                        org.telegram.svipe.SvipeLimitLog.subject(chat.username, chat.id), "reels");
                 return;
             }
+            org.telegram.svipe.SvipeLimitLog.ok(account,
+                    org.telegram.svipe.SvipeLimitLog.GET_MESSAGES,
+                    org.telegram.svipe.SvipeLimitLog.RAIL_ENRICH,
+                    org.telegram.svipe.SvipeLimitLog.subject(chat.username, chat.id), "reels");
             final TLRPC.messages_Messages mm = (TLRPC.messages_Messages) resp;
             if (mm.messages == null || mm.messages.isEmpty()) {
                 return;
@@ -497,6 +524,17 @@ public class SvipeRefResolver {
         final java.util.concurrent.atomic.AtomicBoolean fetched = new java.util.concurrent.atomic.AtomicBoolean();
         ConnectionsManager.getInstance(account).sendRequest(gm, (resp2, err2) -> {
             if (!fetched.compareAndSet(false, true)) return; // the timeout already reported this step
+            if (err2 == null && resp2 instanceof TLRPC.messages_Messages) {
+                org.telegram.svipe.SvipeLimitLog.ok(account,
+                        org.telegram.svipe.SvipeLimitLog.GET_MESSAGES,
+                        org.telegram.svipe.SvipeLimitLog.REEL_PLAY,
+                        org.telegram.svipe.SvipeLimitLog.subject(username, ref.channelId()), "reels");
+            } else {
+                org.telegram.svipe.SvipeLimitLog.failed(account,
+                        org.telegram.svipe.SvipeLimitLog.GET_MESSAGES,
+                        org.telegram.svipe.SvipeLimitLog.REEL_PLAY, err2,
+                        org.telegram.svipe.SvipeLimitLog.subject(username, ref.channelId()), "reels");
+            }
             if (err2 != null || !(resp2 instanceof TLRPC.messages_Messages)) {
                 if (err2 != null && isStalePeer(err2.text)) {
                     // The peer we cached is no longer usable. Drop it so the retry re-resolves

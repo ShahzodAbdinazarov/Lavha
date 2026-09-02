@@ -1207,6 +1207,11 @@ public class SvipeWatchActivity extends BaseFragment {
         final Row head = group.get(0);
         if (org.telegram.svipe.SvipeChannelResolve.blocked(currentAccount)) {
             // Inside an open flood window: asking again is what makes Telegram extend it.
+            org.telegram.svipe.SvipeLimitLog.denied(currentAccount,
+                    org.telegram.svipe.SvipeLimitLog.RESOLVE_USERNAME,
+                    org.telegram.svipe.SvipeLimitLog.WATCH_GROUP, false,
+                    org.telegram.svipe.SvipeChannelResolve.blockedForSeconds(currentAccount),
+                    org.telegram.svipe.SvipeLimitLog.subject(username, head.ref.channelId), "video");
             for (Row r : group) {
                 r.resolving = false;
             }
@@ -1219,12 +1224,22 @@ public class SvipeWatchActivity extends BaseFragment {
                 AndroidUtilities.runOnUIThread(() -> {
                     if (error != null || !(response instanceof TLRPC.TL_contacts_resolvedPeer)) {
                         org.telegram.svipe.SvipeChannelResolve.noteError(currentAccount, error);
+                        org.telegram.svipe.SvipeLimitLog.failed(currentAccount,
+                                org.telegram.svipe.SvipeLimitLog.RESOLVE_USERNAME,
+                                org.telegram.svipe.SvipeLimitLog.WATCH_GROUP, error,
+                                org.telegram.svipe.SvipeLimitLog.subject(username, head.ref.channelId),
+                                "video");
                         for (Row r : group) {
                             r.resolving = false;
                         }
                         if (done != null) done.run();
                         return;
                     }
+                    org.telegram.svipe.SvipeLimitLog.ok(currentAccount,
+                            org.telegram.svipe.SvipeLimitLog.RESOLVE_USERNAME,
+                            org.telegram.svipe.SvipeLimitLog.WATCH_GROUP,
+                            org.telegram.svipe.SvipeLimitLog.subject(username, head.ref.channelId),
+                            "video");
                     TLRPC.TL_contacts_resolvedPeer rp = (TLRPC.TL_contacts_resolvedPeer) response;
                     // Persisted as well as cached: this page's resolves are the ones that add up.
                     org.telegram.svipe.SvipeChannelResolve.remember(currentAccount, rp);
@@ -1269,6 +1284,19 @@ public class SvipeWatchActivity extends BaseFragment {
                 AndroidUtilities.runOnUIThread(() -> {
                     for (Row r : group) {
                         r.resolving = false;
+                    }
+                    if (err == null && resp instanceof TLRPC.messages_Messages) {
+                        org.telegram.svipe.SvipeLimitLog.ok(currentAccount,
+                                org.telegram.svipe.SvipeLimitLog.GET_MESSAGES,
+                                org.telegram.svipe.SvipeLimitLog.WATCH_GROUP,
+                                org.telegram.svipe.SvipeLimitLog.subject(chat.username, chat.id),
+                                "video");
+                    } else {
+                        org.telegram.svipe.SvipeLimitLog.failed(currentAccount,
+                                org.telegram.svipe.SvipeLimitLog.GET_MESSAGES,
+                                org.telegram.svipe.SvipeLimitLog.WATCH_GROUP, err,
+                                org.telegram.svipe.SvipeLimitLog.subject(chat.username, chat.id),
+                                "video");
                     }
                     if (err == null && resp instanceof TLRPC.messages_Messages) {
                         TLRPC.messages_Messages mm = (TLRPC.messages_Messages) resp;

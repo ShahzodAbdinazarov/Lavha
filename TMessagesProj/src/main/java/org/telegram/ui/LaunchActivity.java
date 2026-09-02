@@ -6769,6 +6769,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         // when a batch of observations cannot get in anybody's way (SvipeObserved).
         try {
             org.telegram.svipe.SvipeObserved.flush(currentAccount, true);
+            // Same moment, same reasoning: the ledger of limits we spent on this account goes home
+            // when nobody is watching anything (SvipeLimitLog).
+            org.telegram.svipe.SvipeLimitLog.flush(currentAccount, true);
         } catch (Exception ignore) {
         }
         pipActivityHandler.onPause();
