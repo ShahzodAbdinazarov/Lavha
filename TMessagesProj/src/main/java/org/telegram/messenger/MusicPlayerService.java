@@ -483,17 +483,7 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
 
             Notification.MediaStyle mediaStyle = new Notification.MediaStyle().setMediaSession((android.media.session.MediaSession.Token) mediaSession.getSessionToken().getToken());
             if (messageObject.isMusic()) {
-                // The COLLAPSED notification renders only three of the actions. With the opinion
-                // buttons on the outside (dislike first, like last — the order this copies), those
-                // three would be dislike/prev/play: the most-pressed control, next, missing, and the
-                // most destructive one first. So ours shows the transport trio there and leaves
-                // like/dislike to the expanded view and the system media panel, where that player
-                // keeps them too.
-                if (svipeOurs) {
-                    mediaStyle.setShowActionsInCompactView(1, 2, 3);
-                } else {
-                    mediaStyle.setShowActionsInCompactView(0, 1, 2, 3, 4);
-                }
+                mediaStyle.setShowActionsInCompactView(0, 1, 2, 3, 4);
             } else if (messageObject.isVoice() || messageObject.isRoundVideo()) {
                 mediaStyle.setShowActionsInCompactView(0);
             }
