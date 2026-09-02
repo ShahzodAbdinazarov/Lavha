@@ -381,6 +381,9 @@ public class NotificationCenter {
     // Svipe: the favourite-singers set changed. Global for the same reason as the songs above —
     // an artist row and the artist page can both be on screen at once.
     public static final int svipeArtistFavouritesChanged = totalEvents++;
+    // Svipe: the refused songs/singers set changed. Global for the same reason as the two above — a
+    // song page and the mini player can both be showing state derived from it at once.
+    public static final int svipeMusicDislikesChanged = totalEvents++;
     // Svipe: archived profile photos arrived from the shared pool for a user (arg0 = userId), so the
     // profile-images tab has more to show than when it was built. Per-account, like the fetch itself.
     public static final int svipeAvatarArchiveUpdated = totalEvents++;

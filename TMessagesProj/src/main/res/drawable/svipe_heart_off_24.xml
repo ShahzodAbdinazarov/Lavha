@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  "Not this" — the heart, struck through.
+
+  A dislike has no icon of its own in this app, and inventing an unrelated one (a thumb, a cross)
+  would make the menu item read as a different feature from the heart it is the opposite of. So the
+  mark IS the like button with a stroke across it — the same word people already read on a muted bell
+  or a crossed-out eye.
+
+  An OUTLINE heart, not the filled one: filled is the active like state, and a filled heart with a
+  slash would read as "you liked this, and something is wrong with that".
+
+  One colour, deliberately. A slash usually carries a background-coloured stroke underneath it so it
+  stays legible where it crosses the glyph — but every icon in a Telegram menu is tinted with a single
+  colour at runtime, so a second tone would either be repainted with the first (no gap at all) or stay
+  black in a dark theme. At 24dp, with the slash crossing the heart's outline at a steep angle, the
+  two strokes read apart without it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- The heart outline: two lobes meeting at the top notch, down to the point at (12, 20.1). -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,20.1 C12,20.1 3.6,15.3 3.6,9.5 C3.6,6.9 5.6,5 8,5 C9.7,5 11.2,5.9 12,7.4 C12.8,5.9 14.3,5 16,5 C18.4,5 20.4,6.9 20.4,9.5 C20.4,15.3 12,20.1 12,20.1 Z" />
+
+    <!-- The refusal. Corner to corner so it reads as a strike-through rather than a stray line. -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M4.4,3.7 L20.1,19.4" />
+</vector>

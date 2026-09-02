@@ -143,6 +143,12 @@
     <string name="SvipeFavouritesEmpty">Yoqtirgan qo\'shiqlaringiz shu yerda ko\'rinadi</string>
     <string name="SvipeMusicLike">Sevimli</string>
     <string name="SvipeMusicLiked">Sevimlida</string>
+    <string name="SvipeMusicDislike">Tavsiya qilinmasin</string>
+    <string name="SvipeMusicUndislike">Yana tavsiya qilinsin</string>
+    <string name="SvipeMusicDislikedSong">Bu qo\'shiq endi tavsiya qilinmaydi</string>
+    <string name="SvipeMusicDislikedArtist">Bu ijrochi endi tavsiya qilinmaydi</string>
+    <string name="SvipeMusicUndislikedSong">Bu qo\'shiq yana tavsiya qilinishi mumkin</string>
+    <string name="SvipeMusicUndislikedArtist">Bu ijrochi yana tavsiya qilinishi mumkin</string>
 
     <!-- Svipe favourite singers -->
     <string name="SvipeFavouriteSingers">Sevimli qo\'shiqchilar</string>

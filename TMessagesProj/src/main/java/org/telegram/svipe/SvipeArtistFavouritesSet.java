@@ -64,6 +64,27 @@ public class SvipeArtistFavouritesSet {
         load();
     }
 
+    /**
+     * Forget a singer's follow LOCALLY, without telling the server — the twin of
+     * {@link SvipeFavouritesSet#removeSong}. The server un-follows as part of the dislike write, so
+     * a push from here would repeat work and could race it.
+     */
+    public void removeArtist(long artistId) {
+        if (artistId <= 0) {
+            return;
+        }
+        final boolean removed;
+        synchronized (this) {
+            removed = items.remove(artistId) != null;
+            if (removed) {
+                persistLocked();
+            }
+        }
+        if (removed) {
+            notifyChanged();
+        }
+    }
+
     public synchronized boolean isFavourite(long artistId) {
         return artistId > 0 && items.containsKey(artistId);
     }

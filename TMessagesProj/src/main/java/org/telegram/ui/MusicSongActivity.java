@@ -33,11 +33,15 @@ import org.telegram.svipe.SvipeVibe;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.svipe.SvipeMusicDislikes;
 import org.telegram.ui.Cells.SharedAudioCell;
 import org.telegram.ui.Cells.UserCell;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.ActionBar.ActionBarMenu;
+import org.telegram.ui.ActionBar.ActionBarMenuItem;
+import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
 import org.telegram.ui.Components.ProfileActionsView;
 import org.telegram.ui.Components.RadialProgressView;
 import org.telegram.ui.Components.RecyclerListView;
@@ -257,17 +261,63 @@ public class MusicSongActivity extends ProfileStyleActivity implements Notificat
         return f;
     }
 
+    /** ⋮ item ids. Local to this page — the action bar dispatches by id within one fragment. */
+    private static final int MENU_DISLIKE = 1;
+
+    private ActionBarMenuSubItem dislikeItem;
+
+    @Override
+    protected void onCreateActionBarMenu(ActionBarMenu menu) {
+        if (songId <= 0) {
+            return;   // a Deezer placeholder has no catalog row yet, so there is nothing to refuse
+        }
+        final ActionBarMenuItem other = menu.addItem(0, R.drawable.ic_ab_other);
+        other.setContentDescription(getString(R.string.AccDescrMoreOptions));
+        dislikeItem = other.addSubItem(MENU_DISLIKE, R.drawable.svipe_heart_off_24,
+                getString(R.string.SvipeMusicDislike));
+        refreshDislikeItem();
+    }
+
+    @Override
+    protected void onActionBarItemClick(int id) {
+        if (id != MENU_DISLIKE) {
+            return;
+        }
+        final boolean nowDisliked = SvipeMusicDislikes.getInstance(currentAccount).toggleSong(songId);
+        refreshDislikeItem();
+        // Said out loud, because nothing else on this page changes: a refusal is an instruction to a
+        // recommender the user cannot see, and a menu that closes in silence looks like it did nothing.
+        BulletinFactory.of(this).createSimpleBulletin(
+                nowDisliked ? R.raw.chats_infotip : R.raw.contact_check,
+                getString(nowDisliked ? R.string.SvipeMusicDislikedSong
+                        : R.string.SvipeMusicUndislikedSong)).show();
+    }
+
+    private void refreshDislikeItem() {
+        if (dislikeItem == null) {
+            return;
+        }
+        final boolean disliked = SvipeMusicDislikes.getInstance(currentAccount).isSongDisliked(songId);
+        dislikeItem.setTextAndIcon(getString(disliked ? R.string.SvipeMusicUndislike
+                : R.string.SvipeMusicDislike), R.drawable.svipe_heart_off_24);
+    }
+
     @Override
     public boolean onFragmentCreate() {
         // GLOBAL, not per-account: the heart must also light up when the song is favourited from the
         // mini player or the Music tab, which post globally (see FragmentContextView).
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeFavouritesChanged);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeMusicDislikesChanged);
+        // One-shot per process: what this user refused on another device, so the menu opens with the
+        // right word on it rather than offering to dislike something they already did.
+        SvipeMusicDislikes.getInstance(currentAccount).syncFromServer();
         return super.onFragmentCreate();
     }
 
     @Override
     public void onFragmentDestroy() {
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeFavouritesChanged);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeMusicDislikesChanged);
         super.onFragmentDestroy();
     }
 
@@ -275,6 +325,8 @@ public class MusicSongActivity extends ProfileStyleActivity implements Notificat
     public void didReceivedNotification(int id, int account, Object... args) {
         if (id == NotificationCenter.svipeFavouritesChanged) {
             refreshFavouriteAction();
+        } else if (id == NotificationCenter.svipeMusicDislikesChanged) {
+            refreshDislikeItem();
         }
     }
 

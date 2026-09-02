@@ -64,6 +64,29 @@ public class SvipeFavouritesSet {
         load();
     }
 
+    /**
+     * Forget a catalog song's favourite LOCALLY, without telling the server.
+     *
+     * <p>For one caller only: a dislike landed, and the server dropped the favourite as part of that
+     * same write ({@link SvipeMusicDislikes}). Pushing a second removal from here would be a request
+     * for work already done, and — worse — one that could race the dislike itself.
+     */
+    public void removeSong(long songId) {
+        if (songId <= 0) {
+            return;
+        }
+        final boolean removed;
+        synchronized (this) {
+            removed = items.remove("song:" + songId) != null;
+            if (removed) {
+                persistLocked();
+            }
+        }
+        if (removed) {
+            notifyChanged();
+        }
+    }
+
     public synchronized boolean isFavourite(String key) {
         return key != null && items.containsKey(key);
     }

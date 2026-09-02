@@ -426,6 +426,105 @@ public class SvipeMusic {
         }
     }
 
+    // ---------------- Dislikes (song + singer) ----------------
+
+    /**
+     * The refusal API. Deliberately thinner than favourites: nobody browses their dislikes, so there
+     * is no paged list — {@link #dislikes} returns both id sets at once and that is the whole read
+     * side.
+     *
+     * <p>The ack carries {@code is_favourite} because disliking DROPS a favourite on the server. The
+     * client must adopt that in the same callback, or the heart on the page would stay filled after
+     * the user has just said the opposite.
+     */
+    public interface DislikeCallback {
+        void onResult(long id, boolean isDisliked, boolean isFavourite, String error);
+    }
+
+    public interface DislikesCallback {
+        /** Null lists mean the call failed — keep whatever is cached rather than clearing it. */
+        void onResult(java.util.List<Long> songIds, java.util.List<Long> artistIds, String error);
+    }
+
+    public static void dislikeSong(int account, long songId, DislikeCallback cb) {
+        withToken(account, () -> dislikeAck(cb, songId, false, false, "auth"),
+            token -> dislikeRequest(account, "song", songId, true, token, false, cb));
+    }
+
+    public static void undislikeSong(int account, long songId, DislikeCallback cb) {
+        withToken(account, () -> dislikeAck(cb, songId, true, false, "auth"),
+            token -> dislikeRequest(account, "song", songId, false, token, false, cb));
+    }
+
+    public static void dislikeArtist(int account, long artistId, DislikeCallback cb) {
+        withToken(account, () -> dislikeAck(cb, artistId, false, false, "auth"),
+            token -> dislikeRequest(account, "artist", artistId, true, token, false, cb));
+    }
+
+    public static void undislikeArtist(int account, long artistId, DislikeCallback cb) {
+        withToken(account, () -> dislikeAck(cb, artistId, true, false, "auth"),
+            token -> dislikeRequest(account, "artist", artistId, false, token, false, cb));
+    }
+
+    private static void dislikeRequest(int account, String kind, long id, boolean add, String token,
+                                       boolean retried, DislikeCallback cb) {
+        final String idField = "song".equals(kind) ? "song_id" : "artist_id";
+        final String path = "/v1/music/" + kind + "/" + id + "/dislike";
+        SvipeApi.JsonCallback handler = (res, code, err) -> {
+            if (code == 401 && !retried) {
+                reauth(account, () -> dislikeAck(cb, id, !add, false, "auth"),
+                    t2 -> dislikeRequest(account, kind, id, add, t2, true, cb));
+                return;
+            }
+            // A bodyless response is an error: the contract always answers with a JSON ack, so a
+            // missing id means the write did not happen and the caller must not settle on it.
+            if (res == null || !res.has(idField)) {
+                dislikeAck(cb, id, !add, false, err != null ? err : ("http " + code));
+                return;
+            }
+            dislikeAck(cb, res.optLong(idField), res.optBoolean("is_disliked", add),
+                    res.optBoolean("is_favourite", false), null);
+        };
+        if (add) {
+            SvipeApi.post(path, new JSONObject(), token, handler);
+        } else {
+            SvipeApi.delete(path, token, handler);
+        }
+    }
+
+    private static void dislikeAck(DislikeCallback cb, long id, boolean isDisliked,
+                                   boolean isFavourite, String error) {
+        if (cb != null) {
+            cb.onResult(id, isDisliked, isFavourite, error);
+        }
+    }
+
+    /** Both refusal sets in one call — what the menus are drawn from. */
+    public static void dislikes(int account, DislikesCallback cb) {
+        withToken(account, () -> { if (cb != null) cb.onResult(null, null, "auth"); }, token ->
+            SvipeApi.get("/v1/music/dislikes", token, (res, code, err) -> {
+                if (cb == null) {
+                    return;
+                }
+                if (res == null) {
+                    cb.onResult(null, null, err != null ? err : ("http " + code));
+                    return;
+                }
+                cb.onResult(longs(res.optJSONArray("song_ids")), longs(res.optJSONArray("artist_ids")), null);
+            }));
+    }
+
+    private static java.util.ArrayList<Long> longs(org.json.JSONArray arr) {
+        final java.util.ArrayList<Long> out = new java.util.ArrayList<>();
+        for (int i = 0; arr != null && i < arr.length(); i++) {
+            final long v = arr.optLong(i);
+            if (v != 0) {
+                out.add(v);
+            }
+        }
+        return out;
+    }
+
     // ---------------- Favourite singers ----------------
 
     /** This user's favourite artists, newest first. Same {items, next_offset} shape as the songs. */

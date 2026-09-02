@@ -22,6 +22,7 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.svipe.SvipeArtistFavourite;
 import org.telegram.svipe.SvipeArtistFavouritesSet;
+import org.telegram.svipe.SvipeMusicDislikes;
 import org.telegram.svipe.SvipeMusic;
 import org.telegram.svipe.SvipeMusicQueue;
 import org.telegram.svipe.SvipeMusicResolver;
@@ -29,6 +30,10 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.GraySectionCell;
 import org.telegram.ui.Cells.SharedAudioCell;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.ActionBar.ActionBarMenu;
+import org.telegram.ui.ActionBar.ActionBarMenuItem;
+import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.ProfileActionsView;
 import org.telegram.ui.Components.RadialProgressView;
 import org.telegram.ui.Components.RecyclerListView;
@@ -191,18 +196,62 @@ public class MusicArtistActivity extends ProfileStyleActivity implements Notific
         return f;
     }
 
+    /** ⋮ item ids. Local to this page — the action bar dispatches by id within one fragment. */
+    private static final int MENU_DISLIKE = 1;
+
+    private ActionBarMenuSubItem dislikeItem;
+
+    @Override
+    protected void onCreateActionBarMenu(ActionBarMenu menu) {
+        if (artistId <= 0) {
+            return;   // a Deezer placeholder artist has no catalog row to refuse
+        }
+        final ActionBarMenuItem other = menu.addItem(0, R.drawable.ic_ab_other);
+        other.setContentDescription(getString(R.string.AccDescrMoreOptions));
+        dislikeItem = other.addSubItem(MENU_DISLIKE, R.drawable.svipe_heart_off_24,
+                getString(R.string.SvipeMusicDislike));
+        refreshDislikeItem();
+    }
+
+    @Override
+    protected void onActionBarItemClick(int id) {
+        if (id != MENU_DISLIKE) {
+            return;
+        }
+        final boolean nowDisliked = SvipeMusicDislikes.getInstance(currentAccount).toggleArtist(artistId);
+        refreshDislikeItem();
+        // Refusing a singer refuses their catalog, which is a bigger thing than refusing one song —
+        // so it is worth saying, and the wording says "singer" rather than "this".
+        BulletinFactory.of(this).createSimpleBulletin(
+                nowDisliked ? R.raw.chats_infotip : R.raw.contact_check,
+                getString(nowDisliked ? R.string.SvipeMusicDislikedArtist
+                        : R.string.SvipeMusicUndislikedArtist)).show();
+    }
+
+    private void refreshDislikeItem() {
+        if (dislikeItem == null) {
+            return;
+        }
+        final boolean disliked = SvipeMusicDislikes.getInstance(currentAccount).isArtistDisliked(artistId);
+        dislikeItem.setTextAndIcon(getString(disliked ? R.string.SvipeMusicUndislike
+                : R.string.SvipeMusicDislike), R.drawable.svipe_heart_off_24);
+    }
+
     @Override
     public boolean onFragmentCreate() {
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeArtistFavouritesChanged);
         // One-shot per process, so the first artist page opened pulls the favourite singers the user
         // starred on another device. The song set gets the same treatment from the Music tab.
         SvipeArtistFavouritesSet.getInstance(currentAccount).syncFromServer();
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.svipeMusicDislikesChanged);
+        SvipeMusicDislikes.getInstance(currentAccount).syncFromServer();
         return super.onFragmentCreate();
     }
 
     @Override
     public void onFragmentDestroy() {
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeArtistFavouritesChanged);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.svipeMusicDislikesChanged);
         super.onFragmentDestroy();
     }
 
@@ -210,6 +259,8 @@ public class MusicArtistActivity extends ProfileStyleActivity implements Notific
     public void didReceivedNotification(int id, int account, Object... args) {
         if (id == NotificationCenter.svipeArtistFavouritesChanged) {
             refreshFavouriteAction();
+        } else if (id == NotificationCenter.svipeMusicDislikesChanged) {
+            refreshDislikeItem();
         }
     }
 

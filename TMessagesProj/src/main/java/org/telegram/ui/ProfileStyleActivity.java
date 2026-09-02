@@ -38,6 +38,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.ActionBarMenu;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.SimpleTextView;
 import org.telegram.ui.ActionBar.Theme;
@@ -142,6 +143,20 @@ public abstract class ProfileStyleActivity extends BaseFragment {
     // ---- hooks for subclasses ----
 
     protected abstract RecyclerListView.SelectionAdapter createListAdapter();
+
+    /**
+     * Add the top-right (⋮) items. Default: none, and then no menu button is drawn at all.
+     *
+     * <p>Separate from {@link #onCreateActions}: the action row is what the page is FOR (play, like,
+     * share) and the menu is what it can also do — a page that puts everything in one of the two ends
+     * up with either a row nobody can read or a menu nobody opens.
+     */
+    protected void onCreateActionBarMenu(ActionBarMenu menu) {
+    }
+
+    /** A top-right menu item was tapped. Back (-1) is handled before this and never arrives here. */
+    protected void onActionBarItemClick(int id) {
+    }
 
     /** Add buttons via actionsView.addAction(...). The row is hidden entirely if nothing is added. */
     protected void onCreateActions(ProfileActionsView view) {
@@ -458,9 +473,15 @@ public abstract class ProfileStyleActivity extends BaseFragment {
             public void onItemClick(int id) {
                 if (id == -1) {
                     finishFragment();
+                    return;
                 }
+                onActionBarItemClick(id);
             }
         });
+        // The top-right menu, for pages that have one. Built here rather than in each subclass's
+        // createView so the item sits in the same actionBar this class configures — one that adds it
+        // to a menu of its own would get a second, differently-themed bar over the cover.
+        onCreateActionBarMenu(actionBar.createMenu());
 
         frameLayout = new NestedFrameLayout(context) {
             private boolean ignoreLayout;

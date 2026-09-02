@@ -406,6 +406,12 @@
     <string name="SvipeFavouritesEmpty">Песни, которые вам нравятся, появятся здесь</string>
     <string name="SvipeMusicLike">В избранное</string>
     <string name="SvipeMusicLiked">В избранном</string>
+    <string name="SvipeMusicDislike">Не рекомендовать</string>
+    <string name="SvipeMusicUndislike">Рекомендовать снова</string>
+    <string name="SvipeMusicDislikedSong">Эта песня больше не будет рекомендоваться</string>
+    <string name="SvipeMusicDislikedArtist">Этот исполнитель больше не будет рекомендоваться</string>
+    <string name="SvipeMusicUndislikedSong">Эта песня снова может рекомендоваться</string>
+    <string name="SvipeMusicUndislikedArtist">Этот исполнитель снова может рекомендоваться</string>
 
     <!-- Svipe favourite singers -->
     <string name="SvipeFavouriteSingers">Любимые исполнители</string>

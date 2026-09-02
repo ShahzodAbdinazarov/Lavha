@@ -11101,6 +11101,12 @@
     <string name="SvipeFavouritesEmpty">Songs you love will show up here</string>
     <string name="SvipeMusicLike">Like</string>
     <string name="SvipeMusicLiked">Liked</string>
+    <string name="SvipeMusicDislike">Don\'t recommend</string>
+    <string name="SvipeMusicUndislike">Recommend again</string>
+    <string name="SvipeMusicDislikedSong">This song will not be recommended</string>
+    <string name="SvipeMusicDislikedArtist">This singer will not be recommended</string>
+    <string name="SvipeMusicUndislikedSong">This song can be recommended again</string>
+    <string name="SvipeMusicUndislikedArtist">This singer can be recommended again</string>
 
     <!-- Svipe favourite singers -->
     <string name="SvipeFavouriteSingers">Favourite singers</string>
