@@ -483,7 +483,17 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
 
             Notification.MediaStyle mediaStyle = new Notification.MediaStyle().setMediaSession((android.media.session.MediaSession.Token) mediaSession.getSessionToken().getToken());
             if (messageObject.isMusic()) {
-                mediaStyle.setShowActionsInCompactView(0, 1, 2, 3, 4);
+                // The COLLAPSED notification renders only three of the actions. With the opinion
+                // buttons on the outside (dislike first, like last — the order this copies), those
+                // three would be dislike/prev/play: the most-pressed control, next, missing, and the
+                // most destructive one first. So ours shows the transport trio there and leaves
+                // like/dislike to the expanded view and the system media panel, where that player
+                // keeps them too.
+                if (svipeOurs) {
+                    mediaStyle.setShowActionsInCompactView(1, 2, 3);
+                } else {
+                    mediaStyle.setShowActionsInCompactView(0, 1, 2, 3, 4);
+                }
             } else if (messageObject.isVoice() || messageObject.isRoundVideo()) {
                 mediaStyle.setShowActionsInCompactView(0);
             }
@@ -537,7 +547,7 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                 if (messageObject.isMusic()) {
                     if (svipeOurs) {
                         playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                                NOTIFY_LIKE, svipeLikeTitle, svipeLikeIcon).build());
+                                NOTIFY_DISLIKE, svipeDislikeTitle, svipeDislikeIcon).build());
                     } else {
                         int shuffleIcon = SharedConfig.shuffleMusic ? R.drawable.player_new_shuffle : R.drawable.player_new_shuffle_off;
                         playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
@@ -551,7 +561,7 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                 if (messageObject.isMusic()) {
                     if (svipeOurs) {
                         playbackState.addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
-                                NOTIFY_DISLIKE, svipeDislikeTitle, svipeDislikeIcon).build());
+                                NOTIFY_LIKE, svipeLikeTitle, svipeLikeIcon).build());
                     } else {
                         int repeatIcon;
                         switch (SharedConfig.repeatMode) {
@@ -566,7 +576,7 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                 final String playPauseTitle = isPlaying ? LocaleController.getString(R.string.AccActionPause) : LocaleController.getString(R.string.AccActionPlay);
                 if (messageObject.isMusic()) {
                     if (svipeOurs) {
-                        bldr.addAction(new Notification.Action.Builder(svipeLikeIcon, svipeLikeTitle, pendingLike).build());
+                        bldr.addAction(new Notification.Action.Builder(svipeDislikeIcon, svipeDislikeTitle, pendingDislike).build());
                     } else {
                         int shuffleIcon = SharedConfig.shuffleMusic ? R.drawable.player_new_shuffle : R.drawable.player_new_shuffle_off;
                         bldr.addAction(new Notification.Action.Builder(shuffleIcon, LocaleController.getString(R.string.ShuffleList), pendingShuffle).build());
@@ -577,7 +587,7 @@ public class MusicPlayerService extends Service implements NotificationCenter.No
                 if (messageObject.isMusic()) {
                     bldr.addAction(new Notification.Action.Builder(R.drawable.ic_action_next, nextDescription, pendingNext).build());
                     if (svipeOurs) {
-                        bldr.addAction(new Notification.Action.Builder(svipeDislikeIcon, svipeDislikeTitle, pendingDislike).build());
+                        bldr.addAction(new Notification.Action.Builder(svipeLikeIcon, svipeLikeTitle, pendingLike).build());
                     } else {
                         int repeatIcon;
                         switch (SharedConfig.repeatMode) {
