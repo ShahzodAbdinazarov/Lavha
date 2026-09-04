@@ -12,6 +12,7 @@ import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Seamless auth for the forked client, fully invisible in the UI. Token chain:
@@ -80,12 +81,16 @@ public class SvipeAuth {
         // answer is not wasted — the token it stores is picked up by the next ensureToken call.
         final AtomicBoolean settled = new AtomicBoolean();
         final long startedAt = System.currentTimeMillis();
+        // Which leg of the chain actually answered (or, for the web-app leg specifically, why it
+        // didn't) — the one thing a log line on someone else's phone can never tell us. See authChain.
+        final AtomicReference<String> leg = new AtomicReference<>("none");
         final TokenCallback finish = token -> {
             if (!settled.compareAndSet(false, true)) return;
             // Auth is the first thing standing between a new user and their first reel, and the one
             // step we cannot see from a log line on someone else's phone.
             SvipePerf.sample("auth_latency", System.currentTimeMillis() - startedAt)
                     .context(token != null ? "ok" : "failed")
+                    .extra("leg", leg.get())
                     .submit(account);
             final java.util.ArrayList<TokenCallback> waiters;
             synchronized (inFlight) {
@@ -104,7 +109,7 @@ public class SvipeAuth {
                 finish.run(null);
             }
         }, CHAIN_DEADLINE_MS);
-        authChain(account, finish);
+        authChain(account, finish, leg);
     }
 
     /**
@@ -132,15 +137,17 @@ public class SvipeAuth {
     /** Long enough for a flapping network or a cold MTProto to settle, short enough to feel instant. */
     private static final long AUTH_RETRY_DELAY_MS = 2500;
 
-    private static void authChain(int account, TokenCallback cb) {
+    private static void authChain(int account, TokenCallback cb, AtomicReference<String> leg) {
         final long deadlineAt = System.currentTimeMillis() + CHAIN_DEADLINE_MS;
         refreshToken(account, refreshed -> {
             if (refreshed != null) {
+                leg.set("refresh");
                 cb.run(refreshed);
                 return;
             }
-            webAppAuth(account, webApp -> {
+            webAppAuth(account, leg, webApp -> {
                 if (webApp != null) {
+                    leg.set("webapp");
                     cb.run(webApp);
                     return;
                 }
@@ -150,10 +157,14 @@ public class SvipeAuth {
                 // and pretending otherwise would fire three backend calls plus a poll loop for a
                 // flow that cannot possibly complete.
                 if (!botKnown(account)) {
+                    leg.set(leg.get() + ";no_bot");
                     cb.run(null);
                     return;
                 }
-                legacyBotAuth(account, deadlineAt, cb);
+                legacyBotAuth(account, deadlineAt, token -> {
+                    if (token != null) leg.set("legacy");
+                    cb.run(token);
+                });
             });
         });
     }
@@ -189,9 +200,10 @@ public class SvipeAuth {
         });
     }
 
-    private static void webAppAuth(int account, TokenCallback cb) {
+    private static void webAppAuth(int account, AtomicReference<String> leg, TokenCallback cb) {
         resolveBot(account, botId -> {
             if (botId == 0) {
+                leg.set("webapp_fail:bot_unresolved");
                 AndroidUtilities.runOnUIThread(() -> cb.run(null));
                 return;
             }
@@ -211,8 +223,10 @@ public class SvipeAuth {
                 String initData = null;
                 if (error == null && response instanceof TLRPC.TL_webViewResultUrl) {
                     initData = SvipeInitData.extract(((TLRPC.TL_webViewResultUrl) response).url);
+                    if (initData == null) leg.set("webapp_fail:initdata_null");
                 } else if (error != null) {
                     FileLog.d("svipe: auth requestWebView failed: " + error.text);
+                    leg.set("webapp_fail:tg_" + safeTag(error.text));
                 }
                 if (initData == null) {
                     AndroidUtilities.runOnUIThread(() -> cb.run(null));
@@ -225,6 +239,7 @@ public class SvipeAuth {
                         storeTokens(account, res);
                         cb.run(res.optString("access_token"));
                     } else {
+                        leg.set("webapp_fail:backend_" + code);
                         cb.run(null);
                     }
                 });
@@ -232,10 +247,18 @@ public class SvipeAuth {
             AndroidUtilities.runOnUIThread(() -> {
                 if (answered.compareAndSet(false, true)) {
                     FileLog.d("svipe: auth requestWebView timed out");
+                    leg.set("webapp_fail:timeout");
                     cb.run(null);
                 }
             }, WEBVIEW_STEP_MS);
         });
+    }
+
+    /** A Telegram error string, safe to fold into a metric tag: short, no spaces/PII. */
+    private static String safeTag(String errorText) {
+        if (errorText == null || errorText.isEmpty()) return "unknown";
+        String t = errorText.replaceAll("[^A-Za-z0-9_]", "_");
+        return t.length() > 24 ? t.substring(0, 24) : t;
     }
 
     // ---- legacy deep-link flow (fallback only) ----
@@ -245,8 +268,14 @@ public class SvipeAuth {
             if (res == null) { cb.run(null); return; }
             String nonce = res.optString("nonce", null);
             if (nonce == null || nonce.isEmpty()) { cb.run(null); return; }
-            sendStartToBot(account, nonce);
-            pollToken(account, nonce, 0, deadlineAt, cb);
+            // Resolved once, then reused for both sending "/start" and cleaning the chat up
+            // afterwards — a second resolve would just be a cache hit, but there is no reason to
+            // pay it twice.
+            resolveBot(account, botId -> {
+                if (botId == 0) { cb.run(null); return; }
+                sendStartToBot(account, botId, nonce);
+                pollToken(account, botId, nonce, 0, deadlineAt, cb);
+            });
         });
     }
 
@@ -411,17 +440,14 @@ public class SvipeAuth {
         }
     }
 
-    private static void sendStartToBot(int account, String nonce) {
-        resolveBot(account, botId -> {
-            if (botId == 0) return;
-            AndroidUtilities.runOnUIThread(() -> {
-                try {
-                    SendMessagesHelper.SendMessageParams params =
-                            SendMessagesHelper.SendMessageParams.of("/start " + nonce, botId);
-                    params.notify = false;
-                    SendMessagesHelper.getInstance(account).sendMessage(params);
-                } catch (Exception ignore) {}
-            });
+    private static void sendStartToBot(int account, long botId, String nonce) {
+        AndroidUtilities.runOnUIThread(() -> {
+            try {
+                SendMessagesHelper.SendMessageParams params =
+                        SendMessagesHelper.SendMessageParams.of("/start " + nonce, botId);
+                params.notify = false;
+                SendMessagesHelper.getInstance(account).sendMessage(params);
+            } catch (Exception ignore) {}
         });
     }
 
@@ -430,19 +456,36 @@ public class SvipeAuth {
      * count, so a poll loop can never outlive the flow that started it and pile up on top of the
      * next one (callers retry on their own schedule).
      */
-    private static void pollToken(int account, String nonce, int attempt, long deadlineAt, TokenCallback cb) {
+    private static void pollToken(int account, long botId, String nonce, int attempt, long deadlineAt, TokenCallback cb) {
         if (attempt > 20 || System.currentTimeMillis() >= deadlineAt) { cb.run(null); return; }
         JSONObject body = new JSONObject();
         try { body.put("nonce", nonce); } catch (Exception ignore) {}
         SvipeApi.post("/v1/auth/telegram/poll", body, null, (res, code, err) -> {
             if (res != null && "ok".equals(res.optString("status"))) {
                 storeTokens(account, res);
+                cleanUpBotChat(account, botId);
                 cb.run(res.optString("access_token"));
             } else if (code == 404) {
                 cb.run(null);
             } else {
-                AndroidUtilities.runOnUIThread(() -> pollToken(account, nonce, attempt + 1, deadlineAt, cb), 1500);
+                AndroidUtilities.runOnUIThread(() -> pollToken(account, botId, nonce, attempt + 1, deadlineAt, cb), 1500);
             }
+        });
+    }
+
+    /**
+     * The legacy leg is the one path that is NOT invisible — it sends a real "/start" and the bot
+     * replies in a real chat. The moment that chat has done its job (the token is in hand), remove
+     * it again so the fallback leaves no more trace than the silent paths do. Best-effort: a user
+     * who deleted the chat themselves in the meantime, or is offline, just keeps whatever state they
+     * have — this is tidiness, not something anything else depends on.
+     */
+    private static void cleanUpBotChat(int account, long botId) {
+        if (botId == 0) return;
+        AndroidUtilities.runOnUIThread(() -> {
+            try {
+                MessagesController.getInstance(account).deleteDialog(botId, 0, true);
+            } catch (Exception ignore) {}
         });
     }
 
@@ -456,6 +499,12 @@ public class SvipeAuth {
             e.putString(SvipeConfig.PREF_REFRESH, refresh);
         }
         e.putLong(SvipeConfig.PREF_EXPIRES, System.currentTimeMillis() + res.optInt("expires_in", 3600) * 1000L);
-        e.apply();
+        // commit(), not apply(): this just paid for a whole auth round-trip (network + maybe a bot
+        // message the user SEES), and apply()'s write is only scheduled, not done — a process death
+        // moments later (a crash, a low-memory kill, someone force-closing a stuck-looking screen)
+        // can lose it before it reaches disk. The next launch then finds nothing cached and pays for
+        // the same round-trip again — which is exactly the repeated-/start pattern this was chasing.
+        // A few ms of synchronous I/O on login, which happens once an hour at most, is cheap insurance.
+        e.commit();
     }
 }
