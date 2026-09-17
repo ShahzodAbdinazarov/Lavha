@@ -4,6 +4,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.NotificationsController;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +28,19 @@ public final class SvipeSettingsSync {
     private static final long PUSH_DEBOUNCE_MS = 1500;
 
     private static Runnable pending;
+
+    /**
+     * The message-type exceptions, as the bucket names them and as the client stores them. A device
+     * that predates one of these sends no such key at all, and "not mentioned" is not "none" — a
+     * missing list leaves the local one alone rather than wiping it.
+     */
+    private static final String[] TYPE_LISTS = {
+            "muted_forwards", "notified_forwards", "muted_links", "notified_links",
+    };
+    private static final String[] TYPE_PREFIXES = {
+            NotificationsController.MUTE_FORWARDS_PREFIX, NotificationsController.NOTIFY_FORWARDS_PREFIX,
+            NotificationsController.MUTE_LINKS_PREFIX, NotificationsController.NOTIFY_LINKS_PREFIX,
+    };
 
     /** The bucket carries two rules; the later of the two is what the bucket is dated by. */
     private static long localUpdatedAt(int account) {
@@ -54,12 +68,11 @@ public final class SvipeSettingsSync {
             JSONArray arr = new JSONArray();
             for (Long id : SvipeBotMute.exceptions(account)) arr.put(id);
             value.put("bot_exceptions", arr);
-            JSONArray forwards = new JSONArray();
-            for (Long id : SvipeMessageTypeMute.mutedForwardDialogs(account)) forwards.put(id);
-            value.put("muted_forwards", forwards);
-            JSONArray notified = new JSONArray();
-            for (Long id : SvipeMessageTypeMute.notifiedForwardDialogs(account)) notified.put(id);
-            value.put("notified_forwards", notified);
+            for (int i = 0; i < TYPE_LISTS.length; i++) {
+                JSONArray ids = new JSONArray();
+                for (Long id : SvipeMessageTypeMute.dialogsFor(account, TYPE_PREFIXES[i])) ids.put(id);
+                value.put(TYPE_LISTS[i], ids);
+            }
 
             final JSONObject body = new JSONObject();
             body.put("value", value);
@@ -119,17 +132,12 @@ public final class SvipeSettingsSync {
                     SvipeBotMute.adopt(account, muted, exceptions, remoteAt);
                     // A device that predates message-type exceptions sends no such key at all, and
                     // "not mentioned" is not "none" — leave the local rule alone rather than wipe it.
-                    JSONArray forwards = value.optJSONArray("muted_forwards");
-                    if (forwards != null) {
+                    for (int t = 0; t < TYPE_LISTS.length; t++) {
+                        JSONArray ids = value.optJSONArray(TYPE_LISTS[t]);
+                        if (ids == null) continue;
                         List<Long> dialogs = new ArrayList<>();
-                        for (int i = 0; i < forwards.length(); i++) dialogs.add(forwards.optLong(i));
-                        SvipeMessageTypeMute.adopt(account, dialogs, remoteAt);
-                    }
-                    JSONArray notified = value.optJSONArray("notified_forwards");
-                    if (notified != null) {
-                        List<Long> dialogs = new ArrayList<>();
-                        for (int i = 0; i < notified.length(); i++) dialogs.add(notified.optLong(i));
-                        SvipeMessageTypeMute.adoptNotified(account, dialogs, remoteAt);
+                        for (int i = 0; i < ids.length(); i++) dialogs.add(ids.optLong(i));
+                        SvipeMessageTypeMute.adoptList(account, TYPE_PREFIXES[t], dialogs, remoteAt);
                     }
                 } catch (Exception e) {
                     FileLog.e(e);

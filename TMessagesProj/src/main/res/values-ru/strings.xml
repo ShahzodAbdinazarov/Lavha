@@ -605,4 +605,8 @@
     <string name="SvipeNotifyMuteForwardsInfo">Пересланные сообщения из этого чата приходят без звука. Вы всё равно их получаете и видите в чате.</string>
     <string name="SvipeNotifyForwards">Уведомлять о пересланных</string>
     <string name="SvipeNotifyForwardsInfo">Этот чат без звука, но пересланные сообщения из него всё равно уведомляют вас.</string>
+    <string name="SvipeNotifyMuteLinks">Без звука для сообщений со ссылками</string>
+    <string name="SvipeNotifyLinks">Уведомлять о сообщениях со ссылками</string>
+    <string name="SvipeNotifyMuteTypesInfo">Сообщения этих видов из этого чата приходят без звука. Вы всё равно их получаете и видите в чате.</string>
+    <string name="SvipeNotifyTypesInfo">Этот чат без звука, но сообщения этих видов из него всё равно уведомляют вас.</string>
 </resources>

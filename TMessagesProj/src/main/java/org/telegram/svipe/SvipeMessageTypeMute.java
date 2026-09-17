@@ -27,36 +27,36 @@ public final class SvipeMessageTypeMute {
 
     private SvipeMessageTypeMute() {}
 
+    public static boolean isMuted(int account, String prefix, long dialogId, long topicId) {
+        return notifications(account).getBoolean(prefixed(prefix, dialogId, topicId), false);
+    }
+
+    public static void setMuted(int account, String prefix, long dialogId, long topicId, boolean on) {
+        SharedPreferences.Editor e = notifications(account).edit();
+        if (on) {
+            e.putBoolean(prefixed(prefix, dialogId, topicId), true);
+        } else {
+            e.remove(prefixed(prefix, dialogId, topicId));
+        }
+        e.apply();
+        touch(account);
+        SvipeSettingsSync.push(account);
+    }
+
     public static boolean isForwardsMuted(int account, long dialogId, long topicId) {
-        return notifications(account).getBoolean(key(dialogId, topicId), false);
+        return isMuted(account, NotificationsController.MUTE_FORWARDS_PREFIX, dialogId, topicId);
     }
 
     public static void setForwardsMuted(int account, long dialogId, long topicId, boolean muted) {
-        SharedPreferences.Editor e = notifications(account).edit();
-        if (muted) {
-            e.putBoolean(key(dialogId, topicId), true);
-        } else {
-            e.remove(key(dialogId, topicId));
-        }
-        e.apply();
-        touch(account);
-        SvipeSettingsSync.push(account);
+        setMuted(account, NotificationsController.MUTE_FORWARDS_PREFIX, dialogId, topicId, muted);
     }
 
     public static boolean isForwardsNotified(int account, long dialogId, long topicId) {
-        return notifications(account).getBoolean(notifyKey(dialogId, topicId), false);
+        return isMuted(account, NotificationsController.NOTIFY_FORWARDS_PREFIX, dialogId, topicId);
     }
 
     public static void setForwardsNotified(int account, long dialogId, long topicId, boolean notify) {
-        SharedPreferences.Editor e = notifications(account).edit();
-        if (notify) {
-            e.putBoolean(notifyKey(dialogId, topicId), true);
-        } else {
-            e.remove(notifyKey(dialogId, topicId));
-        }
-        e.apply();
-        touch(account);
-        SvipeSettingsSync.push(account);
+        setMuted(account, NotificationsController.NOTIFY_FORWARDS_PREFIX, dialogId, topicId, notify);
     }
 
     /** Every dialog whose forwards notify despite the mute. */
@@ -64,26 +64,39 @@ public final class SvipeMessageTypeMute {
         return dialogsWith(account, NotificationsController.NOTIFY_FORWARDS_PREFIX);
     }
 
-    /** Every dialog whose forwards are silenced — what the other devices need to know. */
-    public static List<Long> mutedForwardDialogs(int account) {
-        return dialogsWith(account, NotificationsController.MUTE_FORWARDS_PREFIX);
+    public static List<Long> dialogsFor(int account, String prefix) {
+        return dialogsWith(account, prefix);
     }
 
-    public static void adoptNotified(int account, List<Long> dialogs, long updatedAt) {
+    /**
+     * Adopt one list from another device. Whatever is not on it is no longer set, so a switch turned
+     * OFF elsewhere travels just as well as one turned on. Does not push back.
+     */
+    public static void adoptList(int account, String prefix, List<Long> dialogs, long updatedAt) {
         Set<Long> wanted = new HashSet<>(dialogs);
         SharedPreferences.Editor e = notifications(account).edit();
-        for (Long id : notifiedForwardDialogs(account)) {
+        for (Long id : dialogsWith(account, prefix)) {
             if (!wanted.contains(id)) {
-                e.remove(notifyKey(id, 0));
+                e.remove(prefixed(prefix, id, 0));
             }
         }
         for (Long id : wanted) {
-            e.putBoolean(notifyKey(id, 0), true);
+            e.putBoolean(prefixed(prefix, id, 0), true);
         }
         e.apply();
         MessagesController.getMainSettings(account).edit()
                 .putLong(SvipeConfig.PREF_TYPE_MUTE_UPDATED, updatedAt).apply();
     }
+
+    private static String prefixed(String prefix, long dialogId, long topicId) {
+        return prefix + NotificationsController.getSharedPrefKey(dialogId, topicId);
+    }
+
+    /** Every dialog whose forwards are silenced — what the other devices need to know. */
+    public static List<Long> mutedForwardDialogs(int account) {
+        return dialogsWith(account, NotificationsController.MUTE_FORWARDS_PREFIX);
+    }
+
 
     private static String notifyKey(long dialogId, long topicId) {
         return NotificationsController.NOTIFY_FORWARDS_PREFIX + NotificationsController.getSharedPrefKey(dialogId, topicId);
@@ -116,25 +129,6 @@ public final class SvipeMessageTypeMute {
                 .putLong(SvipeConfig.PREF_TYPE_MUTE_UPDATED, System.currentTimeMillis()).apply();
     }
 
-    /**
-     * Adopt the list that arrived from another device: whatever is not on it is no longer muted,
-     * so a switch turned OFF elsewhere travels just as well as one turned on. Does not push back.
-     */
-    public static void adopt(int account, List<Long> dialogs, long updatedAt) {
-        Set<Long> wanted = new HashSet<>(dialogs);
-        SharedPreferences.Editor e = notifications(account).edit();
-        for (Long id : mutedForwardDialogs(account)) {
-            if (!wanted.contains(id)) {
-                e.remove(key(id, 0));
-            }
-        }
-        for (Long id : wanted) {
-            e.putBoolean(key(id, 0), true);
-        }
-        e.apply();
-        MessagesController.getMainSettings(account).edit()
-                .putLong(SvipeConfig.PREF_TYPE_MUTE_UPDATED, updatedAt).apply();
-    }
 
     /**
      * The verdict has to outlive the process. The server re-pushes a message that stays unread, and

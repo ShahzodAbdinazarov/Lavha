@@ -6246,6 +6246,29 @@ public class NotificationsController extends BaseController implements Notificat
     public static final String MUTE_FORWARDS_PREFIX = "svipe_mute_forwards_";
     /** The same exception the other way round: the chat is muted, this kind of message is not. */
     public static final String NOTIFY_FORWARDS_PREFIX = "svipe_notify_forwards_";
+    public static final String MUTE_LINKS_PREFIX = "svipe_mute_links_";
+    public static final String NOTIFY_LINKS_PREFIX = "svipe_notify_links_";
+
+    /** A message is of the "link" kind when it carries a URL — typed, hidden behind text, or previewed. */
+    public static boolean carriesLink(MessageObject messageObject) {
+        TLRPC.Message msg = messageObject == null ? null : messageObject.messageOwner;
+        if (msg == null) {
+            return false;
+        }
+        if (MessageObject.getMedia(msg) instanceof TLRPC.TL_messageMediaWebPage) {
+            return true;
+        }
+        if (msg.entities != null) {
+            for (int i = 0; i < msg.entities.size(); i++) {
+                TLRPC.MessageEntity entity = msg.entities.get(i);
+                if (entity instanceof TLRPC.TL_messageEntityUrl
+                        || entity instanceof TLRPC.TL_messageEntityTextUrl) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
     /**
      * The mirror of {@link #isMutedMessageType}: a chat the user has muted, kept muted, except for
@@ -6259,11 +6282,13 @@ public class NotificationsController extends BaseController implements Notificat
         if (messageObject.isReactionPush || messageObject.isStoryReactionPush || messageObject.isStoryPush) {
             return false;
         }
-        if (!MessageObject.isForwardedMessage(messageObject.messageOwner)) {
-            return false;
+        SharedPreferences prefs = getAccountInstance().getNotificationsSettings();
+        String key = getSharedPrefKey(dialogId, 0);
+        if (MessageObject.isForwardedMessage(messageObject.messageOwner)
+                && prefs.getBoolean(NOTIFY_FORWARDS_PREFIX + key, false)) {
+            return true;
         }
-        return getAccountInstance().getNotificationsSettings()
-                .getBoolean(NOTIFY_FORWARDS_PREFIX + getSharedPrefKey(dialogId, 0), false);
+        return carriesLink(messageObject) && prefs.getBoolean(NOTIFY_LINKS_PREFIX + key, false);
     }
 
     public boolean isMutedMessageType(long dialogId, MessageObject messageObject) {
@@ -6273,14 +6298,19 @@ public class NotificationsController extends BaseController implements Notificat
         if (messageObject.isReactionPush || messageObject.isStoryReactionPush || messageObject.isStoryPush) {
             return false;
         }
-        if (!MessageObject.isForwardedMessage(messageObject.messageOwner)) {
-            // A push-built message carries no fwd_from, so on its own it looks like any other
-            // message — including to the dialog list, which would paint the counter as if the
-            // phone had rung. The verdict already passed on this id is the missing evidence.
-            return isKnownMutedTypeMessage(dialogId, messageObject.getId());
+        SharedPreferences prefs = getAccountInstance().getNotificationsSettings();
+        String key = getSharedPrefKey(dialogId, 0);
+        if (MessageObject.isForwardedMessage(messageObject.messageOwner)
+                && prefs.getBoolean(MUTE_FORWARDS_PREFIX + key, false)) {
+            return true;
         }
-        return getAccountInstance().getNotificationsSettings()
-                .getBoolean(MUTE_FORWARDS_PREFIX + getSharedPrefKey(dialogId, 0), false);
+        if (carriesLink(messageObject) && prefs.getBoolean(MUTE_LINKS_PREFIX + key, false)) {
+            return true;
+        }
+        // A push-built message carries neither fwd_from nor entities, so on its own it looks like
+        // any other message — including to the dialog list, which would paint the counter as if the
+        // phone had rung. The verdict already passed on this id is the missing evidence.
+        return isKnownMutedTypeMessage(dialogId, messageObject.getId());
     }
 
     /**
@@ -6303,8 +6333,10 @@ public class NotificationsController extends BaseController implements Notificat
         if (deferred != null && deferred.contains(mid)) {
             return false;
         }
-        return getAccountInstance().getNotificationsSettings()
-                .getBoolean(MUTE_FORWARDS_PREFIX + getSharedPrefKey(dialogId, 0), false);
+        SharedPreferences prefs = getAccountInstance().getNotificationsSettings();
+        String key = getSharedPrefKey(dialogId, 0);
+        return prefs.getBoolean(MUTE_FORWARDS_PREFIX + key, false)
+                || prefs.getBoolean(MUTE_LINKS_PREFIX + key, false);
     }
 
     private void rememberDeferredTypeCheck(long dialogId, int mid) {

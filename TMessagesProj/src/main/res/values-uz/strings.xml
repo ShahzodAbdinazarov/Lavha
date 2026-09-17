@@ -332,4 +332,8 @@
     <string name="SvipeNotifyMuteForwardsInfo">Bu suhbatdagi yo\'naltirilgan xabarlar ovozsiz keladi. Ular baribir yetib keladi va suhbatda ko\'rinadi.</string>
     <string name="SvipeNotifyForwards">Yo\'naltirilgan xabarlar uchun bildirishnoma</string>
     <string name="SvipeNotifyForwardsInfo">Bu suhbat ovozsiz qilingan, lekin undan kelgan yo\'naltirilgan xabarlar baribir bildirishnoma beradi.</string>
+    <string name="SvipeNotifyMuteLinks">Havolali xabarlarni o\'chirish</string>
+    <string name="SvipeNotifyLinks">Havolali xabarlar uchun bildirishnoma</string>
+    <string name="SvipeNotifyMuteTypesInfo">Bu suhbatdan kelgan shu turdagi xabarlar ovozsiz keladi. Ular baribir yetib keladi va suhbatda ko\'rinadi.</string>
+    <string name="SvipeNotifyTypesInfo">Bu suhbat ovozsiz qilingan, lekin undan kelgan shu turdagi xabarlar baribir bildirishnoma beradi.</string>
 </resources>
