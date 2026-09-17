@@ -336,4 +336,12 @@
     <string name="SvipeNotifyLinks">Havolali xabarlar uchun bildirishnoma</string>
     <string name="SvipeNotifyMuteTypesInfo">Bu suhbatdan kelgan shu turdagi xabarlar ovozsiz keladi. Ular baribir yetib keladi va suhbatda ko\'rinadi.</string>
     <string name="SvipeNotifyTypesInfo">Bu suhbat ovozsiz qilingan, lekin undan kelgan shu turdagi xabarlar baribir bildirishnoma beradi.</string>
+    <string name="SvipeNotifyMuteMedia">Rasm va videolarni o\'chirish</string>
+    <string name="SvipeNotifyMedia">Rasm va videolar uchun bildirishnoma</string>
+    <string name="SvipeNotifyMuteVoice">Ovozli va video xabarlarni o\'chirish</string>
+    <string name="SvipeNotifyVoice">Ovozli va video xabarlar uchun bildirishnoma</string>
+    <string name="SvipeNotifyMuteStickers">Stiker va GIFlarni o\'chirish</string>
+    <string name="SvipeNotifyStickers">Stiker va GIFlar uchun bildirishnoma</string>
+    <string name="SvipeNotifyMuteFiles">Fayl va musiqani o\'chirish</string>
+    <string name="SvipeNotifyFiles">Fayl va musiqa uchun bildirishnoma</string>
 </resources>

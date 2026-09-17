@@ -6243,11 +6243,52 @@ public class NotificationsController extends BaseController implements Notificat
      * notification preferences (see ProfileNotificationsActivity) and is local — the server has no
      * field for it, so it is deliberately not part of updateServerNotificationsSettings.
      */
+    /**
+     * The kinds of message a chat can make an exception for. The pref key is built from the kind, so
+     * adding one is a string here plus a case in {@link #isKind} — and the storage, the dialog
+     * counter, the push machinery and the cross-install sync follow without further work.
+     */
+    public static final String[] MESSAGE_KINDS = {"forwards", "links", "media", "voice", "stickers", "files"};
+
+    public static String muteKindKey(String kind) {
+        return "svipe_mute_" + kind + "_";
+    }
+
+    public static String notifyKindKey(String kind) {
+        return "svipe_notify_" + kind + "_";
+    }
+
+    /** Kept for the two kinds that shipped first and are read by name elsewhere. */
     public static final String MUTE_FORWARDS_PREFIX = "svipe_mute_forwards_";
-    /** The same exception the other way round: the chat is muted, this kind of message is not. */
     public static final String NOTIFY_FORWARDS_PREFIX = "svipe_notify_forwards_";
     public static final String MUTE_LINKS_PREFIX = "svipe_mute_links_";
     public static final String NOTIFY_LINKS_PREFIX = "svipe_notify_links_";
+
+    public static boolean isKind(MessageObject messageObject, String kind) {
+        TLRPC.Message msg = messageObject == null ? null : messageObject.messageOwner;
+        if (msg == null) {
+            return false;
+        }
+        switch (kind) {
+            case "forwards":
+                return MessageObject.isForwardedMessage(msg);
+            case "links":
+                return carriesLink(messageObject);
+            case "media":
+                return messageObject.isPhoto() || (messageObject.isVideo() && !messageObject.isRoundVideo());
+            case "voice":
+                return messageObject.isVoice() || messageObject.isRoundVideo();
+            case "stickers":
+                return messageObject.isSticker() || messageObject.isAnimatedSticker() || messageObject.isGif();
+            case "files":
+                return messageObject.isMusic()
+                        || (messageObject.isDocument() && !messageObject.isSticker()
+                            && !messageObject.isAnimatedSticker() && !messageObject.isGif()
+                            && !messageObject.isVoice() && !messageObject.isRoundVideo()
+                            && !messageObject.isVideo());
+        }
+        return false;
+    }
 
     /** A message is of the "link" kind when it carries a URL — typed, hidden behind text, or previewed. */
     public static boolean carriesLink(MessageObject messageObject) {
@@ -6284,11 +6325,12 @@ public class NotificationsController extends BaseController implements Notificat
         }
         SharedPreferences prefs = getAccountInstance().getNotificationsSettings();
         String key = getSharedPrefKey(dialogId, 0);
-        if (MessageObject.isForwardedMessage(messageObject.messageOwner)
-                && prefs.getBoolean(NOTIFY_FORWARDS_PREFIX + key, false)) {
-            return true;
+        for (String kind : MESSAGE_KINDS) {
+            if (prefs.getBoolean(notifyKindKey(kind) + key, false) && isKind(messageObject, kind)) {
+                return true;
+            }
         }
-        return carriesLink(messageObject) && prefs.getBoolean(NOTIFY_LINKS_PREFIX + key, false);
+        return false;
     }
 
     public boolean isMutedMessageType(long dialogId, MessageObject messageObject) {
@@ -6300,12 +6342,10 @@ public class NotificationsController extends BaseController implements Notificat
         }
         SharedPreferences prefs = getAccountInstance().getNotificationsSettings();
         String key = getSharedPrefKey(dialogId, 0);
-        if (MessageObject.isForwardedMessage(messageObject.messageOwner)
-                && prefs.getBoolean(MUTE_FORWARDS_PREFIX + key, false)) {
-            return true;
-        }
-        if (carriesLink(messageObject) && prefs.getBoolean(MUTE_LINKS_PREFIX + key, false)) {
-            return true;
+        for (String kind : MESSAGE_KINDS) {
+            if (prefs.getBoolean(muteKindKey(kind) + key, false) && isKind(messageObject, kind)) {
+                return true;
+            }
         }
         // A push-built message carries neither fwd_from nor entities, so on its own it looks like
         // any other message — including to the dialog list, which would paint the counter as if the
@@ -6335,8 +6375,12 @@ public class NotificationsController extends BaseController implements Notificat
         }
         SharedPreferences prefs = getAccountInstance().getNotificationsSettings();
         String key = getSharedPrefKey(dialogId, 0);
-        return prefs.getBoolean(MUTE_FORWARDS_PREFIX + key, false)
-                || prefs.getBoolean(MUTE_LINKS_PREFIX + key, false);
+        for (String kind : MESSAGE_KINDS) {
+            if (prefs.getBoolean(muteKindKey(kind) + key, false)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void rememberDeferredTypeCheck(long dialogId, int mid) {

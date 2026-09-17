@@ -11557,4 +11557,12 @@
     <string name="SvipeNotifyLinks">Notify for messages with links</string>
     <string name="SvipeNotifyMuteTypesInfo">Messages of these kinds from this chat arrive silently. You still receive them and see them in the chat.</string>
     <string name="SvipeNotifyTypesInfo">This chat is muted, but messages of these kinds from it still notify you.</string>
+    <string name="SvipeNotifyMuteMedia">Mute photos and videos</string>
+    <string name="SvipeNotifyMedia">Notify for photos and videos</string>
+    <string name="SvipeNotifyMuteVoice">Mute voice and video messages</string>
+    <string name="SvipeNotifyVoice">Notify for voice and video messages</string>
+    <string name="SvipeNotifyMuteStickers">Mute stickers and GIFs</string>
+    <string name="SvipeNotifyStickers">Notify for stickers and GIFs</string>
+    <string name="SvipeNotifyMuteFiles">Mute files and music</string>
+    <string name="SvipeNotifyFiles">Notify for files and music</string>
 </resources>

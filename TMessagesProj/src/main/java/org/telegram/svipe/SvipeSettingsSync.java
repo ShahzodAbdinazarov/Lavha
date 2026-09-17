@@ -34,17 +34,29 @@ public final class SvipeSettingsSync {
      * that predates one of these sends no such key at all, and "not mentioned" is not "none" — a
      * missing list leaves the local one alone rather than wiping it.
      */
-    private static final String[] TYPE_LISTS = {
-            "muted_forwards", "notified_forwards", "muted_links", "notified_links",
-    };
-    private static final String[] TYPE_PREFIXES = {
-            NotificationsController.MUTE_FORWARDS_PREFIX, NotificationsController.NOTIFY_FORWARDS_PREFIX,
-            NotificationsController.MUTE_LINKS_PREFIX, NotificationsController.NOTIFY_LINKS_PREFIX,
-    };
-
-    /** The bucket carries two rules; the later of the two is what the bucket is dated by. */
+    /** The bucket carries several rules; the latest of them is what the bucket is dated by. */
     private static long localUpdatedAt(int account) {
         return Math.max(SvipeBotMute.updatedAt(account), SvipeMessageTypeMute.updatedAt(account));
+    }
+
+    private static String[] typeLists() {
+        String[] kinds = NotificationsController.MESSAGE_KINDS;
+        String[] names = new String[kinds.length * 2];
+        for (int i = 0; i < kinds.length; i++) {
+            names[i * 2] = "muted_" + kinds[i];
+            names[i * 2 + 1] = "notified_" + kinds[i];
+        }
+        return names;
+    }
+
+    private static String[] typePrefixes() {
+        String[] kinds = NotificationsController.MESSAGE_KINDS;
+        String[] prefixes = new String[kinds.length * 2];
+        for (int i = 0; i < kinds.length; i++) {
+            prefixes[i * 2] = NotificationsController.muteKindKey(kinds[i]);
+            prefixes[i * 2 + 1] = NotificationsController.notifyKindKey(kinds[i]);
+        }
+        return prefixes;
     }
 
     private SvipeSettingsSync() {}
@@ -68,10 +80,12 @@ public final class SvipeSettingsSync {
             JSONArray arr = new JSONArray();
             for (Long id : SvipeBotMute.exceptions(account)) arr.put(id);
             value.put("bot_exceptions", arr);
-            for (int i = 0; i < TYPE_LISTS.length; i++) {
+            String[] lists = typeLists();
+            String[] prefixes = typePrefixes();
+            for (int i = 0; i < lists.length; i++) {
                 JSONArray ids = new JSONArray();
-                for (Long id : SvipeMessageTypeMute.dialogsFor(account, TYPE_PREFIXES[i])) ids.put(id);
-                value.put(TYPE_LISTS[i], ids);
+                for (Long id : SvipeMessageTypeMute.dialogsFor(account, prefixes[i])) ids.put(id);
+                value.put(lists[i], ids);
             }
 
             final JSONObject body = new JSONObject();
@@ -132,12 +146,14 @@ public final class SvipeSettingsSync {
                     SvipeBotMute.adopt(account, muted, exceptions, remoteAt);
                     // A device that predates message-type exceptions sends no such key at all, and
                     // "not mentioned" is not "none" — leave the local rule alone rather than wipe it.
-                    for (int t = 0; t < TYPE_LISTS.length; t++) {
-                        JSONArray ids = value.optJSONArray(TYPE_LISTS[t]);
+                    String[] lists = typeLists();
+                    String[] prefixes = typePrefixes();
+                    for (int t = 0; t < lists.length; t++) {
+                        JSONArray ids = value.optJSONArray(lists[t]);
                         if (ids == null) continue;
                         List<Long> dialogs = new ArrayList<>();
                         for (int i = 0; i < ids.length(); i++) dialogs.add(ids.optLong(i));
-                        SvipeMessageTypeMute.adoptList(account, TYPE_PREFIXES[t], dialogs, remoteAt);
+                        SvipeMessageTypeMute.adoptList(account, prefixes[t], dialogs, remoteAt);
                     }
                 } catch (Exception e) {
                     FileLog.e(e);

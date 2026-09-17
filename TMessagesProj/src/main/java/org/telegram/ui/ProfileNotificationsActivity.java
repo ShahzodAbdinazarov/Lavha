@@ -111,8 +111,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
     private int colorRow;
     private int ledInfoRow;
     private int messageTypesRow;
-    private int muteForwardsRow;
-    private int muteLinksRow;
+    private int typeRowsStart;
+    private int typeRowsEnd;
     private int messageTypesInfoRow;
     private int customResetRow;
     private int customResetShadowRow;
@@ -124,13 +124,27 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
 
     private final static int done_button = 1;
 
+    private boolean isTypeRow(int position) {
+        return typeRowsStart != -1 && position >= typeRowsStart && position < typeRowsEnd;
+    }
+
     /** Which pref a type row writes: the kind of message, and which way the exception points. */
     private String typePrefix(int position) {
-        boolean muted = isDialogMutedForTypes();
-        if (position == muteLinksRow) {
-            return muted ? NotificationsController.NOTIFY_LINKS_PREFIX : NotificationsController.MUTE_LINKS_PREFIX;
+        String kind = NotificationsController.MESSAGE_KINDS[position - typeRowsStart];
+        return isDialogMutedForTypes()
+                ? NotificationsController.notifyKindKey(kind)
+                : NotificationsController.muteKindKey(kind);
+    }
+
+    private static int typeLabel(String kind, boolean muted) {
+        switch (kind) {
+            case "links": return muted ? R.string.SvipeNotifyLinks : R.string.SvipeNotifyMuteLinks;
+            case "media": return muted ? R.string.SvipeNotifyMedia : R.string.SvipeNotifyMuteMedia;
+            case "voice": return muted ? R.string.SvipeNotifyVoice : R.string.SvipeNotifyMuteVoice;
+            case "stickers": return muted ? R.string.SvipeNotifyStickers : R.string.SvipeNotifyMuteStickers;
+            case "files": return muted ? R.string.SvipeNotifyFiles : R.string.SvipeNotifyMuteFiles;
         }
-        return muted ? NotificationsController.NOTIFY_FORWARDS_PREFIX : NotificationsController.MUTE_FORWARDS_PREFIX;
+        return muted ? R.string.SvipeNotifyForwards : R.string.SvipeNotifyMuteForwards;
     }
 
     /** Which way the message-type exception points depends on whether the chat itself rings. */
@@ -246,13 +260,14 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
         // settings.
         if (DialogObject.isUserDialog(dialogId) && !DialogObject.isEncryptedDialog(dialogId)) {
             messageTypesRow = rowCount++;
-            muteForwardsRow = rowCount++;
-            muteLinksRow = rowCount++;
+            typeRowsStart = rowCount;
+            rowCount += NotificationsController.MESSAGE_KINDS.length;
+            typeRowsEnd = rowCount;
             messageTypesInfoRow = rowCount++;
         } else {
             messageTypesRow = -1;
-            muteForwardsRow = -1;
-            muteLinksRow = -1;
+            typeRowsStart = -1;
+            typeRowsEnd = -1;
             messageTypesInfoRow = -1;
         }
 
@@ -553,7 +568,7 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                     edit.putBoolean("stories_" + key, value);
                 }
                 edit.apply();getNotificationsController().updateServerNotificationsSettings(dialogId, topicId);
-            } else if (position == muteForwardsRow || position == muteLinksRow) {
+            } else if (isTypeRow(position)) {
                 TextCheckCell checkCell = (TextCheckCell) view;
                 boolean value = !checkCell.isChecked();
                 checkCell.setChecked(value);
@@ -973,20 +988,15 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                         String key = NotificationsController.getSharedPrefKey(dialogId, topicId);
                         boolean value = preferences.getBoolean("stories_" + key, isInTop5Peers || preferences.contains("EnableAllStories") && preferences.getBoolean("EnableAllStories", true));
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.StoriesSoundEnabled), value, true);
-                    } else if (position == muteForwardsRow || position == muteLinksRow) {
+                    } else if (isTypeRow(position)) {
                         // Two directions per row: silence a kind of message in a chat that rings, or
                         // let a kind through in a chat that is muted. Which one it is follows the
                         // chat, so the screen never offers a switch that would do nothing.
                         boolean muted = isDialogMutedForTypes();
-                        boolean forwards = position == muteForwardsRow;
+                        String kind = NotificationsController.MESSAGE_KINDS[position - typeRowsStart];
                         boolean value = SvipeMessageTypeMute.isMuted(currentAccount, typePrefix(position), dialogId, topicId);
-                        int text;
-                        if (forwards) {
-                            text = muted ? R.string.SvipeNotifyForwards : R.string.SvipeNotifyMuteForwards;
-                        } else {
-                            text = muted ? R.string.SvipeNotifyLinks : R.string.SvipeNotifyMuteLinks;
-                        }
-                        checkCell.setTextAndCheck(LocaleController.getString(text), value, forwards);
+                        checkCell.setTextAndCheck(LocaleController.getString(typeLabel(kind, muted)),
+                                value, position < typeRowsEnd - 1);
                     }
                     break;
                 }
@@ -1059,7 +1069,7 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                 return VIEW_TYPE_USER;
             } else if (position == avatarSectionRow || position == customResetShadowRow) {
                 return VIEW_TYPE_SHADOW;
-            } else if (position == enableRow || position == previewRow || position == storiesRow || position == muteForwardsRow || position == muteLinksRow) {
+            } else if (position == enableRow || position == previewRow || position == storiesRow || isTypeRow(position)) {
                 return VIEW_TYPE_TEXT_CHECK;
             }
             return VIEW_TYPE_HEADER;

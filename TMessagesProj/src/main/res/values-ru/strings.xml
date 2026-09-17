@@ -609,4 +609,12 @@
     <string name="SvipeNotifyLinks">Уведомлять о сообщениях со ссылками</string>
     <string name="SvipeNotifyMuteTypesInfo">Сообщения этих видов из этого чата приходят без звука. Вы всё равно их получаете и видите в чате.</string>
     <string name="SvipeNotifyTypesInfo">Этот чат без звука, но сообщения этих видов из него всё равно уведомляют вас.</string>
+    <string name="SvipeNotifyMuteMedia">Без звука для фото и видео</string>
+    <string name="SvipeNotifyMedia">Уведомлять о фото и видео</string>
+    <string name="SvipeNotifyMuteVoice">Без звука для голосовых и видеосообщений</string>
+    <string name="SvipeNotifyVoice">Уведомлять о голосовых и видеосообщениях</string>
+    <string name="SvipeNotifyMuteStickers">Без звука для стикеров и GIF</string>
+    <string name="SvipeNotifyStickers">Уведомлять о стикерах и GIF</string>
+    <string name="SvipeNotifyMuteFiles">Без звука для файлов и музыки</string>
+    <string name="SvipeNotifyFiles">Уведомлять о файлах и музыке</string>
 </resources>
