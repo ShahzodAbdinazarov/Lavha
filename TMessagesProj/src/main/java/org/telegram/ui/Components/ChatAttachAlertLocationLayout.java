@@ -1037,14 +1037,46 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
             padding = mapHeight - overScrollHeight;
             parentAlert.setAllowNestedScroll(false);
         } else {
-            if (!AndroidUtilities.isTablet() && AndroidUtilities.displaySize.x > AndroidUtilities.displaySize.y) {
-                padding = (int) (availableHeight / 3.5f);
-            } else {
-                padding = (availableHeight / 5 * 2);
+            // Svipe: the map is the point of this screen, so it gets the height rather than the
+            // venue list. The top padding IS the map, so it runs down to where "Send selected
+            // location" can sit right above the attach panel; everything under that row falls below
+            // the fold until the sheet is dragged up.
+            // Svipe: the map is what this screen is for, so it gets the room. The top padding IS the
+            // map, and it runs down to where "Send selected location" can sit right above the attach
+            // panel — everything below that row falls past the fold until the sheet is dragged up.
+            // The sheet opens at this padding, so it is the strip of chat left visible above the
+            // map — everything below it belongs to the map, the send row and the attach panel.
+            // How far down the sheet opens. Keep it below the point where the alert pins itself to
+            // the top (it hides the attach panel there), so the collapsed state still shows the
+            // panel — with the map, not the venue list, taking everything above it.
+            final int parallax = AndroidUtilities.dp(100);
+            padding = AndroidUtilities.dp(220);
+            // Where the sheet's top edge lands: the alert puts it at the first item's top plus the
+            // 56dp it reserves for the handle, less the 11dp it trims (see updateLayout).
+            final int sheetTop = padding + AndroidUtilities.dp(56 - 11);
+            // What is left under the map: the send row (60dp, plus the 16dp the spacer adds) and the
+            // strip the attach panel sits in.
+            overScrollHeight = availableHeight - sheetTop - AndroidUtilities.dp(60 + 16 + 64) - listPaddingBottom;
+            if (overScrollHeight < AndroidUtilities.dp(200)) {
+                overScrollHeight = AndroidUtilities.dp(200);
             }
-            padding -= AndroidUtilities.dp(52);
-            if (padding < 0) {
-                padding = 0;
+            mapHeight = overScrollHeight + parallax;
+            if (adapter != null) {
+                adapter.setOverScrollHeight(overScrollHeight + AndroidUtilities.dp(16));
+            }
+            if (mapViewClip != null) {
+                ViewGroup.LayoutParams lp = mapViewClip.getLayoutParams();
+                if (lp != null && lp.height != mapHeight) {
+                    lp.height = mapHeight;
+                    mapViewClip.setLayoutParams(lp);
+                }
+            }
+            if (mapView != null && mapView.getView() != null) {
+                ViewGroup.LayoutParams lp = mapView.getView().getLayoutParams();
+                if (lp != null && lp.height != mapHeight) {
+                    lp.height = mapHeight;
+                    mapView.getView().setLayoutParams(lp);
+                }
             }
             parentAlert.setAllowNestedScroll(true);
         }
@@ -1409,6 +1441,7 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
         }
         listView.smoothScrollBy(0, offset);
     }
+
 
     private void updateClipView() {
         if (mapView == null || mapViewClip == null) {
