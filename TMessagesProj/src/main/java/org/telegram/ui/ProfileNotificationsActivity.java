@@ -45,6 +45,7 @@ import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.NotificationsController;
 import org.telegram.messenger.R;
+import org.telegram.svipe.SvipeMessageTypeMute;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
@@ -539,9 +540,7 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                 TextCheckCell checkCell = (TextCheckCell) view;
                 boolean value = !checkCell.isChecked();
                 checkCell.setChecked(value);
-                MessagesController.getNotificationsSettings(currentAccount).edit()
-                        .putBoolean(NotificationsController.MUTE_FORWARDS_PREFIX + NotificationsController.getSharedPrefKey(dialogId, topicId), value)
-                        .apply();
+                SvipeMessageTypeMute.setForwardsMuted(currentAccount, dialogId, topicId, value);
             }
         });
 

@@ -59,6 +59,7 @@ public class SvipeConfig {
     /** Peers WE muted, so switching the rule off never unmutes a bot the user silenced by hand. */
     public static final String PREF_BOT_MUTE_APPLIED = "svipe_bot_mute_applied";
     public static final String PREF_BOT_MUTE_UPDATED = "svipe_bot_mute_updated";
+    public static final String PREF_TYPE_MUTE_UPDATED = "svipe_type_mute_updated";
 
     /** Buffered performance samples awaiting upload (JSON array) — see SvipePerf. Survives a kill:
      *  a session that ended offline is exactly the session whose numbers we most want. */
