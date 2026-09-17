@@ -1576,6 +1576,11 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
             }
             float translationY = Math.min(Math.max(nonClipSize - top, 0), mapHeight - mapTypeButton.getMeasuredHeight() - AndroidUtilities.dp(64 + 16));
             mapTypeButton.setTranslationY(translationY);
+            // The pin rides with the map-type button it mirrors; without this it scrolls up behind
+            // the action bar and cannot be pressed again to let the map go.
+            if (pinButton != null) {
+                pinButton.setTranslationY(translationY);
+            }
             searchAreaButton.setTranslation(translationY);
             locationButton.setTranslationY(-clipSize);
             markerImageView.setTranslationY(markerTop = (mapHeight - clipSize) / 2 - AndroidUtilities.dp(48) + trY);
