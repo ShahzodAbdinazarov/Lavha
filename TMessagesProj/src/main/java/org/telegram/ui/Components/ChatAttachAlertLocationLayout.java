@@ -1058,7 +1058,7 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
         // edge and keeps the live-location row behind it outside the viewport, unseen.
         if (listView.getLayoutParams() instanceof FrameLayout.LayoutParams) {
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) listView.getLayoutParams();
-            lp.bottomMargin = pinned ? AndroidUtilities.dp(10) : 0;
+            lp.bottomMargin = pinned ? AndroidUtilities.dp(20) : 0;
             listView.setLayoutParams(lp);
         }
         listView.scrollToPosition(0);
@@ -1131,7 +1131,7 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
                     // Pinned, the sheet is the screen: the map runs from the top down to the send
                     // row, which sits on the bottom edge.
                     // ...and a touch more, so the row is lifted clear of the bottom edge.
-                    ? availableHeight - AndroidUtilities.statusBarHeight - ActionBar.getCurrentActionBarHeight() - AndroidUtilities.dp(60 + 16 + 10)
+                    ? availableHeight - AndroidUtilities.statusBarHeight - ActionBar.getCurrentActionBarHeight() - AndroidUtilities.dp(60 + 16 + 72)
                     : availableHeight - sheetTop - AndroidUtilities.dp(60 + 16 + 64) - listPaddingBottom;
             if (overScrollHeight < AndroidUtilities.dp(200)) {
                 overScrollHeight = AndroidUtilities.dp(200);
