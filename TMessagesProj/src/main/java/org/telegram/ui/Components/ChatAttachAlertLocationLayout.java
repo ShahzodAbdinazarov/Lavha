@@ -94,6 +94,9 @@ import java.util.regex.Pattern;
 public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLayout implements NotificationCenter.NotificationCenterDelegate {
 
     private ImageView locationButton;
+    private ImageView pinButton;
+    /** Svipe: the map held open full-screen until the same button says otherwise. */
+    private boolean mapPinned;
     private ActionBarMenuItem mapTypeButton;
     private SearchButton searchAreaButton;
     private LinearLayout emptyView;
@@ -553,6 +556,22 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
         mapTypeButton.setBackground(drawable);
         mapTypeButton.setIcon(R.drawable.msg_map_type);
         mapViewClip.addView(mapTypeButton, LayoutHelper.createFrame(40, 40, Gravity.RIGHT | Gravity.TOP, 0, 12, 12, 0));
+
+        // Svipe: the mirror of the map-type button. It holds the map open full screen — dragging the
+        // sheet down no longer closes it, and the send row moves to the very bottom — until it is
+        // pressed again.
+        pinButton = new ImageView(context);
+        pinButton.setScaleType(ImageView.ScaleType.CENTER);
+        pinButton.setImageResource(R.drawable.msg_pin);
+        pinButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_location_actionIcon), PorterDuff.Mode.SRC_IN));
+        pinButton.setContentDescription(LocaleController.getString(R.string.SvipeMapPin));
+        Drawable pinDrawable = Theme.createSimpleSelectorCircleDrawable(AndroidUtilities.dp(40), getThemedColor(Theme.key_location_actionBackground), getThemedColor(Theme.key_location_actionPressedBackground));
+        ScaleStateListAnimator.apply(pinButton);
+        pinButton.setTranslationZ(dp(2));
+        pinButton.setOutlineProvider(ViewOutlineProviderImpl.BOUNDS_OVAL);
+        pinButton.setBackground(pinDrawable);
+        mapViewClip.addView(pinButton, LayoutHelper.createFrame(40, 40, Gravity.LEFT | Gravity.TOP, 12, 12, 0, 0));
+        pinButton.setOnClickListener(v -> setMapPinned(!mapPinned));
         mapTypeButton.setOnClickListener(v -> mapTypeButton.toggleSubMenu());
         mapTypeButton.setDelegate(id -> {
             if (map == null) {
@@ -1020,6 +1039,49 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
         updateClipView();
     }
 
+
+    /**
+     * Hold the map open, or let it go. Pinning is a deliberate press, so the list can be re-measured
+     * here — the map takes everything down to the send row, the row sits on the bottom edge, and the
+     * sheet stops answering drags until the button is pressed again.
+     */
+    private void setMapPinned(boolean pinned) {
+        if (mapPinned == pinned) {
+            return;
+        }
+        mapPinned = pinned;
+        pinButton.setImageResource(pinned ? R.drawable.msg_pin_filled : R.drawable.msg_pin);
+        if (parentAlert != null) {
+            parentAlert.setAllowNestedScroll(!pinned);
+        }
+        listView.scrollToPosition(0);
+        // The map's share of the sheet is decided in onPreMeasure, and that runs from the alert's
+        // own measure pass — asking this layout alone to lay out again never reaches it.
+        requestLayout();
+        if (parentAlert != null && parentAlert.getSheetContainer() != null) {
+            parentAlert.getSheetContainer().requestLayout();
+        }
+        listView.post(() -> {
+            if (adapter != null) {
+                // The spacer is a bound view; resizing its layout params is not enough, the row has
+                // to be rebound for the list to lay it out at the new height.
+                adapter.setOverScrollHeight(overScrollHeight + AndroidUtilities.dp(16));
+                adapter.notifyItemChanged(0);
+            }
+            listView.post(() -> {
+                listView.scrollToPosition(0);
+                updateClipView();
+                if (parentAlert != null) {
+                    parentAlert.updateLayout(this, false, 0);
+                }
+            });
+            updateClipView();
+            if (parentAlert != null) {
+                parentAlert.updateLayout(this, true, 0);
+            }
+        });
+    }
+
     @Override
     public int getListTopPadding() {
         return listView.getPaddingTop();
@@ -1050,13 +1112,19 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
             // the top (it hides the attach panel there), so the collapsed state still shows the
             // panel — with the map, not the venue list, taking everything above it.
             final int parallax = AndroidUtilities.dp(100);
-            padding = AndroidUtilities.dp(220);
+            // Pinned, the sheet starts at the very top of the screen; loose, it opens low enough
+            // that the alert does not treat it as pinned and keeps the attach panel.
+            padding = mapPinned ? 0 : AndroidUtilities.dp(220);
             // Where the sheet's top edge lands: the alert puts it at the first item's top plus the
             // 56dp it reserves for the handle, less the 11dp it trims (see updateLayout).
             final int sheetTop = padding + AndroidUtilities.dp(56 - 11);
             // What is left under the map: the send row (60dp, plus the 16dp the spacer adds) and the
             // strip the attach panel sits in.
-            overScrollHeight = availableHeight - sheetTop - AndroidUtilities.dp(60 + 16 + 64) - listPaddingBottom;
+            overScrollHeight = mapPinned
+                    // Pinned, the sheet is the screen: the map runs from the top down to the send
+                    // row, which sits on the bottom edge.
+                    ? availableHeight - AndroidUtilities.statusBarHeight - ActionBar.getCurrentActionBarHeight() - AndroidUtilities.dp(60 + 16)
+                    : availableHeight - sheetTop - AndroidUtilities.dp(60 + 16 + 64) - listPaddingBottom;
             if (overScrollHeight < AndroidUtilities.dp(200)) {
                 overScrollHeight = AndroidUtilities.dp(200);
             }
