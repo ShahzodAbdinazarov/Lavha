@@ -617,4 +617,14 @@
     <string name="SvipeNotifyStickers">Уведомлять о стикерах и GIF</string>
     <string name="SvipeNotifyMuteFiles">Без звука для файлов и музыки</string>
     <string name="SvipeNotifyFiles">Уведомлять о файлах и музыке</string>
+    <string name="SvipeMutedTypesHeader">Типы сообщений без звука</string>
+    <string name="SvipeUnmutedTypesHeader">Типы сообщений со звуком</string>
+    <string name="SvipeAddMessageType">Добавить тип сообщений</string>
+    <string name="SvipeMessageTypesInfo">Типы без звука никогда не уведомляют, типы со звуком уведомляют всегда — независимо от того, отключён ли звук у самого чата.</string>
+    <string name="SvipeTypeForwards">Пересланные сообщения</string>
+    <string name="SvipeTypeLinks">Сообщения со ссылками</string>
+    <string name="SvipeTypeMedia">Фото и видео</string>
+    <string name="SvipeTypeVoice">Голосовые и видеосообщения</string>
+    <string name="SvipeTypeStickers">Стикеры и GIF</string>
+    <string name="SvipeTypeFiles">Файлы и музыка</string>
 </resources>

@@ -56,6 +56,9 @@ import org.telegram.ui.ActionBar.ThemeDescription;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.RadioCell;
 import org.telegram.ui.Cells.ShadowSectionCell;
+import android.widget.LinearLayout;
+import org.telegram.ui.ActionBar.BottomSheet;
+import org.telegram.ui.Cells.TextCell;
 import org.telegram.ui.Cells.TextCheckBoxCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextColorCell;
@@ -110,10 +113,17 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
     private int ledRow;
     private int colorRow;
     private int ledInfoRow;
-    private int messageTypesRow;
-    private int typeRowsStart;
-    private int typeRowsEnd;
+    private int mutedTypesRow;
+    private int mutedTypesStart;
+    private int mutedTypesEnd;
+    private int mutedTypesAddRow;
+    private int notifiedTypesRow;
+    private int notifiedTypesStart;
+    private int notifiedTypesEnd;
+    private int notifiedTypesAddRow;
     private int messageTypesInfoRow;
+    private final ArrayList<String> mutedKinds = new ArrayList<>();
+    private final ArrayList<String> notifiedKinds = new ArrayList<>();
     private int customResetRow;
     private int customResetShadowRow;
     private int rowCount;
@@ -124,27 +134,89 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
 
     private final static int done_button = 1;
 
-    private boolean isTypeRow(int position) {
-        return typeRowsStart != -1 && position >= typeRowsStart && position < typeRowsEnd;
+    private boolean isMutedTypeRow(int position) {
+        return mutedTypesStart != -1 && position >= mutedTypesStart && position < mutedTypesEnd;
     }
 
-    /** Which pref a type row writes: the kind of message, and which way the exception points. */
-    private String typePrefix(int position) {
-        String kind = NotificationsController.MESSAGE_KINDS[position - typeRowsStart];
-        return isDialogMutedForTypes()
-                ? NotificationsController.notifyKindKey(kind)
-                : NotificationsController.muteKindKey(kind);
+    private boolean isNotifiedTypeRow(int position) {
+        return notifiedTypesStart != -1 && position >= notifiedTypesStart && position < notifiedTypesEnd;
     }
 
-    private static int typeLabel(String kind, boolean muted) {
+    /** The name of a kind, in the plain form both lists use: the list it sits in says what it does. */
+    private static int typeLabel(String kind) {
         switch (kind) {
-            case "links": return muted ? R.string.SvipeNotifyLinks : R.string.SvipeNotifyMuteLinks;
-            case "media": return muted ? R.string.SvipeNotifyMedia : R.string.SvipeNotifyMuteMedia;
-            case "voice": return muted ? R.string.SvipeNotifyVoice : R.string.SvipeNotifyMuteVoice;
-            case "stickers": return muted ? R.string.SvipeNotifyStickers : R.string.SvipeNotifyMuteStickers;
-            case "files": return muted ? R.string.SvipeNotifyFiles : R.string.SvipeNotifyMuteFiles;
+            case "links": return R.string.SvipeTypeLinks;
+            case "media": return R.string.SvipeTypeMedia;
+            case "voice": return R.string.SvipeTypeVoice;
+            case "stickers": return R.string.SvipeTypeStickers;
+            case "files": return R.string.SvipeTypeFiles;
         }
-        return muted ? R.string.SvipeNotifyForwards : R.string.SvipeNotifyMuteForwards;
+        return R.string.SvipeTypeForwards;
+    }
+
+    /** Telegram already draws each of these kinds somewhere; reuse its icon rather than invent one. */
+    private static int typeIcon(String kind) {
+        switch (kind) {
+            case "links": return R.drawable.msg_link;
+            case "media": return R.drawable.msg_media;
+            case "voice": return R.drawable.msg_filled_data_voice;
+            case "stickers": return R.drawable.msg_emoji_stickers;
+            case "files": return R.drawable.msg_filled_data_files;
+        }
+        return R.drawable.msg_forward;
+    }
+
+    /**
+     * The picker both lists share. Every kind is on it with a switch showing whether it is already
+     * on that list, so the sheet adds and removes in one place; each flip is written as it happens
+     * and the list behind the sheet is rebuilt when it closes.
+     */
+    private void showTypesSheet(final boolean muted) {
+        Context context = getParentActivity();
+        if (context == null) {
+            return;
+        }
+        LinearLayout layout = new LinearLayout(context);
+        layout.setOrientation(LinearLayout.VERTICAL);
+
+        HeaderCell header = new HeaderCell(context, resourcesProvider);
+        header.setText(LocaleController.getString(muted ? R.string.SvipeMutedTypesHeader : R.string.SvipeUnmutedTypesHeader));
+        layout.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        final String[] kinds = NotificationsController.MESSAGE_KINDS;
+        for (int i = 0; i < kinds.length; i++) {
+            final String kind = kinds[i];
+            final String prefix = muted
+                    ? NotificationsController.muteKindKey(kind)
+                    : NotificationsController.notifyKindKey(kind);
+            TextCell cell = new TextCell(context, 23, false, true, resourcesProvider);
+            cell.setTextAndCheckAndIcon(LocaleController.getString(typeLabel(kind)),
+                    SvipeMessageTypeMute.isMuted(currentAccount, prefix, dialogId, topicId),
+                    typeIcon(kind), i < kinds.length - 1);
+            cell.setOnClickListener(v -> {
+                boolean value = !SvipeMessageTypeMute.isMuted(currentAccount, prefix, dialogId, topicId);
+                SvipeMessageTypeMute.setMuted(currentAccount, prefix, dialogId, topicId, value);
+                ((TextCell) v).getCheckBox().setChecked(value, true);
+                // Rebuild behind the sheet as each switch is flipped: by the time the sheet slides
+                // away the list under it already reads the way the user just set it.
+                updateRows();
+                if (adapter != null) {
+                    adapter.notifyDataSetChanged();
+                }
+            });
+            layout.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 50));
+        }
+
+        BottomSheet sheet = new BottomSheet.Builder(context, false, resourcesProvider)
+                .setCustomView(layout)
+                .create();
+        sheet.setOnDismissListener(dialog -> {
+            updateRows();
+            if (adapter != null) {
+                adapter.notifyDataSetChanged();
+            }
+        });
+        showDialog(sheet);
     }
 
     /** Which way the message-type exception points depends on whether the chat itself rings. */
@@ -170,19 +242,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
     }
 
 
-    @Override
-    public boolean onFragmentCreate() {
-        if (DialogObject.isUserDialog(dialogId)) {
-            ArrayList<TLRPC.TL_topPeer> topPeers = getMediaDataController().hints;
-            for (int i = 0; i < topPeers.size(); ++i) {
-                TLRPC.Peer peer = topPeers.get(i).peer;
-                if (peer instanceof TLRPC.TL_peerUser && peer.user_id == dialogId) {
-                    isInTop5Peers = i < 5;
-                    break;
-                }
-            }
-        }
-
+    /** The whole list, rebuilt: the message-type sections grow and shrink as the user edits them. */
+    private void updateRows() {
         rowCount = 0;
         if (addingException) {
             avatarRow = rowCount++;
@@ -259,15 +320,36 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
         // with forwards. Private chats only: a group's noise is already handled by its own
         // settings.
         if (DialogObject.isUserDialog(dialogId) && !DialogObject.isEncryptedDialog(dialogId)) {
-            messageTypesRow = rowCount++;
-            typeRowsStart = rowCount;
-            rowCount += NotificationsController.MESSAGE_KINDS.length;
-            typeRowsEnd = rowCount;
+            mutedKinds.clear();
+            notifiedKinds.clear();
+            for (String kind : NotificationsController.MESSAGE_KINDS) {
+                if (SvipeMessageTypeMute.isMuted(currentAccount, NotificationsController.muteKindKey(kind), dialogId, topicId)) {
+                    mutedKinds.add(kind);
+                }
+                if (SvipeMessageTypeMute.isMuted(currentAccount, NotificationsController.notifyKindKey(kind), dialogId, topicId)) {
+                    notifiedKinds.add(kind);
+                }
+            }
+            mutedTypesRow = rowCount++;
+            mutedTypesStart = rowCount;
+            rowCount += mutedKinds.size();
+            mutedTypesEnd = rowCount;
+            mutedTypesAddRow = rowCount++;
+            notifiedTypesRow = rowCount++;
+            notifiedTypesStart = rowCount;
+            rowCount += notifiedKinds.size();
+            notifiedTypesEnd = rowCount;
+            notifiedTypesAddRow = rowCount++;
             messageTypesInfoRow = rowCount++;
         } else {
-            messageTypesRow = -1;
-            typeRowsStart = -1;
-            typeRowsEnd = -1;
+            mutedTypesRow = -1;
+            mutedTypesStart = -1;
+            mutedTypesEnd = -1;
+            mutedTypesAddRow = -1;
+            notifiedTypesRow = -1;
+            notifiedTypesStart = -1;
+            notifiedTypesEnd = -1;
+            notifiedTypesAddRow = -1;
             messageTypesInfoRow = -1;
         }
 
@@ -278,6 +360,22 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
             customResetRow = -1;
             customResetShadowRow = -1;
         }
+    }
+
+    @Override
+    public boolean onFragmentCreate() {
+        if (DialogObject.isUserDialog(dialogId)) {
+            ArrayList<TLRPC.TL_topPeer> topPeers = getMediaDataController().hints;
+            for (int i = 0; i < topPeers.size(); ++i) {
+                TLRPC.Peer peer = topPeers.get(i).peer;
+                if (peer instanceof TLRPC.TL_peerUser && peer.user_id == dialogId) {
+                    isInTop5Peers = i < 5;
+                    break;
+                }
+            }
+        }
+
+        updateRows();
 
         boolean defaultEnabled = NotificationsController.getInstance(currentAccount).isGlobalNotificationsEnabled(dialogId, false, false);
         if (addingException) {
@@ -568,11 +666,10 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                     edit.putBoolean("stories_" + key, value);
                 }
                 edit.apply();getNotificationsController().updateServerNotificationsSettings(dialogId, topicId);
-            } else if (isTypeRow(position)) {
-                TextCheckCell checkCell = (TextCheckCell) view;
-                boolean value = !checkCell.isChecked();
-                checkCell.setChecked(value);
-                SvipeMessageTypeMute.setMuted(currentAccount, typePrefix(position), dialogId, topicId, value);
+            } else if (position == mutedTypesAddRow || isMutedTypeRow(position)) {
+                showTypesSheet(true);
+            } else if (position == notifiedTypesAddRow || isNotifiedTypeRow(position)) {
+                showTypesSheet(false);
             }
         });
 
@@ -722,7 +819,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
             VIEW_TYPE_RADIO = 4,
             VIEW_TYPE_USER = 5,
             VIEW_TYPE_SHADOW = 6,
-            VIEW_TYPE_TEXT_CHECK = 7;
+            VIEW_TYPE_TEXT_CHECK = 7,
+            VIEW_TYPE_TEXT_CELL = 8;
 
         private Context context;
 
@@ -754,7 +852,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                 case VIEW_TYPE_SHADOW: {
                     return false;
                 }
-                case VIEW_TYPE_TEXT_CHECK: {
+                case VIEW_TYPE_TEXT_CHECK:
+                case VIEW_TYPE_TEXT_CELL: {
                     return true;
                 }
             }
@@ -766,6 +865,10 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             View view;
             switch (viewType) {
+                case VIEW_TYPE_TEXT_CELL:
+                    view = new TextCell(context, resourcesProvider);
+                    view.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                    break;
                 case VIEW_TYPE_HEADER:
                     view = new HeaderCell(context, resourcesProvider);
                     view.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
@@ -815,8 +918,10 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                         headerCell.setText(LocaleController.getString(R.string.NotificationsLed));
                     } else if (position == callsRow) {
                         headerCell.setText(LocaleController.getString(R.string.VoipNotificationSettings));
-                    } else if (position == messageTypesRow) {
-                        headerCell.setText(LocaleController.getString(R.string.SvipeNotifyTypesHeader));
+                    } else if (position == mutedTypesRow) {
+                        headerCell.setText(LocaleController.getString(R.string.SvipeMutedTypesHeader));
+                    } else if (position == notifiedTypesRow) {
+                        headerCell.setText(LocaleController.getString(R.string.SvipeUnmutedTypesHeader));
                     }
                     break;
                 }
@@ -915,8 +1020,7 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                     } else if (position == ringtoneInfoRow) {
                         textCell.setText(LocaleController.getString(R.string.VoipRingtoneInfo));
                     } else if (position == messageTypesInfoRow) {
-                        textCell.setText(LocaleController.getString(isDialogMutedForTypes()
-                                ? R.string.SvipeNotifyTypesInfo : R.string.SvipeNotifyMuteTypesInfo));
+                        textCell.setText(LocaleController.getString(R.string.SvipeMessageTypesInfo));
                     }
                     break;
                 }
@@ -988,15 +1092,22 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                         String key = NotificationsController.getSharedPrefKey(dialogId, topicId);
                         boolean value = preferences.getBoolean("stories_" + key, isInTop5Peers || preferences.contains("EnableAllStories") && preferences.getBoolean("EnableAllStories", true));
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.StoriesSoundEnabled), value, true);
-                    } else if (isTypeRow(position)) {
-                        // Two directions per row: silence a kind of message in a chat that rings, or
-                        // let a kind through in a chat that is muted. Which one it is follows the
-                        // chat, so the screen never offers a switch that would do nothing.
-                        boolean muted = isDialogMutedForTypes();
-                        String kind = NotificationsController.MESSAGE_KINDS[position - typeRowsStart];
-                        boolean value = SvipeMessageTypeMute.isMuted(currentAccount, typePrefix(position), dialogId, topicId);
-                        checkCell.setTextAndCheck(LocaleController.getString(typeLabel(kind, muted)),
-                                value, position < typeRowsEnd - 1);
+                    }
+                    break;
+                }
+                case VIEW_TYPE_TEXT_CELL: {
+                    TextCell textCell = (TextCell) holder.itemView;
+                    if (position == mutedTypesAddRow || position == notifiedTypesAddRow) {
+                        textCell.setColors(Theme.key_windowBackgroundWhiteBlueIcon, Theme.key_windowBackgroundWhiteBlueButton);
+                        textCell.setTextAndIcon(LocaleController.getString(R.string.SvipeAddMessageType),
+                                R.drawable.msg_add, false);
+                    } else {
+                        boolean muted = isMutedTypeRow(position);
+                        String kind = muted
+                                ? mutedKinds.get(position - mutedTypesStart)
+                                : notifiedKinds.get(position - notifiedTypesStart);
+                        textCell.setColors(Theme.key_windowBackgroundWhiteGrayIcon, Theme.key_windowBackgroundWhiteBlackText);
+                        textCell.setTextAndIcon(LocaleController.getString(typeLabel(kind)), typeIcon(kind), true);
                     }
                     break;
                 }
@@ -1055,7 +1166,12 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
 
         @Override
         public int getItemViewType(int position) {
-            if (position == generalRow || position == popupRow || position == ledRow || position == callsRow || position == messageTypesRow) {
+            if (isMutedTypeRow(position) || isNotifiedTypeRow(position)
+                    || position == mutedTypesAddRow || position == notifiedTypesAddRow) {
+                return VIEW_TYPE_TEXT_CELL;
+            }
+            if (position == generalRow || position == popupRow || position == ledRow || position == callsRow
+                    || position == mutedTypesRow || position == notifiedTypesRow) {
                 return VIEW_TYPE_HEADER;
             } else if (position == soundRow || position == vibrateRow || position == priorityRow || position == smartRow || position == ringtoneRow || position == callsVibrateRow || position == customResetRow) {
                 return VIEW_TYPE_TEXT_SETTINGS;
@@ -1069,7 +1185,7 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                 return VIEW_TYPE_USER;
             } else if (position == avatarSectionRow || position == customResetShadowRow) {
                 return VIEW_TYPE_SHADOW;
-            } else if (position == enableRow || position == previewRow || position == storiesRow || isTypeRow(position)) {
+            } else if (position == enableRow || position == previewRow || position == storiesRow) {
                 return VIEW_TYPE_TEXT_CHECK;
             }
             return VIEW_TYPE_HEADER;

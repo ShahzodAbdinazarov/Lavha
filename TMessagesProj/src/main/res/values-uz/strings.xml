@@ -344,4 +344,14 @@
     <string name="SvipeNotifyStickers">Stiker va GIFlar uchun bildirishnoma</string>
     <string name="SvipeNotifyMuteFiles">Fayl va musiqani o\'chirish</string>
     <string name="SvipeNotifyFiles">Fayl va musiqa uchun bildirishnoma</string>
+    <string name="SvipeMutedTypesHeader">Ovozsiz xabar turlari</string>
+    <string name="SvipeUnmutedTypesHeader">Ovozli xabar turlari</string>
+    <string name="SvipeAddMessageType">Xabar turini qo\'shish</string>
+    <string name="SvipeMessageTypesInfo">Ovozsiz turlar hech qachon bildirishnoma bermaydi, ovozli turlar esa har doim beradi — suhbatning o\'zi ovozsiz qilinganidan qat\'i nazar.</string>
+    <string name="SvipeTypeForwards">Yo\'naltirilgan xabarlar</string>
+    <string name="SvipeTypeLinks">Havolali xabarlar</string>
+    <string name="SvipeTypeMedia">Rasm va videolar</string>
+    <string name="SvipeTypeVoice">Ovozli va video xabarlar</string>
+    <string name="SvipeTypeStickers">Stiker va GIFlar</string>
+    <string name="SvipeTypeFiles">Fayl va musiqa</string>
 </resources>

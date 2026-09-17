@@ -11565,4 +11565,14 @@
     <string name="SvipeNotifyStickers">Notify for stickers and GIFs</string>
     <string name="SvipeNotifyMuteFiles">Mute files and music</string>
     <string name="SvipeNotifyFiles">Notify for files and music</string>
+    <string name="SvipeMutedTypesHeader">Muted message types</string>
+    <string name="SvipeUnmutedTypesHeader">Unmuted message types</string>
+    <string name="SvipeAddMessageType">Add message type</string>
+    <string name="SvipeMessageTypesInfo">Muted kinds never notify you, unmuted kinds always do — whether or not the chat itself is muted.</string>
+    <string name="SvipeTypeForwards">Forwarded messages</string>
+    <string name="SvipeTypeLinks">Messages with links</string>
+    <string name="SvipeTypeMedia">Photos and videos</string>
+    <string name="SvipeTypeVoice">Voice and video messages</string>
+    <string name="SvipeTypeStickers">Stickers and GIFs</string>
+    <string name="SvipeTypeFiles">Files and music</string>
 </resources>
