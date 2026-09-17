@@ -330,4 +330,6 @@
     <string name="SvipeNotifyTypesHeader">Xabar turlari</string>
     <string name="SvipeNotifyMuteForwards">Yo\'naltirilgan xabarlarni o\'chirish</string>
     <string name="SvipeNotifyMuteForwardsInfo">Bu suhbatdagi yo\'naltirilgan xabarlar ovozsiz keladi. Ular baribir yetib keladi va suhbatda ko\'rinadi.</string>
+    <string name="SvipeNotifyForwards">Yo\'naltirilgan xabarlar uchun bildirishnoma</string>
+    <string name="SvipeNotifyForwardsInfo">Bu suhbat ovozsiz qilingan, lekin undan kelgan yo\'naltirilgan xabarlar baribir bildirishnoma beradi.</string>
 </resources>

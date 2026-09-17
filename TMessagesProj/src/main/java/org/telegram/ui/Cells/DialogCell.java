@@ -4948,7 +4948,10 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
         } else if (chat != null && chat.forum && forumTopic == null) {
             return !hasUnmutedTopics;
         } else if (dialogMuted) {
-            return true;
+            // ...and the mirror: a muted chat whose newest message is of a type that was let
+            // through did ring, so its counter should not look silent.
+            return !(isDialogCell && message != null && !message.isOutOwner()
+                    && NotificationsController.getInstance(currentAccount).isNotifiedMessageType(currentDialogId, message));
         } else {
             // Svipe: the chat itself is unmuted, but the newest thing in it is a kind of message
             // this chat has an exception for, so the phone stayed silent. Grey the counter to match

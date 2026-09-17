@@ -11551,4 +11551,6 @@
     <string name="SvipeNotifyTypesHeader">Message types</string>
     <string name="SvipeNotifyMuteForwards">Mute forwarded messages</string>
     <string name="SvipeNotifyMuteForwardsInfo">Forwarded messages from this chat arrive silently. You still receive them and see them in the chat.</string>
+    <string name="SvipeNotifyForwards">Notify for forwarded messages</string>
+    <string name="SvipeNotifyForwardsInfo">This chat is muted, but forwarded messages from it still notify you.</string>
 </resources>

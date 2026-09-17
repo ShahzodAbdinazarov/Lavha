@@ -57,6 +57,9 @@ public final class SvipeSettingsSync {
             JSONArray forwards = new JSONArray();
             for (Long id : SvipeMessageTypeMute.mutedForwardDialogs(account)) forwards.put(id);
             value.put("muted_forwards", forwards);
+            JSONArray notified = new JSONArray();
+            for (Long id : SvipeMessageTypeMute.notifiedForwardDialogs(account)) notified.put(id);
+            value.put("notified_forwards", notified);
 
             final JSONObject body = new JSONObject();
             body.put("value", value);
@@ -121,6 +124,12 @@ public final class SvipeSettingsSync {
                         List<Long> dialogs = new ArrayList<>();
                         for (int i = 0; i < forwards.length(); i++) dialogs.add(forwards.optLong(i));
                         SvipeMessageTypeMute.adopt(account, dialogs, remoteAt);
+                    }
+                    JSONArray notified = value.optJSONArray("notified_forwards");
+                    if (notified != null) {
+                        List<Long> dialogs = new ArrayList<>();
+                        for (int i = 0; i < notified.length(); i++) dialogs.add(notified.optLong(i));
+                        SvipeMessageTypeMute.adoptNotified(account, dialogs, remoteAt);
                     }
                 } catch (Exception e) {
                     FileLog.e(e);

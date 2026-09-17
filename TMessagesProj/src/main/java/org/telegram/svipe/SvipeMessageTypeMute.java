@@ -43,14 +43,59 @@ public final class SvipeMessageTypeMute {
         SvipeSettingsSync.push(account);
     }
 
+    public static boolean isForwardsNotified(int account, long dialogId, long topicId) {
+        return notifications(account).getBoolean(notifyKey(dialogId, topicId), false);
+    }
+
+    public static void setForwardsNotified(int account, long dialogId, long topicId, boolean notify) {
+        SharedPreferences.Editor e = notifications(account).edit();
+        if (notify) {
+            e.putBoolean(notifyKey(dialogId, topicId), true);
+        } else {
+            e.remove(notifyKey(dialogId, topicId));
+        }
+        e.apply();
+        touch(account);
+        SvipeSettingsSync.push(account);
+    }
+
+    /** Every dialog whose forwards notify despite the mute. */
+    public static List<Long> notifiedForwardDialogs(int account) {
+        return dialogsWith(account, NotificationsController.NOTIFY_FORWARDS_PREFIX);
+    }
+
     /** Every dialog whose forwards are silenced — what the other devices need to know. */
     public static List<Long> mutedForwardDialogs(int account) {
+        return dialogsWith(account, NotificationsController.MUTE_FORWARDS_PREFIX);
+    }
+
+    public static void adoptNotified(int account, List<Long> dialogs, long updatedAt) {
+        Set<Long> wanted = new HashSet<>(dialogs);
+        SharedPreferences.Editor e = notifications(account).edit();
+        for (Long id : notifiedForwardDialogs(account)) {
+            if (!wanted.contains(id)) {
+                e.remove(notifyKey(id, 0));
+            }
+        }
+        for (Long id : wanted) {
+            e.putBoolean(notifyKey(id, 0), true);
+        }
+        e.apply();
+        MessagesController.getMainSettings(account).edit()
+                .putLong(SvipeConfig.PREF_TYPE_MUTE_UPDATED, updatedAt).apply();
+    }
+
+    private static String notifyKey(long dialogId, long topicId) {
+        return NotificationsController.NOTIFY_FORWARDS_PREFIX + NotificationsController.getSharedPrefKey(dialogId, topicId);
+    }
+
+    private static List<Long> dialogsWith(int account, String prefix) {
         List<Long> ids = new ArrayList<>();
         for (Map.Entry<String, ?> entry : notifications(account).getAll().entrySet()) {
             String k = entry.getKey();
-            if (k == null || !k.startsWith(NotificationsController.MUTE_FORWARDS_PREFIX)) continue;
+            if (k == null || !k.startsWith(prefix)) continue;
             if (!(entry.getValue() instanceof Boolean) || !((Boolean) entry.getValue())) continue;
-            String id = k.substring(NotificationsController.MUTE_FORWARDS_PREFIX.length());
+            String id = k.substring(prefix.length());
             // Topics carry a "dialog_topic" key; they are not synced, only whole dialogs are.
             if (id.indexOf('_') >= 0) continue;
             try {

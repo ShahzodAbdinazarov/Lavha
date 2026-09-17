@@ -603,4 +603,6 @@
     <string name="SvipeNotifyTypesHeader">Типы сообщений</string>
     <string name="SvipeNotifyMuteForwards">Без звука для пересланных</string>
     <string name="SvipeNotifyMuteForwardsInfo">Пересланные сообщения из этого чата приходят без звука. Вы всё равно их получаете и видите в чате.</string>
+    <string name="SvipeNotifyForwards">Уведомлять о пересланных</string>
+    <string name="SvipeNotifyForwardsInfo">Этот чат без звука, но пересланные сообщения из него всё равно уведомляют вас.</string>
 </resources>

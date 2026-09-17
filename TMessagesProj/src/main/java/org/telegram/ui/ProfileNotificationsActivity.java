@@ -123,6 +123,11 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
 
     private final static int done_button = 1;
 
+    /** Which way the message-type exception points depends on whether the chat itself rings. */
+    private boolean isDialogMutedForTypes() {
+        return MessagesController.getInstance(currentAccount).isDialogMuted(dialogId, topicId);
+    }
+
     public interface ProfileNotificationsActivityDelegate {
         void didCreateNewException(NotificationsSettingsActivity.NotificationException exception);
         default void didRemoveException(long dialog_id) {}
@@ -540,7 +545,11 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                 TextCheckCell checkCell = (TextCheckCell) view;
                 boolean value = !checkCell.isChecked();
                 checkCell.setChecked(value);
-                SvipeMessageTypeMute.setForwardsMuted(currentAccount, dialogId, topicId, value);
+                if (isDialogMutedForTypes()) {
+                    SvipeMessageTypeMute.setForwardsNotified(currentAccount, dialogId, topicId, value);
+                } else {
+                    SvipeMessageTypeMute.setForwardsMuted(currentAccount, dialogId, topicId, value);
+                }
             }
         });
 
@@ -883,7 +892,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                     } else if (position == ringtoneInfoRow) {
                         textCell.setText(LocaleController.getString(R.string.VoipRingtoneInfo));
                     } else if (position == messageTypesInfoRow) {
-                        textCell.setText(LocaleController.getString(R.string.SvipeNotifyMuteForwardsInfo));
+                        textCell.setText(LocaleController.getString(isDialogMutedForTypes()
+                                ? R.string.SvipeNotifyForwardsInfo : R.string.SvipeNotifyMuteForwardsInfo));
                     }
                     break;
                 }
@@ -956,9 +966,16 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                         boolean value = preferences.getBoolean("stories_" + key, isInTop5Peers || preferences.contains("EnableAllStories") && preferences.getBoolean("EnableAllStories", true));
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.StoriesSoundEnabled), value, true);
                     } else if (position == muteForwardsRow) {
-                        String key = NotificationsController.getSharedPrefKey(dialogId, topicId);
-                        boolean value = preferences.getBoolean(NotificationsController.MUTE_FORWARDS_PREFIX + key, false);
-                        checkCell.setTextAndCheck(LocaleController.getString(R.string.SvipeNotifyMuteForwards), value, false);
+                        // One row, two directions: silence a kind of message in a chat that rings,
+                        // or let a kind of message through in a chat that is muted. Which one it is
+                        // follows the chat, so the screen never offers a switch that would do
+                        // nothing.
+                        boolean muted = isDialogMutedForTypes();
+                        boolean value = muted
+                                ? SvipeMessageTypeMute.isForwardsNotified(currentAccount, dialogId, topicId)
+                                : SvipeMessageTypeMute.isForwardsMuted(currentAccount, dialogId, topicId);
+                        checkCell.setTextAndCheck(LocaleController.getString(muted
+                                ? R.string.SvipeNotifyForwards : R.string.SvipeNotifyMuteForwards), value, false);
                     }
                     break;
                 }

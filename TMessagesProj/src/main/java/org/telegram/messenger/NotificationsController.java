@@ -1253,6 +1253,13 @@ public class NotificationsController extends BaseController implements Notificat
                     settingsCache.put(dialogId, value);
                 }
 
+                if (!value && isNotifiedMessageType(dialogId, messageObject)) {
+                    // The person is muted; this kind of message is the exception to that.
+                    value = true;
+                    if (BuildVars.LOGS_ENABLED) {
+                        FileLog.d("notifying anyway: the type is excepted from the mute on dialog " + dialogId);
+                    }
+                }
                 if (BuildVars.LOGS_ENABLED) {
                     FileLog.d("NotificationsController: process new messages, value is " + value + " ("+dialogId+", "+isChannel+", "+messageObject.isReactionPush+", "+messageObject.isStoryReactionPush+")");
                 }
@@ -6237,6 +6244,27 @@ public class NotificationsController extends BaseController implements Notificat
      * field for it, so it is deliberately not part of updateServerNotificationsSettings.
      */
     public static final String MUTE_FORWARDS_PREFIX = "svipe_mute_forwards_";
+    /** The same exception the other way round: the chat is muted, this kind of message is not. */
+    public static final String NOTIFY_FORWARDS_PREFIX = "svipe_notify_forwards_";
+
+    /**
+     * The mirror of {@link #isMutedMessageType}: a chat the user has muted, kept muted, except for
+     * one kind of message. Only the copy that carries fwd_from can prove it, and for a muted chat
+     * the server sends no push at all — so this decides only what the app itself receives.
+     */
+    public boolean isNotifiedMessageType(long dialogId, MessageObject messageObject) {
+        if (messageObject == null || messageObject.messageOwner == null) {
+            return false;
+        }
+        if (messageObject.isReactionPush || messageObject.isStoryReactionPush || messageObject.isStoryPush) {
+            return false;
+        }
+        if (!MessageObject.isForwardedMessage(messageObject.messageOwner)) {
+            return false;
+        }
+        return getAccountInstance().getNotificationsSettings()
+                .getBoolean(NOTIFY_FORWARDS_PREFIX + getSharedPrefKey(dialogId, 0), false);
+    }
 
     public boolean isMutedMessageType(long dialogId, MessageObject messageObject) {
         if (messageObject == null || messageObject.messageOwner == null) {
