@@ -598,4 +598,6 @@
     <string name="SvipeApkInstallAnyway">Всё равно установить</string>
     <string name="SvipeApkBlockedEngines">Опознан %1$d антивирусами из %2$d</string>
     <string name="SvipeApkBlockedListed">Числится в базе вредоносного ПО</string>
+    <string name="UseProxyWeb">WEB-прокси</string>
+    <string name="UseProxyWebInfo">WEB-прокси использует HTTPS-страницу внутри приватного WebView. Введите имя хоста без схемы и пути и 16-байтный секрет MTProxy. Это экспериментальная функция: требуется актуальный Android System WebView, и она рассчитана на проверку при открытом приложении.</string>
 </resources>

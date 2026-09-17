@@ -7,8 +7,8 @@ import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.view.View;
 
-import com.google.android.exoplayer2.Player;
-import com.google.android.exoplayer2.analytics.AnalyticsListener;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.analytics.AnalyticsListener;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;

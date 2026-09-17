@@ -325,4 +325,6 @@
     <string name="SvipeApkInstallAnyway">Baribir o\'rnatish</string>
     <string name="SvipeApkBlockedEngines">%2$d antivirusdan %1$d tasi zararli dedi</string>
     <string name="SvipeApkBlockedListed">Zararli dasturlar bazasida qayd etilgan</string>
+    <string name="UseProxyWeb">WEB proksi</string>
+    <string name="UseProxyWebInfo">WEB proksi yopiq WebView ichidagi HTTPS sahifadan foydalanadi. Sxema va yo\'lsiz host nomini hamda 16 baytli MTProxy maxfiy kalitini kiriting. Bu tajriba rejimi uchun: joriy Android System WebView talab qilinadi va faqat ilova ochiq turganda sinash uchun mo\'ljallangan.</string>
 </resources>

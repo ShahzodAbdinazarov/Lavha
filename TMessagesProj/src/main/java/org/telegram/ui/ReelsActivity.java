@@ -42,8 +42,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.PagerSnapHelper;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.google.android.exoplayer2.ExoPlayer;
-import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
+import androidx.media3.exoplayer.ExoPlayer;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -2160,7 +2159,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 public void onRenderedFirstFrame() { handleFirstFrame(); }
 
                 @Override
-                public void onRenderedFirstFrame(com.google.android.exoplayer2.analytics.AnalyticsListener.EventTime eventTime) { handleFirstFrame(); }
+                public void onRenderedFirstFrame(androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime eventTime) { handleFirstFrame(); }
 
                 private void handleFirstFrame() {
                     if (firstFrameSeen) return;
