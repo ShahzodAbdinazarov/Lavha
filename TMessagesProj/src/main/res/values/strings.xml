@@ -11495,7 +11495,7 @@
     <string name="SvipeNotificationsBotsMute">Mute all bots</string>
     <string name="SvipeNotificationsBotsInfo">Telegram counts bots as private chats, so silencing them means silencing your friends too. This silences only bots — new ones included.</string>
     <string name="SvipeNotificationsBotsExceptions">Bots that still notify</string>
-    <string name="SvipeNotificationsBotsExceptionsInfo">Turn a bot on to keep its notifications while the rest stay silent.</string>
+    <string name="SvipeNotificationsBotsExceptionsInfo">Bots added here keep notifying you while the rest stay silent.</string>
     <string name="SvipeNotificationsBotsOn">On</string>
     <string name="SvipeNotificationsBotsOff">Muted</string>
     <string name="SvipeNotificationsBotOn">Notifies</string>

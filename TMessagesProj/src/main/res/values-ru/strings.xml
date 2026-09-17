@@ -540,7 +540,7 @@
     <string name="SvipeNotificationsBotsMute">Отключить все боты</string>
     <string name="SvipeNotificationsBotsInfo">Telegram считает ботов личными чатами, поэтому отключить их — значит отключить и друзей. Здесь отключаются только боты, включая новые.</string>
     <string name="SvipeNotificationsBotsExceptions">Боты, которые уведомляют</string>
-    <string name="SvipeNotificationsBotsExceptionsInfo">Включите бота, чтобы он уведомлял, пока остальные молчат.</string>
+    <string name="SvipeNotificationsBotsExceptionsInfo">Добавленные сюда боты продолжают уведомлять, остальные молчат.</string>
     <string name="SvipeNotificationsBotsOn">Включены</string>
     <string name="SvipeNotificationsBotsOff">Отключены</string>
     <string name="SvipeNotificationsBotOn">Уведомляет</string>
