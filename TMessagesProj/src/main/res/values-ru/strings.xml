@@ -620,7 +620,8 @@
     <string name="SvipeMutedTypesHeader">Типы сообщений без звука</string>
     <string name="SvipeUnmutedTypesHeader">Типы сообщений со звуком</string>
     <string name="SvipeAddMessageType">Добавить тип сообщений</string>
-    <string name="SvipeMessageTypesInfo">Типы без звука никогда не уведомляют, типы со звуком уведомляют всегда — независимо от того, отключён ли звук у самого чата.</string>
+    <string name="SvipeMutedTypesInfo">Эти типы никогда не уведомляют — даже если у чата звук включён.</string>
+    <string name="SvipeUnmutedTypesInfo">Эти типы уведомляют всегда — даже если у чата отключён звук.</string>
     <string name="SvipeTypeForwards">Пересланные сообщения</string>
     <string name="SvipeTypeLinks">Сообщения со ссылками</string>
     <string name="SvipeTypeMedia">Фото и видео</string>

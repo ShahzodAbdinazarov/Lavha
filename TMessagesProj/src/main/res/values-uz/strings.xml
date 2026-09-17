@@ -347,7 +347,8 @@
     <string name="SvipeMutedTypesHeader">Ovozsiz xabar turlari</string>
     <string name="SvipeUnmutedTypesHeader">Ovozli xabar turlari</string>
     <string name="SvipeAddMessageType">Xabar turini qo\'shish</string>
-    <string name="SvipeMessageTypesInfo">Ovozsiz turlar hech qachon bildirishnoma bermaydi, ovozli turlar esa har doim beradi — suhbatning o\'zi ovozsiz qilinganidan qat\'i nazar.</string>
+    <string name="SvipeMutedTypesInfo">Bu turlar hech qachon bildirishnoma bermaydi — suhbatning o\'zi ovozsiz qilinmagan bo\'lsa ham.</string>
+    <string name="SvipeUnmutedTypesInfo">Bu turlar har doim bildirishnoma beradi — suhbatning o\'zi ovozsiz qilingan bo\'lsa ham.</string>
     <string name="SvipeTypeForwards">Yo\'naltirilgan xabarlar</string>
     <string name="SvipeTypeLinks">Havolali xabarlar</string>
     <string name="SvipeTypeMedia">Rasm va videolar</string>

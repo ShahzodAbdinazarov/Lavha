@@ -11568,7 +11568,8 @@
     <string name="SvipeMutedTypesHeader">Muted message types</string>
     <string name="SvipeUnmutedTypesHeader">Unmuted message types</string>
     <string name="SvipeAddMessageType">Add message type</string>
-    <string name="SvipeMessageTypesInfo">Muted kinds never notify you, unmuted kinds always do — whether or not the chat itself is muted.</string>
+    <string name="SvipeMutedTypesInfo">These kinds never notify you, even when the chat itself is not muted.</string>
+    <string name="SvipeUnmutedTypesInfo">These kinds always notify you, even when the chat itself is muted.</string>
     <string name="SvipeTypeForwards">Forwarded messages</string>
     <string name="SvipeTypeLinks">Messages with links</string>
     <string name="SvipeTypeMedia">Photos and videos</string>

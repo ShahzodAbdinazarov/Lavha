@@ -122,6 +122,9 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
     private int notifiedTypesEnd;
     private int notifiedTypesAddRow;
     private int mutedTypesDeleteRow;
+    private int mutedTypesDeleteShadowRow;
+    private int notifiedTypesDeleteShadowRow;
+    private int mutedTypesInfoRow;
     private int typesShadowRow;
     private int notifiedTypesDeleteRow;
     private int messageTypesInfoRow;
@@ -354,15 +357,29 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
             mutedTypesStart = rowCount;
             rowCount += mutedKinds.size();
             mutedTypesEnd = rowCount;
-            mutedTypesDeleteRow = mutedKinds.isEmpty() ? -1 : rowCount++;
-            // The two lists mean opposite things; run together they read as one long list.
-            typesShadowRow = rowCount++;
+            // Telegram keeps its clear-all row in a section of its own, under the list it clears,
+            // and the note under that. The gap the note leaves is what keeps the two lists apart.
+            if (mutedKinds.isEmpty()) {
+                mutedTypesDeleteShadowRow = -1;
+                mutedTypesDeleteRow = -1;
+            } else {
+                mutedTypesDeleteShadowRow = rowCount++;
+                mutedTypesDeleteRow = rowCount++;
+            }
+            mutedTypesInfoRow = rowCount++;
+            typesShadowRow = -1;
             notifiedTypesRow = rowCount++;
             notifiedTypesAddRow = rowCount++;
             notifiedTypesStart = rowCount;
             rowCount += notifiedKinds.size();
             notifiedTypesEnd = rowCount;
-            notifiedTypesDeleteRow = notifiedKinds.isEmpty() ? -1 : rowCount++;
+            if (notifiedKinds.isEmpty()) {
+                notifiedTypesDeleteShadowRow = -1;
+                notifiedTypesDeleteRow = -1;
+            } else {
+                notifiedTypesDeleteShadowRow = rowCount++;
+                notifiedTypesDeleteRow = rowCount++;
+            }
             messageTypesInfoRow = rowCount++;
         } else {
             mutedTypesRow = -1;
@@ -374,6 +391,9 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
             notifiedTypesEnd = -1;
             notifiedTypesAddRow = -1;
             mutedTypesDeleteRow = -1;
+            mutedTypesDeleteShadowRow = -1;
+            notifiedTypesDeleteShadowRow = -1;
+            mutedTypesInfoRow = -1;
             typesShadowRow = -1;
             notifiedTypesDeleteRow = -1;
             messageTypesInfoRow = -1;
@@ -1045,10 +1065,12 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                         } else {
                             textCell.setText(LocaleController.getString(R.string.PriorityInfo));
                         }
+                    } else if (position == mutedTypesInfoRow) {
+                        textCell.setText(LocaleController.getString(R.string.SvipeMutedTypesInfo));
                     } else if (position == ringtoneInfoRow) {
                         textCell.setText(LocaleController.getString(R.string.VoipRingtoneInfo));
                     } else if (position == messageTypesInfoRow) {
-                        textCell.setText(LocaleController.getString(R.string.SvipeMessageTypesInfo));
+                        textCell.setText(LocaleController.getString(R.string.SvipeUnmutedTypesInfo));
                     }
                     break;
                 }
@@ -1209,7 +1231,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                 return VIEW_TYPE_HEADER;
             } else if (position == soundRow || position == vibrateRow || position == priorityRow || position == smartRow || position == ringtoneRow || position == callsVibrateRow || position == customResetRow) {
                 return VIEW_TYPE_TEXT_SETTINGS;
-            } else if (position == popupInfoRow || position == ledInfoRow || position == priorityInfoRow || position == ringtoneInfoRow || position == messageTypesInfoRow) {
+            } else if (position == popupInfoRow || position == ledInfoRow || position == priorityInfoRow || position == ringtoneInfoRow
+                    || position == messageTypesInfoRow || position == mutedTypesInfoRow) {
                 return VIEW_TYPE_INFO;
             } else if (position == colorRow) {
                 return VIEW_TYPE_TEXT_COLOR;
@@ -1217,7 +1240,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                 return VIEW_TYPE_RADIO;
             } else if (position == avatarRow) {
                 return VIEW_TYPE_USER;
-            } else if (position == avatarSectionRow || position == customResetShadowRow || position == typesShadowRow) {
+            } else if (position == avatarSectionRow || position == customResetShadowRow || position == typesShadowRow
+                    || position == mutedTypesDeleteShadowRow || position == notifiedTypesDeleteShadowRow) {
                 return VIEW_TYPE_SHADOW;
             } else if (position == enableRow || position == previewRow || position == storiesRow) {
                 return VIEW_TYPE_TEXT_CHECK;
