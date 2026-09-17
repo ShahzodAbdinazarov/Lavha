@@ -877,6 +877,8 @@ public class NotificationsCustomSettingsActivity extends BaseFragment implements
                         updateRows(true);
                     }
                 }));
+            } else if (item.id == 101) {
+                presentFragment(new org.telegram.svipe.SvipeMessageTypesActivity(svipeScope(), R.string.SvipeMessageTypes));
             } else if (item.id == 4) {
                 if (!view.isEnabled()) {
                     return;
@@ -1355,6 +1357,18 @@ public class NotificationsCustomSettingsActivity extends BaseFragment implements
     @Keep
     public int soundRow = -1;
     @Keep
+    /** Which class of chats this screen is for, in the words the message-type rules use. */
+    private String svipeScope() {
+        if (currentType == TYPE_PRIVATE) {
+            return NotificationsController.SCOPE_PRIVATE;
+        } else if (currentType == TYPE_GROUP) {
+            return NotificationsController.SCOPE_GROUPS;
+        } else if (currentType == TYPE_CHANNEL) {
+            return NotificationsController.SCOPE_CHANNELS;
+        }
+        return null;
+    }
+
     public int addExceptionRow = -1;
     @Keep
     public int deleteExceptionsRow = -1;
@@ -1509,6 +1523,14 @@ public class NotificationsCustomSettingsActivity extends BaseFragment implements
                 items.add(ItemInner.asExpand(getString(R.string.NotifyMoreOptions), true));
             }
             settingsEnd = items.size() - 1;
+
+            // Svipe: the same message-type exceptions a single chat can carry, written for this
+            // whole category at once — out of the collapsed block, since it is not a sound setting
+            // and a rule nobody can find is a rule nobody uses. A chat's own rule still wins.
+            if (svipeScope() != null) {
+                items.add(ItemInner.asShadow(-21, null));
+                items.add(ItemInner.asSetting(101, getString(R.string.SvipeMessageTypes), ""));
+            }
 
             items.add(ItemInner.asShadow(-2, null));
         }

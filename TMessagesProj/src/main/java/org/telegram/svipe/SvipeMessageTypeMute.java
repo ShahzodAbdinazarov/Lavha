@@ -4,6 +4,7 @@ import android.content.SharedPreferences;
 
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationsController;
+import org.telegram.messenger.R;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -26,6 +27,46 @@ import java.util.Set;
 public final class SvipeMessageTypeMute {
 
     private SvipeMessageTypeMute() {}
+
+    /** The same switch written for a class of chats rather than one: the scope replaces the id. */
+    public static boolean isMutedScope(int account, String prefix, String scope) {
+        return notifications(account).getBoolean(prefix + scope, false);
+    }
+
+    public static void setMutedScope(int account, String prefix, String scope, boolean on) {
+        SharedPreferences.Editor e = notifications(account).edit();
+        if (on) {
+            e.putBoolean(prefix + scope, true);
+        } else {
+            e.remove(prefix + scope);
+        }
+        e.apply();
+        touch(account);
+        SvipeSettingsSync.push(account);
+    }
+
+    /** The name and the icon of a kind, shared by every screen that lists them. */
+    public static int labelOf(String kind) {
+        switch (kind) {
+            case "links": return R.string.SvipeTypeLinks;
+            case "media": return R.string.SvipeTypeMedia;
+            case "voice": return R.string.SvipeTypeVoice;
+            case "stickers": return R.string.SvipeTypeStickers;
+            case "files": return R.string.SvipeTypeFiles;
+        }
+        return R.string.SvipeTypeForwards;
+    }
+
+    public static int iconOf(String kind) {
+        switch (kind) {
+            case "links": return R.drawable.msg_link;
+            case "media": return R.drawable.msg_filled_data_photos;
+            case "voice": return R.drawable.msg_filled_data_voice;
+            case "stickers": return R.drawable.msg_emoji_stickers;
+            case "files": return R.drawable.msg_filled_data_files;
+        }
+        return R.drawable.msg_forward;
+    }
 
     public static boolean isMuted(int account, String prefix, long dialogId, long topicId) {
         return notifications(account).getBoolean(prefixed(prefix, dialogId, topicId), false);

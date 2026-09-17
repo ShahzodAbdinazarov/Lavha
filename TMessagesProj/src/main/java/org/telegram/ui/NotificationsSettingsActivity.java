@@ -108,6 +108,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
     @Keep
     private int privateRow;
     private int botsRow;   // Svipe: bots are their own category (Telegram files them under private chats)
+    private int messageTypesRow;   // Svipe: message-type rules for every chat at once
     @Keep
     private int groupRow;
     @Keep
@@ -184,6 +185,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
         channelsRow = rowCount++;
         storiesRow = rowCount++;
         reactionsRow = rowCount++;
+        messageTypesRow = rowCount++;
         notificationsSection2Row = rowCount++;
 
         callsSectionRow = rowCount++;
@@ -513,6 +515,11 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
             }
             if (position == botsRow) {
                 presentFragment(new org.telegram.svipe.SvipeBotNotificationsActivity());
+                return;
+            }
+            if (position == messageTypesRow) {
+                presentFragment(new org.telegram.svipe.SvipeMessageTypesActivity(
+                        NotificationsController.SCOPE_ALL, R.string.SvipeMessageTypesAll));
                 return;
             }
             if (position == privateRow || position == groupRow || position == channelsRow || position == storiesRow || position == reactionsRow) {
@@ -1170,7 +1177,9 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 case 5: {
                     TextSettingsCell textCell = (TextSettingsCell) holder.itemView;
                     SharedPreferences preferences = MessagesController.getNotificationsSettings(currentAccount);
-                    if (position == callsRingtoneRow) {
+                    if (position == messageTypesRow) {
+                        textCell.setText(getString(R.string.SvipeMessageTypesAll), true);
+                    } else if (position == callsRingtoneRow) {
                         String value = preferences.getString("CallsRingtone", getString("DefaultRingtone", R.string.DefaultRingtone));
                         if (value.equals("NoSound")) {
                             value = getString("NoSound", R.string.NoSound);
@@ -1230,6 +1239,8 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 return 1;
             } else if (position == resetNotificationsRow) {
                 return 2;
+            } else if (position == messageTypesRow) {
+                return 5;
             } else if (position == botsRow) {
                 return 7;   // Svipe: same cell as the categories above, but our own rule behind it
             } else if (position == privateRow || position == groupRow || position == channelsRow || position == storiesRow || position == reactionsRow) {

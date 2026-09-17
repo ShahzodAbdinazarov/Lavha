@@ -9,12 +9,14 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.NotificationsController;
 import org.telegram.messenger.R;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.HeaderCell;
+import org.telegram.ui.Cells.TextCell;
 import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.UserCell;
@@ -41,6 +43,7 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
     private ListAdapter adapter;
     private final ArrayList<TLRPC.User> bots = new ArrayList<>();
 
+    private int typesRow;
     private int muteRow;
     private int muteInfoRow;
     private int exceptionsHeaderRow;
@@ -61,6 +64,7 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
         rowCount = 0;
         muteRow = rowCount++;
         muteInfoRow = rowCount++;
+        typesRow = rowCount++;
         if (!bots.isEmpty()) {
             exceptionsHeaderRow = rowCount++;
             botsStartRow = rowCount;
@@ -105,6 +109,8 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
                 SvipeBotMute.setEnabled(currentAccount, muted);
                 ((TextCheckCell) view).setChecked(muted);
                 if (adapter != null) adapter.notifyDataSetChanged();
+            } else if (position == typesRow) {
+                presentFragment(new SvipeMessageTypesActivity(NotificationsController.SCOPE_BOTS, R.string.SvipeMessageTypes));
             } else if (position >= botsStartRow && position < botsEndRow) {
                 TLRPC.User bot = bots.get(position - botsStartRow);
                 boolean nowExcepted = !SvipeBotMute.isException(currentAccount, bot.id);
@@ -136,7 +142,7 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
             if (position >= botsStartRow && position < botsEndRow) {
                 return SvipeBotMute.isEnabled(currentAccount);
             }
-            return position == muteRow;
+            return position == muteRow || position == typesRow;
         }
 
         @Override
@@ -144,6 +150,7 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
             if (position == muteRow) return 0;
             if (position == muteInfoRow || position == exceptionsInfoRow) return 1;
             if (position == exceptionsHeaderRow) return 2;
+            if (position == typesRow) return 4;
             return 3;
         }
 
@@ -161,6 +168,10 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
                     break;
                 case 2:
                     view = new HeaderCell(context);
+                    view.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                    break;
+                case 4:
+                    view = new TextCell(context);
                     view.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
                     break;
                 default:
@@ -191,6 +202,11 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
                     }
                     cell.setBackground(Theme.getThemedDrawableByKey(context,
                             R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+                    break;
+                }
+                case 4: {
+                    TextCell cell = (TextCell) holder.itemView;
+                    cell.setTextAndIcon(LocaleController.getString(R.string.SvipeMessageTypes), R.drawable.msg_message, false);
                     break;
                 }
                 case 2: {

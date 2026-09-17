@@ -629,4 +629,6 @@
     <string name="SvipeTypeStickers">Стикеры и GIF</string>
     <string name="SvipeTypeFiles">Файлы и музыка</string>
     <string name="SvipeDeleteMessageTypes">Удалить все типы сообщений</string>
+    <string name="SvipeMessageTypes">Типы сообщений</string>
+    <string name="SvipeMessageTypesAll">Типы сообщений во всех чатах</string>
 </resources>

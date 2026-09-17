@@ -6250,6 +6250,37 @@ public class NotificationsController extends BaseController implements Notificat
      */
     public static final String[] MESSAGE_KINDS = {"forwards", "links", "media", "voice", "stickers", "files"};
 
+    /**
+     * A rule can be written for one chat or for a whole class of them. The scope is the second half
+     * of the pref key: a dialog id for one chat, or one of these names for the broader rules, which
+     * a chat falls back to when it carries no rule of its own.
+     */
+    public static final String SCOPE_ALL = "all";
+    public static final String SCOPE_PRIVATE = "private";
+    public static final String SCOPE_GROUPS = "groups";
+    public static final String SCOPE_CHANNELS = "channels";
+    public static final String SCOPE_BOTS = "bots";
+
+    public String scopeOf(long dialogId) {
+        if (DialogObject.isUserDialog(dialogId)) {
+            TLRPC.User user = getMessagesController().getUser(dialogId);
+            return user != null && user.bot ? SCOPE_BOTS : SCOPE_PRIVATE;
+        }
+        TLRPC.Chat chat = getMessagesController().getChat(-dialogId);
+        return ChatObject.isChannel(chat) && !chat.megagroup ? SCOPE_CHANNELS : SCOPE_GROUPS;
+    }
+
+    /** The chat's own rule first, then its kind of chat, then every chat. */
+    private boolean kindRule(SharedPreferences prefs, String prefix, String kind, long dialogId) {
+        if (prefs.getBoolean(prefix + kind + "_" + getSharedPrefKey(dialogId, 0), false)) {
+            return true;
+        }
+        if (prefs.getBoolean(prefix + kind + "_" + scopeOf(dialogId), false)) {
+            return true;
+        }
+        return prefs.getBoolean(prefix + kind + "_" + SCOPE_ALL, false);
+    }
+
     public static String muteKindKey(String kind) {
         return "svipe_mute_" + kind + "_";
     }
@@ -6324,9 +6355,8 @@ public class NotificationsController extends BaseController implements Notificat
             return false;
         }
         SharedPreferences prefs = getAccountInstance().getNotificationsSettings();
-        String key = getSharedPrefKey(dialogId, 0);
         for (String kind : MESSAGE_KINDS) {
-            if (prefs.getBoolean(notifyKindKey(kind) + key, false) && isKind(messageObject, kind)) {
+            if (kindRule(prefs, "svipe_notify_", kind, dialogId) && isKind(messageObject, kind)) {
                 return true;
             }
         }
@@ -6341,9 +6371,8 @@ public class NotificationsController extends BaseController implements Notificat
             return false;
         }
         SharedPreferences prefs = getAccountInstance().getNotificationsSettings();
-        String key = getSharedPrefKey(dialogId, 0);
         for (String kind : MESSAGE_KINDS) {
-            if (prefs.getBoolean(muteKindKey(kind) + key, false) && isKind(messageObject, kind)) {
+            if (kindRule(prefs, "svipe_mute_", kind, dialogId) && isKind(messageObject, kind)) {
                 return true;
             }
         }
@@ -6374,9 +6403,8 @@ public class NotificationsController extends BaseController implements Notificat
             return false;
         }
         SharedPreferences prefs = getAccountInstance().getNotificationsSettings();
-        String key = getSharedPrefKey(dialogId, 0);
         for (String kind : MESSAGE_KINDS) {
-            if (prefs.getBoolean(muteKindKey(kind) + key, false)) {
+            if (kindRule(prefs, "svipe_mute_", kind, dialogId)) {
                 return true;
             }
         }

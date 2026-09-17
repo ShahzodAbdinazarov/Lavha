@@ -148,30 +148,6 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
         return notifiedTypesStart != -1 && position >= notifiedTypesStart && position < notifiedTypesEnd;
     }
 
-    /** The name of a kind, in the plain form both lists use: the list it sits in says what it does. */
-    private static int typeLabel(String kind) {
-        switch (kind) {
-            case "links": return R.string.SvipeTypeLinks;
-            case "media": return R.string.SvipeTypeMedia;
-            case "voice": return R.string.SvipeTypeVoice;
-            case "stickers": return R.string.SvipeTypeStickers;
-            case "files": return R.string.SvipeTypeFiles;
-        }
-        return R.string.SvipeTypeForwards;
-    }
-
-    /** Telegram already draws each of these kinds somewhere; reuse its icon rather than invent one. */
-    private static int typeIcon(String kind) {
-        switch (kind) {
-            case "links": return R.drawable.msg_link;
-            case "media": return R.drawable.msg_filled_data_photos;
-            case "voice": return R.drawable.msg_filled_data_voice;
-            case "stickers": return R.drawable.msg_emoji_stickers;
-            case "files": return R.drawable.msg_filled_data_files;
-        }
-        return R.drawable.msg_forward;
-    }
-
     /** The red row under a list, the way Telegram clears its own exceptions: all of them at once. */
     private void clearTypes(boolean muted) {
         for (String kind : NotificationsController.MESSAGE_KINDS) {
@@ -212,9 +188,9 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                     ? NotificationsController.muteKindKey(kind)
                     : NotificationsController.notifyKindKey(kind);
             TextCell cell = new TextCell(context, 23, false, true, resourcesProvider);
-            cell.setTextAndCheckAndIcon(LocaleController.getString(typeLabel(kind)),
+            cell.setTextAndCheckAndIcon(LocaleController.getString(SvipeMessageTypeMute.labelOf(kind)),
                     SvipeMessageTypeMute.isMuted(currentAccount, prefix, dialogId, topicId),
-                    typeIcon(kind), i < kinds.length - 1);
+                    SvipeMessageTypeMute.iconOf(kind), i < kinds.length - 1);
             cell.setOnClickListener(v -> {
                 boolean value = !SvipeMessageTypeMute.isMuted(currentAccount, prefix, dialogId, topicId);
                 SvipeMessageTypeMute.setMuted(currentAccount, prefix, dialogId, topicId, value);
@@ -1162,7 +1138,7 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                                 : notifiedKinds.get(position - notifiedTypesStart);
                         int last = (muted ? mutedTypesEnd : notifiedTypesEnd) - 1;
                         textCell.setColors(Theme.key_windowBackgroundWhiteGrayIcon, Theme.key_windowBackgroundWhiteBlackText);
-                        textCell.setTextAndIcon(LocaleController.getString(typeLabel(kind)), typeIcon(kind), position != last);
+                        textCell.setTextAndIcon(LocaleController.getString(SvipeMessageTypeMute.labelOf(kind)), SvipeMessageTypeMute.iconOf(kind), position != last);
                     }
                     break;
                 }
