@@ -122,6 +122,7 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
     private int notifiedTypesEnd;
     private int notifiedTypesAddRow;
     private int mutedTypesDeleteRow;
+    private int typesShadowRow;
     private int notifiedTypesDeleteRow;
     private int messageTypesInfoRow;
     private final ArrayList<String> mutedKinds = new ArrayList<>();
@@ -354,6 +355,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
             rowCount += mutedKinds.size();
             mutedTypesEnd = rowCount;
             mutedTypesDeleteRow = mutedKinds.isEmpty() ? -1 : rowCount++;
+            // The two lists mean opposite things; run together they read as one long list.
+            typesShadowRow = rowCount++;
             notifiedTypesRow = rowCount++;
             notifiedTypesAddRow = rowCount++;
             notifiedTypesStart = rowCount;
@@ -371,6 +374,7 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
             notifiedTypesEnd = -1;
             notifiedTypesAddRow = -1;
             mutedTypesDeleteRow = -1;
+            typesShadowRow = -1;
             notifiedTypesDeleteRow = -1;
             messageTypesInfoRow = -1;
         }
@@ -1213,7 +1217,7 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                 return VIEW_TYPE_RADIO;
             } else if (position == avatarRow) {
                 return VIEW_TYPE_USER;
-            } else if (position == avatarSectionRow || position == customResetShadowRow) {
+            } else if (position == avatarSectionRow || position == customResetShadowRow || position == typesShadowRow) {
                 return VIEW_TYPE_SHADOW;
             } else if (position == enableRow || position == previewRow || position == storiesRow) {
                 return VIEW_TYPE_TEXT_CHECK;
