@@ -6246,7 +6246,10 @@ public class NotificationsController extends BaseController implements Notificat
             return false;
         }
         if (!MessageObject.isForwardedMessage(messageObject.messageOwner)) {
-            return false;
+            // A push-built message carries no fwd_from, so on its own it looks like any other
+            // message — including to the dialog list, which would paint the counter as if the
+            // phone had rung. The verdict already passed on this id is the missing evidence.
+            return isKnownMutedTypeMessage(dialogId, messageObject.getId());
         }
         return getAccountInstance().getNotificationsSettings()
                 .getBoolean(MUTE_FORWARDS_PREFIX + getSharedPrefKey(dialogId, 0), false);
@@ -6293,7 +6296,10 @@ public class NotificationsController extends BaseController implements Notificat
             return false;
         }
         HashSet<Integer> ids = mutedTypeMessages.get(dialogId);
-        return ids != null && ids.contains(mid);
+        if (ids != null && ids.contains(mid)) {
+            return true;
+        }
+        return org.telegram.svipe.SvipeMessageTypeMute.isKnownMuted(currentAccount, dialogId, mid);
     }
 
     private void rememberMutedTypeMessage(long dialogId, int mid) {
@@ -6309,6 +6315,7 @@ public class NotificationsController extends BaseController implements Notificat
             ids.clear();
         }
         ids.add(mid);
+        org.telegram.svipe.SvipeMessageTypeMute.rememberMuted(currentAccount, dialogId, mid);
     }
 
     /**

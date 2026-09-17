@@ -91,6 +91,45 @@ public final class SvipeMessageTypeMute {
                 .putLong(SvipeConfig.PREF_TYPE_MUTE_UPDATED, updatedAt).apply();
     }
 
+    /**
+     * The verdict has to outlive the process. The server re-pushes a message that stays unread, and
+     * by then the app may have been killed and restarted — a verdict kept only in memory is gone,
+     * the repeat looks like a brand new message with nothing to judge it by, and the forward that
+     * was silenced an hour ago rings after all. Keep the last ids judged per dialog on disk.
+     */
+    private static final int REMEMBERED_IDS = 64;
+
+    public static boolean isKnownMuted(int account, long dialogId, int mid) {
+        if (mid == 0) return false;
+        String stored = notifications(account).getString(judgedKey(dialogId), null);
+        if (stored == null) return false;
+        for (String part : stored.split(",")) {
+            if (part.equals(Integer.toString(mid))) return true;
+        }
+        return false;
+    }
+
+    public static void rememberMuted(int account, long dialogId, int mid) {
+        if (mid == 0 || isKnownMuted(account, dialogId, mid)) return;
+        String stored = notifications(account).getString(judgedKey(dialogId), "");
+        ArrayList<String> ids = new ArrayList<>();
+        if (stored.length() > 0) {
+            for (String part : stored.split(",")) ids.add(part);
+        }
+        ids.add(Integer.toString(mid));
+        while (ids.size() > REMEMBERED_IDS) ids.remove(0);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(ids.get(i));
+        }
+        notifications(account).edit().putString(judgedKey(dialogId), sb.toString()).apply();
+    }
+
+    private static String judgedKey(long dialogId) {
+        return "svipe_muted_type_mids_" + dialogId;
+    }
+
     private static String key(long dialogId, long topicId) {
         return NotificationsController.MUTE_FORWARDS_PREFIX + NotificationsController.getSharedPrefKey(dialogId, topicId);
     }
