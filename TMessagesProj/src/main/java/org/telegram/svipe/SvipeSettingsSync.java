@@ -84,7 +84,7 @@ public final class SvipeSettingsSync {
             String[] prefixes = typePrefixes();
             for (int i = 0; i < lists.length; i++) {
                 JSONArray ids = new JSONArray();
-                for (Long id : SvipeMessageTypeMute.dialogsFor(account, prefixes[i])) ids.put(id);
+                for (String id : SvipeMessageTypeMute.dialogsFor(account, prefixes[i])) ids.put(id);
                 value.put(lists[i], ids);
             }
 
@@ -151,8 +151,8 @@ public final class SvipeSettingsSync {
                     for (int t = 0; t < lists.length; t++) {
                         JSONArray ids = value.optJSONArray(lists[t]);
                         if (ids == null) continue;
-                        List<Long> dialogs = new ArrayList<>();
-                        for (int i = 0; i < ids.length(); i++) dialogs.add(ids.optLong(i));
+                        List<String> dialogs = new ArrayList<>();
+                        for (int i = 0; i < ids.length(); i++) dialogs.add(ids.optString(i));
                         SvipeMessageTypeMute.adoptList(account, prefixes[t], dialogs, remoteAt);
                     }
                 } catch (Exception e) {

@@ -100,12 +100,7 @@ public final class SvipeMessageTypeMute {
         setMuted(account, NotificationsController.NOTIFY_FORWARDS_PREFIX, dialogId, topicId, notify);
     }
 
-    /** Every dialog whose forwards notify despite the mute. */
-    public static List<Long> notifiedForwardDialogs(int account) {
-        return dialogsWith(account, NotificationsController.NOTIFY_FORWARDS_PREFIX);
-    }
-
-    public static List<Long> dialogsFor(int account, String prefix) {
+    public static List<String> dialogsFor(int account, String prefix) {
         return dialogsWith(account, prefix);
     }
 
@@ -113,16 +108,17 @@ public final class SvipeMessageTypeMute {
      * Adopt one list from another device. Whatever is not on it is no longer set, so a switch turned
      * OFF elsewhere travels just as well as one turned on. Does not push back.
      */
-    public static void adoptList(int account, String prefix, List<Long> dialogs, long updatedAt) {
-        Set<Long> wanted = new HashSet<>(dialogs);
+    public static void adoptList(int account, String prefix, List<String> dialogs, long updatedAt) {
+        Set<String> wanted = new HashSet<>(dialogs);
         SharedPreferences.Editor e = notifications(account).edit();
-        for (Long id : dialogsWith(account, prefix)) {
+        for (String id : dialogsWith(account, prefix)) {
             if (!wanted.contains(id)) {
-                e.remove(prefixed(prefix, id, 0));
+                e.remove(prefix + id);
             }
         }
-        for (Long id : wanted) {
-            e.putBoolean(prefixed(prefix, id, 0), true);
+        for (String id : wanted) {
+            if (id.length() == 0) continue;
+            e.putBoolean(prefix + id, true);
         }
         e.apply();
         MessagesController.getMainSettings(account).edit()
@@ -133,18 +129,18 @@ public final class SvipeMessageTypeMute {
         return prefix + NotificationsController.getSharedPrefKey(dialogId, topicId);
     }
 
-    /** Every dialog whose forwards are silenced — what the other devices need to know. */
-    public static List<Long> mutedForwardDialogs(int account) {
-        return dialogsWith(account, NotificationsController.MUTE_FORWARDS_PREFIX);
-    }
-
 
     private static String notifyKey(long dialogId, long topicId) {
         return NotificationsController.NOTIFY_FORWARDS_PREFIX + NotificationsController.getSharedPrefKey(dialogId, topicId);
     }
 
-    private static List<Long> dialogsWith(int account, String prefix) {
-        List<Long> ids = new ArrayList<>();
+    /**
+     * Everything a rule can be written for, as the key spells it: a dialog id, or one of the scope
+     * names. Strings, not ids — a rule written for "all chats" travels between installs exactly like
+     * a rule written for one chat, and reading these as numbers is what used to drop them.
+     */
+    private static List<String> dialogsWith(int account, String prefix) {
+        List<String> ids = new ArrayList<>();
         for (Map.Entry<String, ?> entry : notifications(account).getAll().entrySet()) {
             String k = entry.getKey();
             if (k == null || !k.startsWith(prefix)) continue;
@@ -152,10 +148,7 @@ public final class SvipeMessageTypeMute {
             String id = k.substring(prefix.length());
             // Topics carry a "dialog_topic" key; they are not synced, only whole dialogs are.
             if (id.indexOf('_') >= 0) continue;
-            try {
-                ids.add(Long.parseLong(id));
-            } catch (NumberFormatException ignore) {
-            }
+            ids.add(id);
         }
         return ids;
     }
