@@ -1,6 +1,8 @@
 package org.telegram.svipe;
 
 import android.content.Context;
+import android.os.Bundle;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -24,7 +26,11 @@ import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.UserCell;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.BulletinFactory;
+import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.RecyclerListView;
+import org.telegram.ui.DialogsActivity;
+import org.telegram.ui.ProfileNotificationsActivity;
 
 import java.util.ArrayList;
 
@@ -141,9 +147,20 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
                 }
                 refresh();
             } else if (position >= botsStartRow && position < botsEndRow) {
-                TLRPC.User bot = bots.get(position - botsStartRow);
-                SvipeBotMute.setException(currentAccount, bot.id, false);
-                refresh();
+                final TLRPC.User bot = bots.get(position - botsStartRow);
+                ItemOptions.makeOptions(this, view)
+                    .setGravity(Gravity.LEFT)
+                    .add(R.drawable.msg_customize, LocaleController.getString(R.string.NotificationsCustomize), () -> {
+                        Bundle args = new Bundle();
+                        args.putLong("dialog_id", bot.id);
+                        presentFragment(new ProfileNotificationsActivity(args));
+                    })
+                    .add(R.drawable.msg_mute, LocaleController.getString(R.string.NotificationsStoryMute), true, () -> {
+                        SvipeBotMute.setException(currentAccount, bot.id, false);
+                        refresh();
+                    })
+                    .setScrimViewBackground(listView.getClipBackground(view))
+                    .show();
             }
         });
         return fragmentView;
@@ -283,38 +300,33 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
      * actually has a chat with. Picking one makes it an exception and closes the sheet, the way
      * choosing a contact there does.
      */
+    /**
+     * The same Select Chat screen Telegram opens from Add Exception, narrowed to users and then to
+     * bots — the picker has no bots-only mode, so a person picked here is turned down rather than
+     * quietly added to a list about bots.
+     */
     private void showBotPicker() {
-        Context context = getParentActivity();
-        if (context == null) {
-            return;
-        }
-        ArrayList<TLRPC.User> candidates = new ArrayList<>();
-        for (TLRPC.User bot : SvipeBotMute.botDialogs(currentAccount)) {
-            if (!SvipeBotMute.isException(currentAccount, bot.id)) {
-                candidates.add(bot);
+        Bundle args = new Bundle();
+        args.putBoolean("onlySelect", true);
+        args.putBoolean("checkCanWrite", false);
+        args.putInt("dialogsType", DialogsActivity.DIALOGS_TYPE_USERS_ONLY);
+        DialogsActivity activity = new DialogsActivity(args);
+        activity.setDelegate((fragment, dids, message, param, notify, scheduleDate, scheduleRepeatPeriod, topicsFragment) -> {
+            if (dids.isEmpty()) {
+                return true;
             }
-        }
-        LinearLayout layout = new LinearLayout(context);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        HeaderCell header = new HeaderCell(context);
-        header.setText(LocaleController.getString(R.string.NotificationsAddAnException));
-        layout.addView(header, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-        final BottomSheet[] sheet = new BottomSheet[1];
-        for (int i = 0; i < candidates.size(); i++) {
-            final TLRPC.User bot = candidates.get(i);
-            UserCell cell = new UserCell(context, 6, 0, false);
-            cell.setData(bot, null, null, 0, i < candidates.size() - 1);
-            cell.setOnClickListener(v -> {
-                SvipeBotMute.setException(currentAccount, bot.id, true);
-                refresh();
-                if (sheet[0] != null) {
-                    sheet[0].dismiss();
-                }
-            });
-            layout.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 58));
-        }
-        sheet[0] = new BottomSheet.Builder(context, false).setCustomView(layout).create();
-        showDialog(sheet[0]);
+            long did = dids.get(0).dialogId;
+            TLRPC.User user = getMessagesController().getUser(did);
+            if (user == null || !user.bot) {
+                BulletinFactory.of(fragment).createErrorBulletin(LocaleController.getString(R.string.SvipeNotificationsBotsOnlyBots)).show();
+                return false;
+            }
+            SvipeBotMute.setException(currentAccount, did, true);
+            fragment.finishFragment();
+            refresh();
+            return true;
+        });
+        presentFragment(activity);
     }
 
     /** Used by the Notifications screen's row to describe the rule without opening it. */

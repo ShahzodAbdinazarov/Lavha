@@ -359,4 +359,5 @@
     <string name="SvipeMessageTypes">Xabar turlari</string>
     <string name="SvipeMessageTypesAll">Barcha suhbatlarda xabar turlari</string>
     <string name="SvipeNotificationsBotsMessages">Botlardan yangi xabarlar</string>
+    <string name="SvipeNotificationsBotsOnlyBots">Bu yerga faqat botlarni qo&#8217;shish mumkin.</string>
 </resources>

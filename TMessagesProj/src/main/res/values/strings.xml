@@ -11580,4 +11580,5 @@
     <string name="SvipeMessageTypes">Message types</string>
     <string name="SvipeMessageTypesAll">Message types in all chats</string>
     <string name="SvipeNotificationsBotsMessages">New Messages from Bots</string>
+    <string name="SvipeNotificationsBotsOnlyBots">Only bots can be added here.</string>
 </resources>

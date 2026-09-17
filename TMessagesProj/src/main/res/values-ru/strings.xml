@@ -632,4 +632,5 @@
     <string name="SvipeMessageTypes">Типы сообщений</string>
     <string name="SvipeMessageTypesAll">Типы сообщений во всех чатах</string>
     <string name="SvipeNotificationsBotsMessages">Новые сообщения от ботов</string>
+    <string name="SvipeNotificationsBotsOnlyBots">Сюда можно добавлять только ботов.</string>
 </resources>
