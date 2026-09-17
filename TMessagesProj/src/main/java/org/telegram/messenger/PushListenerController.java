@@ -1456,6 +1456,14 @@ public class PushListenerController {
                                         messageOwner.from_id = messageOwner.peer_id;
                                     }
                                     messageOwner.mentioned = mention || pinned;
+                                    // Svipe: a push carries no fwd_from, so the per-dialog "mute
+                                    // forwards" exception would never see a forward that arrived
+                                    // while the app was asleep. The *_FWDS push keys are the one
+                                    // case the server does name, so mark those as forwarded here.
+                                    if (loc_key.endsWith("_FWDS")) {
+                                        messageOwner.fwd_from = new TLRPC.TL_messageFwdHeader();
+                                        messageOwner.flags |= TLRPC.MESSAGE_FLAG_FWD;
+                                    }
                                     messageOwner.silent = silent;
                                     messageOwner.from_scheduled = scheduled;
 

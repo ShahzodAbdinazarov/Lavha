@@ -109,6 +109,9 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
     private int ledRow;
     private int colorRow;
     private int ledInfoRow;
+    private int messageTypesRow;
+    private int muteForwardsRow;
+    private int messageTypesInfoRow;
     private int customResetRow;
     private int customResetShadowRow;
     private int rowCount;
@@ -220,6 +223,20 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
         ledRow = rowCount++;
         colorRow = rowCount++;
         ledInfoRow = rowCount++;
+
+        // Svipe: exceptions inside the exception. The dialog stays unmuted, but the kinds of
+        // message listed here arrive silently — someone you want to hear from can still flood you
+        // with forwards. Private chats only: a group's noise is already handled by its own
+        // settings.
+        if (DialogObject.isUserDialog(dialogId) && !DialogObject.isEncryptedDialog(dialogId)) {
+            messageTypesRow = rowCount++;
+            muteForwardsRow = rowCount++;
+            messageTypesInfoRow = rowCount++;
+        } else {
+            messageTypesRow = -1;
+            muteForwardsRow = -1;
+            messageTypesInfoRow = -1;
+        }
 
         if (!addingException) {
             customResetRow = rowCount++;
@@ -518,6 +535,13 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                     edit.putBoolean("stories_" + key, value);
                 }
                 edit.apply();getNotificationsController().updateServerNotificationsSettings(dialogId, topicId);
+            } else if (position == muteForwardsRow) {
+                TextCheckCell checkCell = (TextCheckCell) view;
+                boolean value = !checkCell.isChecked();
+                checkCell.setChecked(value);
+                MessagesController.getNotificationsSettings(currentAccount).edit()
+                        .putBoolean(NotificationsController.MUTE_FORWARDS_PREFIX + NotificationsController.getSharedPrefKey(dialogId, topicId), value)
+                        .apply();
             }
         });
 
@@ -760,6 +784,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                         headerCell.setText(LocaleController.getString(R.string.NotificationsLed));
                     } else if (position == callsRow) {
                         headerCell.setText(LocaleController.getString(R.string.VoipNotificationSettings));
+                    } else if (position == messageTypesRow) {
+                        headerCell.setText(LocaleController.getString(R.string.SvipeNotifyTypesHeader));
                     }
                     break;
                 }
@@ -857,6 +883,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                         }
                     } else if (position == ringtoneInfoRow) {
                         textCell.setText(LocaleController.getString(R.string.VoipRingtoneInfo));
+                    } else if (position == messageTypesInfoRow) {
+                        textCell.setText(LocaleController.getString(R.string.SvipeNotifyMuteForwardsInfo));
                     }
                     break;
                 }
@@ -928,6 +956,10 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                         String key = NotificationsController.getSharedPrefKey(dialogId, topicId);
                         boolean value = preferences.getBoolean("stories_" + key, isInTop5Peers || preferences.contains("EnableAllStories") && preferences.getBoolean("EnableAllStories", true));
                         checkCell.setTextAndCheck(LocaleController.getString(R.string.StoriesSoundEnabled), value, true);
+                    } else if (position == muteForwardsRow) {
+                        String key = NotificationsController.getSharedPrefKey(dialogId, topicId);
+                        boolean value = preferences.getBoolean(NotificationsController.MUTE_FORWARDS_PREFIX + key, false);
+                        checkCell.setTextAndCheck(LocaleController.getString(R.string.SvipeNotifyMuteForwards), value, false);
                     }
                     break;
                 }
@@ -986,11 +1018,11 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
 
         @Override
         public int getItemViewType(int position) {
-            if (position == generalRow || position == popupRow || position == ledRow || position == callsRow) {
+            if (position == generalRow || position == popupRow || position == ledRow || position == callsRow || position == messageTypesRow) {
                 return VIEW_TYPE_HEADER;
             } else if (position == soundRow || position == vibrateRow || position == priorityRow || position == smartRow || position == ringtoneRow || position == callsVibrateRow || position == customResetRow) {
                 return VIEW_TYPE_TEXT_SETTINGS;
-            } else if (position == popupInfoRow || position == ledInfoRow || position == priorityInfoRow || position == ringtoneInfoRow) {
+            } else if (position == popupInfoRow || position == ledInfoRow || position == priorityInfoRow || position == ringtoneInfoRow || position == messageTypesInfoRow) {
                 return VIEW_TYPE_INFO;
             } else if (position == colorRow) {
                 return VIEW_TYPE_TEXT_COLOR;
@@ -1000,7 +1032,7 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                 return VIEW_TYPE_USER;
             } else if (position == avatarSectionRow || position == customResetShadowRow) {
                 return VIEW_TYPE_SHADOW;
-            } else if (position == enableRow || position == previewRow || position == storiesRow) {
+            } else if (position == enableRow || position == previewRow || position == storiesRow || position == muteForwardsRow) {
                 return VIEW_TYPE_TEXT_CHECK;
             }
             return VIEW_TYPE_HEADER;

@@ -79,6 +79,7 @@ import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.NotificationCenter;
+import org.telegram.messenger.NotificationsController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
@@ -4944,8 +4945,16 @@ public class DialogCell extends BaseCell implements StoriesListPlaceProvider.Ava
             return !hasUnmutedCommunityDialogs;
         } else if (isTopic) {
             return topicMuted;
+        } else if (chat != null && chat.forum && forumTopic == null) {
+            return !hasUnmutedTopics;
+        } else if (dialogMuted) {
+            return true;
         } else {
-            return chat != null && chat.forum && forumTopic == null ? !hasUnmutedTopics : dialogMuted;
+            // Svipe: the chat itself is unmuted, but the newest thing in it is a kind of message
+            // this chat has an exception for, so the phone stayed silent. Grey the counter to match
+            // what actually happened instead of promising a notification that never arrived.
+            return isDialogCell && message != null && !message.isOutOwner()
+                    && NotificationsController.getInstance(currentAccount).isMutedMessageType(currentDialogId, message);
         }
     }
 

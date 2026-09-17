@@ -109,6 +109,14 @@ public class NotificationsController extends BaseController implements Notificat
     private final ArrayList<MessageObject> delayedPushMessages = new ArrayList<>();
     private final LongSparseArray<SparseArray<MessageObject>> pushMessagesDict = new LongSparseArray<>();
     private final LongSparseArray<MessageObject> fcmRandomMessagesDict = new LongSparseArray<>();
+    // Svipe: ids already judged to be of a muted type. The same message reaches us twice — once
+    // over MTProto, where fwd_from tells the truth, and once as a push, where it does not — so the
+    // verdict has to outlive the first pass or the push shows the notification the first pass
+    // suppressed.
+    private final LongSparseArray<HashSet<Integer>> mutedTypeMessages = new LongSparseArray<>();
+    // Pushes already held back once, so the retry is never held back again.
+    private final LongSparseArray<HashSet<Integer>> deferredTypeChecks = new LongSparseArray<>();
+    private static final long MUTED_TYPE_PUSH_DELAY = 2000L;
     private final LongSparseArray<Point> smartNotificationsDialogs = new LongSparseArray<>();
     private static NotificationManagerCompat notificationManager = null;
     private static NotificationManager systemNotificationManager = null;
@@ -1124,6 +1132,24 @@ public class NotificationsController extends BaseController implements Notificat
                 int mid = messageObject.getId();
                 long randomId = messageObject.isFcmMessage() ? messageObject.messageOwner.random_id : 0;
                 long dialogId = messageObject.getDialogId();
+                if (shouldDeferForTypeCheck(dialogId, mid, messageObject)) {
+                    if (BuildVars.LOGS_ENABLED) {
+                        FileLog.d("holding push for dialog " + dialogId + " mid = " + mid + " until the real message can name its type");
+                    }
+                    rememberDeferredTypeCheck(dialogId, mid);
+                    final ArrayList<MessageObject> retry = new ArrayList<>(1);
+                    retry.add(messageObject);
+                    notificationsQueue.postRunnable(() -> processNewMessages(retry, true, true, null), MUTED_TYPE_PUSH_DELAY);
+                    continue;
+                }
+                if (isMutedMessageType(dialogId, messageObject) || isKnownMutedTypeMessage(dialogId, mid)) {
+                    if (BuildVars.LOGS_ENABLED) {
+                        FileLog.d("skipped message because its type is muted for dialog " + dialogId + " mid = " + mid);
+                    }
+                    rememberMutedTypeMessage(dialogId, mid);
+                    retractMutedTypeNotification(dialogId, mid);
+                    continue;
+                }
                 boolean isChannel;
                 if (messageObject.isFcmMessage()) {
                     isChannel = messageObject.localChannel;
@@ -6201,6 +6227,107 @@ public class NotificationsController extends BaseController implements Notificat
         } else {
             return new TLRPC.TL_notificationSoundDefault();
         }
+    }
+
+    /**
+     * Svipe: a per-dialog exception that mutes one KIND of message while the dialog itself stays
+     * unmuted. Today the only kind is a forward: the message still lands in the chat and in the
+     * unread count, it just does not ring. The setting lives next to the other per-dialog
+     * notification preferences (see ProfileNotificationsActivity) and is local — the server has no
+     * field for it, so it is deliberately not part of updateServerNotificationsSettings.
+     */
+    public static final String MUTE_FORWARDS_PREFIX = "svipe_mute_forwards_";
+
+    public boolean isMutedMessageType(long dialogId, MessageObject messageObject) {
+        if (messageObject == null || messageObject.messageOwner == null) {
+            return false;
+        }
+        if (messageObject.isReactionPush || messageObject.isStoryReactionPush || messageObject.isStoryPush) {
+            return false;
+        }
+        if (!MessageObject.isForwardedMessage(messageObject.messageOwner)) {
+            return false;
+        }
+        return getAccountInstance().getNotificationsSettings()
+                .getBoolean(MUTE_FORWARDS_PREFIX + getSharedPrefKey(dialogId, 0), false);
+    }
+
+    /**
+     * A push carries no fwd_from, so on its own it can never tell whether it is the forward this
+     * chat has silenced. The same message is also on its way over MTProto, where it can. Hold the
+     * push for a beat and let the copy that knows the answer arrive first; only chats that actually
+     * carry a message-type exception pay the delay, and only once per message.
+     */
+    private boolean shouldDeferForTypeCheck(long dialogId, int mid, MessageObject messageObject) {
+        if (mid == 0 || messageObject == null || !messageObject.isFcmMessage()) {
+            return false;
+        }
+        if (messageObject.isReactionPush || messageObject.isStoryReactionPush || messageObject.isStoryPush) {
+            return false;
+        }
+        if (isKnownMutedTypeMessage(dialogId, mid) || isMutedMessageType(dialogId, messageObject)) {
+            return false;
+        }
+        HashSet<Integer> deferred = deferredTypeChecks.get(dialogId);
+        if (deferred != null && deferred.contains(mid)) {
+            return false;
+        }
+        return getAccountInstance().getNotificationsSettings()
+                .getBoolean(MUTE_FORWARDS_PREFIX + getSharedPrefKey(dialogId, 0), false);
+    }
+
+    private void rememberDeferredTypeCheck(long dialogId, int mid) {
+        HashSet<Integer> deferred = deferredTypeChecks.get(dialogId);
+        if (deferred == null) {
+            deferred = new HashSet<>();
+            deferredTypeChecks.put(dialogId, deferred);
+        }
+        if (deferred.size() > 128) {
+            deferred.clear();
+        }
+        deferred.add(mid);
+    }
+
+    private boolean isKnownMutedTypeMessage(long dialogId, int mid) {
+        if (mid == 0) {
+            return false;
+        }
+        HashSet<Integer> ids = mutedTypeMessages.get(dialogId);
+        return ids != null && ids.contains(mid);
+    }
+
+    private void rememberMutedTypeMessage(long dialogId, int mid) {
+        if (mid == 0) {
+            return;
+        }
+        HashSet<Integer> ids = mutedTypeMessages.get(dialogId);
+        if (ids == null) {
+            ids = new HashSet<>();
+            mutedTypeMessages.put(dialogId, ids);
+        }
+        if (ids.size() > 128) {
+            ids.clear();
+        }
+        ids.add(mid);
+    }
+
+    /**
+     * The push can win the race against the real message, in which case the notification is already
+     * on screen by the time fwd_from arrives and proves it should never have been. Take it back.
+     */
+    private void retractMutedTypeNotification(long dialogId, int mid) {
+        if (mid == 0) {
+            return;
+        }
+        SparseArray<MessageObject> shown = pushMessagesDict.get(dialogId);
+        if (shown == null || shown.get(mid) == null) {
+            return;
+        }
+        LongSparseArray<ArrayList<Integer>> deleted = new LongSparseArray<>();
+        ArrayList<Integer> ids = new ArrayList<>();
+        ids.add(mid);
+        deleted.put(dialogId, ids);
+        removeDeletedMessagesFromNotifications(deleted, false);
     }
 
     public boolean isGlobalNotificationsEnabled(long dialogId, boolean isReaction, boolean isStoryReaction) {

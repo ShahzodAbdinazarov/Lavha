@@ -327,4 +327,7 @@
     <string name="SvipeApkBlockedListed">Zararli dasturlar bazasida qayd etilgan</string>
     <string name="UseProxyWeb">WEB proksi</string>
     <string name="UseProxyWebInfo">WEB proksi yopiq WebView ichidagi HTTPS sahifadan foydalanadi. Sxema va yo\'lsiz host nomini hamda 16 baytli MTProxy maxfiy kalitini kiriting. Bu tajriba rejimi uchun: joriy Android System WebView talab qilinadi va faqat ilova ochiq turganda sinash uchun mo\'ljallangan.</string>
+    <string name="SvipeNotifyTypesHeader">Xabar turlari</string>
+    <string name="SvipeNotifyMuteForwards">Yo\'naltirilgan xabarlarni o\'chirish</string>
+    <string name="SvipeNotifyMuteForwardsInfo">Bu suhbatdagi yo\'naltirilgan xabarlar ovozsiz keladi. Ular baribir yetib keladi va suhbatda ko\'rinadi.</string>
 </resources>

@@ -600,4 +600,7 @@
     <string name="SvipeApkBlockedListed">Числится в базе вредоносного ПО</string>
     <string name="UseProxyWeb">WEB-прокси</string>
     <string name="UseProxyWebInfo">WEB-прокси использует HTTPS-страницу внутри приватного WebView. Введите имя хоста без схемы и пути и 16-байтный секрет MTProxy. Это экспериментальная функция: требуется актуальный Android System WebView, и она рассчитана на проверку при открытом приложении.</string>
+    <string name="SvipeNotifyTypesHeader">Типы сообщений</string>
+    <string name="SvipeNotifyMuteForwards">Без звука для пересланных</string>
+    <string name="SvipeNotifyMuteForwardsInfo">Пересланные сообщения из этого чата приходят без звука. Вы всё равно их получаете и видите в чате.</string>
 </resources>
