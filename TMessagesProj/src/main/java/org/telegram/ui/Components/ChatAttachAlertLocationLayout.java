@@ -1054,6 +1054,13 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
         if (parentAlert != null) {
             parentAlert.setAllowNestedScroll(!pinned);
         }
+        // The list stops short of the bottom edge while pinned: that lifts the send row off the
+        // edge and keeps the live-location row behind it outside the viewport, unseen.
+        if (listView.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) listView.getLayoutParams();
+            lp.bottomMargin = pinned ? AndroidUtilities.dp(10) : 0;
+            listView.setLayoutParams(lp);
+        }
         listView.scrollToPosition(0);
         // The map's share of the sheet is decided in onPreMeasure, and that runs from the alert's
         // own measure pass — asking this layout alone to lay out again never reaches it.
@@ -1123,7 +1130,8 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
             overScrollHeight = mapPinned
                     // Pinned, the sheet is the screen: the map runs from the top down to the send
                     // row, which sits on the bottom edge.
-                    ? availableHeight - AndroidUtilities.statusBarHeight - ActionBar.getCurrentActionBarHeight() - AndroidUtilities.dp(60 + 16)
+                    // ...and a touch more, so the row is lifted clear of the bottom edge.
+                    ? availableHeight - AndroidUtilities.statusBarHeight - ActionBar.getCurrentActionBarHeight() - AndroidUtilities.dp(60 + 16 + 10)
                     : availableHeight - sheetTop - AndroidUtilities.dp(60 + 16 + 64) - listPaddingBottom;
             if (overScrollHeight < AndroidUtilities.dp(200)) {
                 overScrollHeight = AndroidUtilities.dp(200);
