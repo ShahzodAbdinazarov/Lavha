@@ -354,4 +354,5 @@
     <string name="SvipeTypeVoice">Ovozli va video xabarlar</string>
     <string name="SvipeTypeStickers">Stiker va GIFlar</string>
     <string name="SvipeTypeFiles">Fayl va musiqa</string>
+    <string name="SvipeDeleteMessageTypes">Barcha xabar turlarini o\'chirish</string>
 </resources>

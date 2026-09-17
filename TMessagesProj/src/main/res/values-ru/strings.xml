@@ -627,4 +627,5 @@
     <string name="SvipeTypeVoice">Голосовые и видеосообщения</string>
     <string name="SvipeTypeStickers">Стикеры и GIF</string>
     <string name="SvipeTypeFiles">Файлы и музыка</string>
+    <string name="SvipeDeleteMessageTypes">Удалить все типы сообщений</string>
 </resources>

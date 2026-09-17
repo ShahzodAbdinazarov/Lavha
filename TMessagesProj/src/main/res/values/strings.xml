@@ -11575,4 +11575,5 @@
     <string name="SvipeTypeVoice">Voice and video messages</string>
     <string name="SvipeTypeStickers">Stickers and GIFs</string>
     <string name="SvipeTypeFiles">Files and music</string>
+    <string name="SvipeDeleteMessageTypes">Delete all message types</string>
 </resources>

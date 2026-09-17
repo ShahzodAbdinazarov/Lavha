@@ -121,6 +121,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
     private int notifiedTypesStart;
     private int notifiedTypesEnd;
     private int notifiedTypesAddRow;
+    private int mutedTypesDeleteRow;
+    private int notifiedTypesDeleteRow;
     private int messageTypesInfoRow;
     private final ArrayList<String> mutedKinds = new ArrayList<>();
     private final ArrayList<String> notifiedKinds = new ArrayList<>();
@@ -158,12 +160,28 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
     private static int typeIcon(String kind) {
         switch (kind) {
             case "links": return R.drawable.msg_link;
-            case "media": return R.drawable.msg_media;
+            case "media": return R.drawable.msg_filled_data_photos;
             case "voice": return R.drawable.msg_filled_data_voice;
             case "stickers": return R.drawable.msg_emoji_stickers;
             case "files": return R.drawable.msg_filled_data_files;
         }
         return R.drawable.msg_forward;
+    }
+
+    /** The red row under a list, the way Telegram clears its own exceptions: all of them at once. */
+    private void clearTypes(boolean muted) {
+        for (String kind : NotificationsController.MESSAGE_KINDS) {
+            String prefix = muted
+                    ? NotificationsController.muteKindKey(kind)
+                    : NotificationsController.notifyKindKey(kind);
+            if (SvipeMessageTypeMute.isMuted(currentAccount, prefix, dialogId, topicId)) {
+                SvipeMessageTypeMute.setMuted(currentAccount, prefix, dialogId, topicId, false);
+            }
+        }
+        updateRows();
+        if (adapter != null) {
+            adapter.notifyDataSetChanged();
+        }
     }
 
     /**
@@ -331,15 +349,17 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                 }
             }
             mutedTypesRow = rowCount++;
+            mutedTypesAddRow = rowCount++;
             mutedTypesStart = rowCount;
             rowCount += mutedKinds.size();
             mutedTypesEnd = rowCount;
-            mutedTypesAddRow = rowCount++;
+            mutedTypesDeleteRow = mutedKinds.isEmpty() ? -1 : rowCount++;
             notifiedTypesRow = rowCount++;
+            notifiedTypesAddRow = rowCount++;
             notifiedTypesStart = rowCount;
             rowCount += notifiedKinds.size();
             notifiedTypesEnd = rowCount;
-            notifiedTypesAddRow = rowCount++;
+            notifiedTypesDeleteRow = notifiedKinds.isEmpty() ? -1 : rowCount++;
             messageTypesInfoRow = rowCount++;
         } else {
             mutedTypesRow = -1;
@@ -350,6 +370,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
             notifiedTypesStart = -1;
             notifiedTypesEnd = -1;
             notifiedTypesAddRow = -1;
+            mutedTypesDeleteRow = -1;
+            notifiedTypesDeleteRow = -1;
             messageTypesInfoRow = -1;
         }
 
@@ -670,6 +692,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                 showTypesSheet(true);
             } else if (position == notifiedTypesAddRow || isNotifiedTypeRow(position)) {
                 showTypesSheet(false);
+            } else if (position == mutedTypesDeleteRow || position == notifiedTypesDeleteRow) {
+                clearTypes(position == mutedTypesDeleteRow);
             }
         });
 
@@ -1098,16 +1122,21 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
                 case VIEW_TYPE_TEXT_CELL: {
                     TextCell textCell = (TextCell) holder.itemView;
                     if (position == mutedTypesAddRow || position == notifiedTypesAddRow) {
+                        boolean divider = position == mutedTypesAddRow ? !mutedKinds.isEmpty() : !notifiedKinds.isEmpty();
                         textCell.setColors(Theme.key_windowBackgroundWhiteBlueIcon, Theme.key_windowBackgroundWhiteBlueButton);
                         textCell.setTextAndIcon(LocaleController.getString(R.string.SvipeAddMessageType),
-                                R.drawable.msg_add, false);
+                                R.drawable.msg_add, divider);
+                    } else if (position == mutedTypesDeleteRow || position == notifiedTypesDeleteRow) {
+                        textCell.setColors(-1, Theme.key_text_RedRegular);
+                        textCell.setText(LocaleController.getString(R.string.SvipeDeleteMessageTypes), false);
                     } else {
                         boolean muted = isMutedTypeRow(position);
                         String kind = muted
                                 ? mutedKinds.get(position - mutedTypesStart)
                                 : notifiedKinds.get(position - notifiedTypesStart);
+                        int last = (muted ? mutedTypesEnd : notifiedTypesEnd) - 1;
                         textCell.setColors(Theme.key_windowBackgroundWhiteGrayIcon, Theme.key_windowBackgroundWhiteBlackText);
-                        textCell.setTextAndIcon(LocaleController.getString(typeLabel(kind)), typeIcon(kind), true);
+                        textCell.setTextAndIcon(LocaleController.getString(typeLabel(kind)), typeIcon(kind), position != last);
                     }
                     break;
                 }
@@ -1167,7 +1196,8 @@ public class ProfileNotificationsActivity extends BaseFragment implements Notifi
         @Override
         public int getItemViewType(int position) {
             if (isMutedTypeRow(position) || isNotifiedTypeRow(position)
-                    || position == mutedTypesAddRow || position == notifiedTypesAddRow) {
+                    || position == mutedTypesAddRow || position == notifiedTypesAddRow
+                    || position == mutedTypesDeleteRow || position == notifiedTypesDeleteRow) {
                 return VIEW_TYPE_TEXT_CELL;
             }
             if (position == generalRow || position == popupRow || position == ledRow || position == callsRow
