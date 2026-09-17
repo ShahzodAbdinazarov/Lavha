@@ -631,4 +631,5 @@
     <string name="SvipeDeleteMessageTypes">Удалить все типы сообщений</string>
     <string name="SvipeMessageTypes">Типы сообщений</string>
     <string name="SvipeMessageTypesAll">Типы сообщений во всех чатах</string>
+    <string name="SvipeNotificationsBotsMessages">Новые сообщения от ботов</string>
 </resources>

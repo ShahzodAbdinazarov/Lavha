@@ -11579,4 +11579,5 @@
     <string name="SvipeDeleteMessageTypes">Delete all message types</string>
     <string name="SvipeMessageTypes">Message types</string>
     <string name="SvipeMessageTypesAll">Message types in all chats</string>
+    <string name="SvipeNotificationsBotsMessages">New Messages from Bots</string>
 </resources>

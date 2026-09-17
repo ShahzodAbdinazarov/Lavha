@@ -46,6 +46,7 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
     private ListAdapter adapter;
     private final ArrayList<TLRPC.User> bots = new ArrayList<>();
 
+    private int notifyHeaderRow;
     private int typesRow;
     private int muteRow;
     private int muteInfoRow;
@@ -74,7 +75,10 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
                 bots.add(bot);
             }
         }
+        // Laid out exactly like Private Chats, Groups and Channels next door: the "notify me about"
+        // switch in its own card, the message-type rules in theirs, then the exception list.
         rowCount = 0;
+        notifyHeaderRow = rowCount++;
         muteRow = rowCount++;
         muteInfoRow = rowCount++;
         typesRow = rowCount++;
@@ -90,7 +94,7 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
             deleteShadowRow = rowCount++;
             deleteAllRow = rowCount++;
         }
-        exceptionsInfoRow = rowCount++;
+        exceptionsInfoRow = -1;
     }
 
     @Override
@@ -112,6 +116,10 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
         fragmentView = frameLayout;
 
         listView = new RecyclerListView(context);
+        // The rounded cards the rest of the settings screens draw; cells stay transparent so the
+        // section background is what shows through.
+        listView.setSections();
+        actionBar.setAdaptiveBackground(listView);
         listView.setVerticalScrollBarEnabled(false);
         listView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
         listView.setAdapter(adapter = new ListAdapter(context));
@@ -119,9 +127,9 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
 
         listView.setOnItemClickListener((view, position) -> {
             if (position == muteRow) {
-                boolean muted = !SvipeBotMute.isEnabled(currentAccount);
-                SvipeBotMute.setEnabled(currentAccount, muted);
-                ((TextCheckCell) view).setChecked(muted);
+                boolean notify = SvipeBotMute.isEnabled(currentAccount);
+                SvipeBotMute.setEnabled(currentAccount, !notify);
+                ((TextCheckCell) view).setChecked(notify);
                 if (adapter != null) adapter.notifyDataSetChanged();
             } else if (position == typesRow) {
                 presentFragment(new SvipeMessageTypesActivity(NotificationsController.SCOPE_BOTS, R.string.SvipeMessageTypes));
@@ -169,7 +177,8 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
         @Override
         public int getItemViewType(int position) {
             if (position == muteRow) return 0;
-            if (position == muteInfoRow || position == exceptionsInfoRow) return 1;
+            if (position == muteInfoRow) return 1;
+            if (position == notifyHeaderRow) return 5;
             if (position == exceptionsShadowRow || position == deleteShadowRow) return 2;
             if (position == typesRow || position == addExceptionRow || position == deleteAllRow) return 4;
             return 3;
@@ -182,7 +191,7 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
             switch (viewType) {
                 case 0:
                     view = new TextCheckCell(context);
-                    view.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                    view.setBackgroundColor(0);
                     break;
                 case 1:
                     view = new TextInfoPrivacyCell(context);
@@ -190,14 +199,18 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
                 case 2:
                     view = new ShadowSectionCell(context);
                     break;
+                case 5:
+                    view = new HeaderCell(context);
+                    view.setBackgroundColor(0);
+                    break;
                 case 4:
                     view = new TextCell(context);
-                    view.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                    view.setBackgroundColor(0);
                     break;
                 default:
                     // No checkbox: an exception list shows who is on it, the way Telegram's does.
                     view = new UserCell(context, 6, 0, false);
-                    view.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                    view.setBackgroundColor(0);
                     break;
             }
             view.setLayoutParams(new RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT,
@@ -208,28 +221,31 @@ public class SvipeBotNotificationsActivity extends BaseFragment {
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
             switch (holder.getItemViewType()) {
+                case 5: {
+                    HeaderCell cell = (HeaderCell) holder.itemView;
+                    cell.setText(LocaleController.getString(R.string.NotifyMeAbout));
+                    break;
+                }
                 case 0: {
                     TextCheckCell cell = (TextCheckCell) holder.itemView;
-                    cell.setTextAndCheck(LocaleController.getString(R.string.SvipeNotificationsBotsMute),
-                            SvipeBotMute.isEnabled(currentAccount), !bots.isEmpty());
+                    cell.setTextAndCheck(LocaleController.getString(R.string.SvipeNotificationsBotsMessages),
+                            !SvipeBotMute.isEnabled(currentAccount), false);
                     break;
                 }
                 case 1: {
                     TextInfoPrivacyCell cell = (TextInfoPrivacyCell) holder.itemView;
-                    if (position == muteInfoRow) {
-                        cell.setText(LocaleController.getString(R.string.SvipeNotificationsBotsInfo));
-                    } else {
-                        cell.setText(LocaleController.getString(R.string.SvipeNotificationsBotsExceptionsInfo));
-                    }
+                    cell.setText(LocaleController.getString(R.string.SvipeNotificationsBotsInfo));
                     cell.setBackground(Theme.getThemedDrawableByKey(context,
-                            R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+                            R.drawable.greydivider, Theme.key_windowBackgroundGrayShadow));
                     break;
                 }
                 case 4: {
                     TextCell cell = (TextCell) holder.itemView;
                     if (position == typesRow) {
+                        // No icon: the same row on Private Chats, Groups and Channels carries none,
+                        // and this screen sits beside them.
                         cell.setColors(Theme.key_windowBackgroundWhiteGrayIcon, Theme.key_windowBackgroundWhiteBlackText);
-                        cell.setTextAndIcon(LocaleController.getString(R.string.SvipeMessageTypes), R.drawable.msg_msgbubble3, false);
+                        cell.setText(LocaleController.getString(R.string.SvipeMessageTypes), false);
                     } else if (position == addExceptionRow) {
                         cell.setColors(Theme.key_windowBackgroundWhiteBlueIcon, Theme.key_windowBackgroundWhiteBlueButton);
                         cell.setTextAndIcon(LocaleController.getString(R.string.NotificationsAddAnException),

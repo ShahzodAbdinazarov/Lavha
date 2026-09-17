@@ -125,6 +125,10 @@ public class SvipeMessageTypesActivity extends BaseFragment {
         });
 
         listView = new RecyclerListView(context);
+        // The rounded cards the rest of the settings screens draw; cells stay transparent so the
+        // section background is what shows through.
+        listView.setSections();
+        actionBar.setAdaptiveBackground(listView);
         listView.setLayoutManager(new LinearLayoutManager(context));
         listView.setAdapter(adapter = new ListAdapter(context));
         listView.setOnItemClickListener((view, position) -> {
@@ -247,7 +251,7 @@ public class SvipeMessageTypesActivity extends BaseFragment {
             switch (viewType) {
                 case VIEW_TYPE_HEADER:
                     view = new HeaderCell(context);
-                    view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                    view.setBackgroundColor(0);
                     break;
                 case VIEW_TYPE_INFO:
                     view = new TextInfoPrivacyCell(context);
@@ -257,7 +261,7 @@ public class SvipeMessageTypesActivity extends BaseFragment {
                     break;
                 default:
                     view = new TextCell(context);
-                    view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                    view.setBackgroundColor(0);
                     break;
             }
             view.setLayoutParams(new RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT, RecyclerView.LayoutParams.WRAP_CONTENT));
