@@ -11582,4 +11582,5 @@
     <string name="SvipeNotificationsBotsMessages">New Messages from Bots</string>
     <string name="SvipeNotificationsBotsOnlyBots">Only bots can be added here.</string>
     <string name="SvipeMapPin">Keep the map open</string>
+    <string name="SvipeContinueAsGuest">Continue as guest</string>
 </resources>

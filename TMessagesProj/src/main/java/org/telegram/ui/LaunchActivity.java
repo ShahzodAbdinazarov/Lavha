@@ -1120,7 +1120,10 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         if (LoginActivity.loadCurrentState(false, currentAccount).getInt("currentViewNum", 0) != 0) {
             return new LoginActivity();
         }
-        return new SvipeGuestReelsActivity();
+        // Svipe: the app opens where every Telegram opens — the onboarding and the phone number.
+        // Guest mode is a door on that screen ("continue as guest"), not the screen itself: landing
+        // straight in a feed hides that this is an account-shaped app at all.
+        return new IntroActivity();
     }
 
     public FireworksOverlay getFireworksOverlay() {

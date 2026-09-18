@@ -347,6 +347,8 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
     private AnimatorSet doneItemAnimation;
     private TransformableLoginButtonView floatingButtonIcon;
     private FragmentFloatingButton floatingButton;
+    /** Svipe: "continue as guest", beside the floating button on the phone-number page. */
+    private TextView guestButton;
     private VerticalPositionAutoAnimator floatingAutoAnimator;
     private int progressRequestId;
     private boolean[] doneButtonVisible = new boolean[] {true, false};
@@ -733,6 +735,34 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             if (phoneNumberConfirmView != null) {
                 phoneNumberConfirmView.updateFabPosition();
             }
+        });
+
+        // Svipe: the way in for somebody who has not decided yet. It mirrors the floating button
+        // opposite it — same height, same bottom margin, the other edge — and it is the ONLY way
+        // into guest mode: the app itself starts here, at the login, like any other Telegram.
+        guestButton = new TextView(context);
+        guestButton.setText(LocaleController.getString(R.string.SvipeContinueAsGuest));
+        guestButton.setTextColor(Theme.getColor(Theme.key_chats_actionBackground, resourceProvider));
+        guestButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        guestButton.setTypeface(AndroidUtilities.bold());
+        guestButton.setGravity(Gravity.CENTER);
+        guestButton.setPadding(AndroidUtilities.dp(18), 0, AndroidUtilities.dp(18), 0);
+        guestButton.setBackground(Theme.createSelectorWithBackgroundDrawable(0, Theme.getColor(Theme.key_listSelector, resourceProvider)));
+        guestButton.setOnClickListener(v -> presentFragment(new SvipeGuestReelsActivity(), true));
+        sizeNotifierFrameLayout.addView(guestButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 56,
+                (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.BOTTOM, 12, 0, 12, 14));
+        // It rides with the floating button opposite it — that one lifts above the keypad, and a
+        // pair that only half moves reads as two unrelated things rather than one row. Copied per
+        // frame rather than on the animator's callbacks: the button is also moved directly, without
+        // one, when the keypad appears.
+        guestButton.getViewTreeObserver().addOnPreDrawListener(() -> {
+            if (guestButton != null && floatingButton != null && guestButton.getVisibility() == View.VISIBLE) {
+                final float y = floatingButton.getY() + (floatingButton.getHeight() - guestButton.getHeight()) / 2f;
+                if (Math.abs(guestButton.getY() - y) > 0.5f) {
+                    guestButton.setY(y);
+                }
+            }
+            return true;
         });
 
         backButtonView = new ImageView(context);
@@ -1498,6 +1528,22 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         showEditDoneProgress(false, animated);
     }
 
+    /**
+     * The guest way in belongs to the first page only: past it the user is mid-login, and offering
+     * to throw that away would be a trap rather than a shortcut. It is also pointless on a screen
+     * reached from an account that already exists.
+     */
+    private void updateGuestButton() {
+        if (guestButton == null) {
+            return;
+        }
+        final boolean show = currentViewNum == VIEW_PHONE_INPUT && !newAccount && activityMode == MODE_LOGIN;
+        guestButton.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (show && floatingButton != null) {
+            guestButton.setTranslationY(floatingButton.getTranslationY());
+        }
+    }
+
     public void setPage(@ViewNumber int page, boolean animated, Bundle params, boolean back) {
         boolean needFloatingButton = page == VIEW_PHONE_INPUT || page == VIEW_REGISTER || page == VIEW_PASSWORD ||
                 page == VIEW_NEW_PASSWORD_STAGE_1 || page == VIEW_NEW_PASSWORD_STAGE_2 || page == VIEW_ADD_EMAIL || page == VIEW_CODE_PHRASE || page == VIEW_CODE_WORD;
@@ -1531,6 +1577,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             final SlideView outView = views[currentViewNum];
             final SlideView newView = views[page];
             currentViewNum = page;
+            updateGuestButton();
             backButtonView.setVisibility(newView.needBackButton() || newAccount ? View.VISIBLE : View.GONE);
 
             newView.setParams(params, false);

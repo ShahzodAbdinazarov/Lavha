@@ -634,4 +634,5 @@
     <string name="SvipeNotificationsBotsMessages">Новые сообщения от ботов</string>
     <string name="SvipeNotificationsBotsOnlyBots">Сюда можно добавлять только ботов.</string>
     <string name="SvipeMapPin">Держать карту открытой</string>
+    <string name="SvipeContinueAsGuest">Продолжить как гость</string>
 </resources>
