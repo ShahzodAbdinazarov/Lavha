@@ -1131,7 +1131,7 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
                     // Pinned, the sheet is the screen: the map runs from the top down to the send
                     // row, which sits on the bottom edge.
                     // ...and a touch more, so the row is lifted clear of the bottom edge.
-                    ? availableHeight - AndroidUtilities.statusBarHeight - ActionBar.getCurrentActionBarHeight() - AndroidUtilities.dp(60 + 16 + 72)
+                    ? availableHeight - AndroidUtilities.statusBarHeight - ActionBar.getCurrentActionBarHeight() - AndroidUtilities.dp(60 + 16 + 112)
                     : availableHeight - sheetTop - AndroidUtilities.dp(60 + 16 + 64) - listPaddingBottom;
             if (overScrollHeight < AndroidUtilities.dp(200)) {
                 overScrollHeight = AndroidUtilities.dp(200);
