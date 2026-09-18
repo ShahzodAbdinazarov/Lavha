@@ -4,6 +4,8 @@ import android.content.Context;
 import android.graphics.Color;
 import android.net.Uri;
 import android.view.GestureDetector;
+import android.util.TypedValue;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -125,6 +127,25 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         });
         root.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
+        // A guest who has said "not now" is still a guest: the way in stays on screen rather than
+        // disappearing with the sheet, so it is there the moment they change their mind. It sits
+        // under the status bar — the feed draws behind that, and the inset is only known once the
+        // window has it, hence the post().
+        final TextView signInBanner = new TextView(context);
+        signInBanner.setText(LocaleController.getString(R.string.SvipeGuestSheetTitle));
+        signInBanner.setTextColor(0xFFFFFFFF);
+        signInBanner.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        signInBanner.setTypeface(AndroidUtilities.bold());
+        signInBanner.setGravity(Gravity.CENTER);
+        signInBanner.setSingleLine();
+        signInBanner.setEllipsize(TextUtils.TruncateAt.END);
+        signInBanner.setPadding(AndroidUtilities.dp(18), 0, AndroidUtilities.dp(18), 0);
+        signInBanner.setBackground(Theme.createSimpleSelectorRoundRectDrawable(AndroidUtilities.dp(19),
+                Theme.getColor(Theme.key_featuredStickers_addButton), Theme.getColor(Theme.key_featuredStickers_addButtonPressed)));
+        signInBanner.setOnClickListener(v -> wall());
+        root.addView(signInBanner, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 38, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 16, 0, 16, 0));
+        signInBanner.post(() -> signInBanner.setTranslationY(AndroidUtilities.statusBarHeight + AndroidUtilities.dp(10)));
+
         emptyView = new TextView(context);
         emptyView.setText(LocaleController.getString(R.string.SvipeGuestEnd));
         emptyView.setTextColor(0xB3FFFFFF);
@@ -234,15 +255,21 @@ public class SvipeGuestReelsActivity extends BaseFragment {
         return vh instanceof ReelsActivity.ReelsHolder ? (ReelsActivity.ReelsHolder) vh : null;
     }
 
+    /** The warm page is offered once; after that this screen fetches for itself. */
+    private boolean warmAsked;
+
     /** Ask for the next page. One in flight at a time; an empty page ends the feed honestly. */
     private void loadMore() {
         if (loading || cursor == null) {
             return;
         }
-        if (at0()) {
+        if (at0() && !warmAsked) {
             // The app started warming this the moment it knew there was no account. Wait for it
             // rather than racing it: firing a second request for the same page means two requests
-            // and the screen still waiting on the slower one.
+            // and the screen still waiting on the slower one. Ask ONCE: a warm-up that holds
+            // nothing answers immediately, and the retry below would otherwise come straight back
+            // here — the same page, the same empty answer, until the stack ran out.
+            warmAsked = true;
             loading = true;
             SvipeGuest.takeWarm(w -> {
                 loading = false;
@@ -275,7 +302,12 @@ public class SvipeGuestReelsActivity extends BaseFragment {
                 // say, and a spinner that never resolves would be a lie about that.
                 cursor = null;
                 if (items.isEmpty() && emptyView != null) {
+                    // Nothing to show at all is not an end, it is a dead end: a guest who is handed
+                    // a sentence and no way forward has no reason to still be here. Offer the
+                    // account, which is the only thing that does have something behind it.
                     emptyView.setVisibility(View.VISIBLE);
+                    emptyView.setOnClickListener(v -> wall());
+                    AndroidUtilities.runOnUIThread(this::wall, 400);
                 }
                 return;
             }
