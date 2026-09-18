@@ -97,6 +97,8 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
     private ImageView pinButton;
     /** Svipe: the map held open full-screen until the same button says otherwise. */
     private boolean mapPinned;
+    /** How far the pinned map reaches above the sheet, behind the action bar. */
+    private static final int PIN_MAP_LIFT = 400;
     private ActionBarMenuItem mapTypeButton;
     private SearchButton searchAreaButton;
     private LinearLayout emptyView;
@@ -1140,17 +1142,18 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
             if (adapter != null) {
                 adapter.setOverScrollHeight(overScrollHeight + AndroidUtilities.dp(16));
             }
+            final int clipHeight = mapHeight + (mapPinned ? PIN_MAP_LIFT : 0);
             if (mapViewClip != null) {
                 ViewGroup.LayoutParams lp = mapViewClip.getLayoutParams();
-                if (lp != null && lp.height != mapHeight) {
-                    lp.height = mapHeight;
+                if (lp != null && lp.height != clipHeight) {
+                    lp.height = clipHeight;
                     mapViewClip.setLayoutParams(lp);
                 }
             }
             if (mapView != null && mapView.getView() != null) {
                 ViewGroup.LayoutParams lp = mapView.getView().getLayoutParams();
-                if (lp != null && lp.height != mapHeight) {
-                    lp.height = mapHeight;
+                if (lp != null && lp.height != clipHeight) {
+                    lp.height = clipHeight;
                     mapView.getView().setLayoutParams(lp);
                 }
             }
@@ -1567,7 +1570,10 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
             nonClipSize = maxClipSize - clipSize;
             mapViewClip.invalidate();
 
-            mapViewClip.setTranslationY(top - nonClipSize);
+            // Svipe: pinned, the map starts 400 pixels higher — and the same 400 comes off
+            // the bottom clip, otherwise the whole map rises and leaves a gap above the send row.
+            final int lift = mapPinned ? PIN_MAP_LIFT : 0;
+            mapViewClip.setTranslationY(top - nonClipSize - lift);
             if (map != null) {
                 map.setPadding(0, AndroidUtilities.dp(6), 0, clipSize + AndroidUtilities.dp(6));
             }
@@ -1575,15 +1581,18 @@ public class ChatAttachAlertLocationLayout extends ChatAttachAlert.AttachAlertLa
                 overlayView.setTranslationY(trY);
             }
             float translationY = Math.min(Math.max(nonClipSize - top, 0), mapHeight - mapTypeButton.getMeasuredHeight() - AndroidUtilities.dp(64 + 16));
-            mapTypeButton.setTranslationY(translationY);
-            // The pin rides with the map-type button it mirrors; without this it scrolls up behind
-            // the action bar and cannot be pressed again to let the map go.
+            // ...and the two buttons come back down by the same 400, so they stay on the map
+            // instead of riding it up behind the action bar. The pin mirrors the map-type button in
+            // this too, or it ends up out of reach with no way to let the map go.
+            mapTypeButton.setTranslationY(translationY + lift);
             if (pinButton != null) {
-                pinButton.setTranslationY(translationY);
+                pinButton.setTranslationY(translationY + lift);
             }
             searchAreaButton.setTranslation(translationY);
             locationButton.setTranslationY(-clipSize);
-            markerImageView.setTranslationY(markerTop = (mapHeight - clipSize) / 2 - AndroidUtilities.dp(48) + trY);
+            // Pinned, the map was raised behind the action bar, so its marker comes back down with
+            // the rest of what sits on it.
+            markerImageView.setTranslationY(markerTop = (mapHeight - clipSize) / 2 - AndroidUtilities.dp(48) + trY + (mapPinned ? 200 : 0));
             if (prevClipSize != clipSize) {
                 IMapsProvider.LatLng location;
                 if (lastPressedMarker != null) {
