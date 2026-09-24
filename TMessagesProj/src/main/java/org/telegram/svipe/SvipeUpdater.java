@@ -940,30 +940,31 @@ public class SvipeUpdater {
                     .show();
             return;
         }
-        // Prefer the modern PackageInstaller session API. The legacy ACTION_VIEW hand-off below is what
-        // Telegram itself uses, but it fails on some OEM ROMs (notably MIUI/Xiaomi) with a generic
-        // "App not installed" and gives us no reason. The session API is more reliable there, can skip
-        // the confirm dialog entirely when the OS allows a same-package self-update, and reports the
-        // real failure code via a status callback. Fall back to the classic intent if the session
-        // can't even be created.
-        try {
-            installViaSession(activity.getApplicationContext(), apk);
-        } catch (Exception e) {
-            FileLog.e(e);
-            installViaView(activity, apk);
+        // Hand the APK to the system installer, the way Telegram and Boyman do: its screen ends on its
+        // own "Open" button, so the person lands back in the new build with one tap. The session API
+        // below installs silently and leaves nothing on screen afterwards — the app just disappears —
+        // so it is only the fallback for when the installer cannot be started at all.
+        if (!installViaView(activity, apk)) {
+            try {
+                installViaSession(activity.getApplicationContext(), apk);
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
         }
     }
 
-    /** Classic hand-off to the system installer (Telegram's own approach); used as a fallback. */
-    private static void installViaView(Activity activity, File apk) {
+    /** Classic hand-off to the system installer (Telegram's and Boyman's approach) — the primary path. */
+    private static boolean installViaView(Activity activity, File apk) {
         try {
             Intent intent = new Intent(Intent.ACTION_VIEW);
             Uri uri = FileProvider.getUriForFile(activity, activity.getPackageName() + ".provider", apk);
             intent.setDataAndType(uri, "application/vnd.android.package-archive");
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
             activity.startActivity(intent);
+            return true;
         } catch (Exception e) {
             FileLog.e(e);
+            return false;
         }
     }
 
