@@ -877,7 +877,7 @@ public class NotificationsCustomSettingsActivity extends BaseFragment implements
                         updateRows(true);
                     }
                 }));
-            } else if (item.id == 101) {
+            } else if (item.id == BUTTON_SVIPE_MESSAGE_TYPES) {
                 presentFragment(new org.telegram.svipe.SvipeMessageTypesActivity(svipeScope(), R.string.SvipeMessageTypes));
             } else if (item.id == 4) {
                 if (!view.isEnabled()) {
@@ -1339,6 +1339,7 @@ public class NotificationsCustomSettingsActivity extends BaseFragment implements
     private static final int BUTTON_IMPORTANT_STORIES = 102;
     private static final int BUTTON_MESSAGES_REACTIONS = 103;
     private static final int BUTTON_STORIES_REACTIONS = 104;
+    private static final int BUTTON_SVIPE_MESSAGE_TYPES = 105;
 
     @Keep
     public int newRow = -1;
@@ -1356,7 +1357,6 @@ public class NotificationsCustomSettingsActivity extends BaseFragment implements
     public int showSenderRow = -1;
     @Keep
     public int soundRow = -1;
-    @Keep
     /** Which class of chats this screen is for, in the words the message-type rules use. */
     private String svipeScope() {
         if (currentType == TYPE_PRIVATE) {
@@ -1369,6 +1369,7 @@ public class NotificationsCustomSettingsActivity extends BaseFragment implements
         return null;
     }
 
+    @Keep
     public int addExceptionRow = -1;
     @Keep
     public int deleteExceptionsRow = -1;
@@ -1529,7 +1530,7 @@ public class NotificationsCustomSettingsActivity extends BaseFragment implements
             // and a rule nobody can find is a rule nobody uses. A chat's own rule still wins.
             if (svipeScope() != null) {
                 items.add(ItemInner.asShadow(-21, null));
-                items.add(ItemInner.asSetting(101, getString(R.string.SvipeMessageTypes), ""));
+                items.add(ItemInner.asSetting(BUTTON_SVIPE_MESSAGE_TYPES, getString(R.string.SvipeMessageTypes), ""));
             }
 
             items.add(ItemInner.asShadow(-2, null));
