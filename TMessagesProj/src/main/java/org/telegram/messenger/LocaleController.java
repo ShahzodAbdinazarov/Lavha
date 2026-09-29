@@ -1628,14 +1628,14 @@ public class LocaleController {
 
     private static String formatString(String key, String fallback, int res, Object... args) {
         try {
-            final String value = getInstance().getStringV2(key, res, fallback);
-            if (value == null) {
+            final String raw = getInstance().getStringV2(key, res, fallback);
+            if (raw == null) {
                 return "LOC_ERR: " + key;
             }
 
             // Rebrand before formatting: the placeholders are untouched by the substitution, and doing
             // it here covers the formatted strings too. See SvipeBrand.
-            value = org.telegram.svipe.SvipeBrand.apply(key, value);
+            final String value = org.telegram.svipe.SvipeBrand.apply(key, raw);
 
             if (getInstance().currentLocale != null) {
                 return String.format(getInstance().currentLocale, value, args);
