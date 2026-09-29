@@ -1702,6 +1702,20 @@ public class DatabaseMigrationHelper {
             database.executeFast("PRAGMA user_version = 178").stepThis().dispose();
             version = 178;
         }
+        // Upstream 12.10.4/12.10.5 numbered these two steps 177 -> 178 and 178 -> 179. Our 177 -> 178 is
+        // already upstream's welcome_messages step, renumbered above, and installed Svipe builds sit
+        // at 178 — under upstream's numbers the music index would never run for them. Shifted by one,
+        // for the same reason as last time.
+        if (version == 178) {
+            database.executeFast("CREATE INDEX IF NOT EXISTS media_v4_music_browse_idx ON media_v4(uid, date DESC, mid DESC) WHERE type = 4 AND mid > 0 AND uid != 0;").stepThis().dispose();
+            database.executeFast("PRAGMA user_version = 179").stepThis().dispose();
+            version = 179;
+        }
+        if (version == 179) {
+            database.executeFast("DELETE FROM downloading_documents").stepThis().dispose();
+            database.executeFast("PRAGMA user_version = 180").stepThis().dispose();
+            version = 180;
+        }
 
         return version;
     }
