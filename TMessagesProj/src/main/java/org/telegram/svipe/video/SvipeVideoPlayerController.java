@@ -944,7 +944,6 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
                 FileStreamLoadOperation.setPriorityForDocument(doc, FileLoader.PRIORITY_HIGH);
             }
             p.setTextureView(stage.getTextureView()); // exactly once per opened video
-            attachPipSource();
             // setDelegate MUST precede preparePlayer: VideoPlayer reports the first state change
             // during prepare and dereferences the delegate with no null check.
             p.setDelegate(new VideoPlayer.VideoPlayerDelegate() {
@@ -1028,6 +1027,10 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
                 FileLog.d("svipe: long-form play source=" + (whole ? "LOCAL-cache" : "network"));
                 p.preparePlayer(vu.uri, "other");
             }
+            // AFTER prepare: VideoPlayer only creates its ExoPlayer inside preparePlayer, and the PiP
+            // source hands that ExoPlayer to a MediaSession, which throws on null. Registered before
+            // it, the source took a null player and the first layout pass crashed the app.
+            attachPipSource();
             if (startPaused) {
                 // Returning to a video the user had paused: it stays paused. (A video that was
                 // running when it was buried takes the ordinary autoplay path below.)
@@ -1490,7 +1493,7 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
     }
 
     private void attachPipSource() {
-        if (pipSource != null || player == null || stage == null) return;
+        if (pipSource != null || player == null || player.player == null || stage == null) return;
         final Activity activity = activityOf();
         if (activity == null) return;
         try {
