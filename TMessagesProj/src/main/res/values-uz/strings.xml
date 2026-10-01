@@ -64,8 +64,8 @@
     <string name="SvipeMsgSyncWithPartner">Suhbatdosh bilan</string>
     <string name="SvipeMsgSyncSelfOnly">Faqat mening qurilmalarim</string>
     <string name="SvipeMsgSyncOff">Sinxronlanmasin</string>
-    <string name="SvipeMsgSyncModeInfo">\"Suhbatdosh bilan\" — shaxsiy suhbatning o\'chirilgan va tahrirlangan xabarlarini ikkovingiz uchun saqlaydi, faqat ikkalangiz ham yoqsangiz. \"Faqat mening qurilmalarim\" — faqat o\'zingiz yuborgan xabarlarni o\'zingiz uchun zaxiralaydi. Alohida suhbatni o\'sha suhbat ichidan o\'chirib qo\'yishingiz mumkin. Guruh, kanal yoki Maxfiy chatlarga hech qachon qo\'llanmaydi.</string>
-    <string name="SvipeMsgSyncOffConfirm">Sinxronni o\'chirsangiz, suhbatdoshingizning o\'chirgan xabarlari ham sizga kelmaydi — xuddi \"oxirgi ko\'rilgan\"ni yashirgandek. O\'chirilsinmi?</string>
+    <string name="SvipeMsgSyncModeInfo">\"Suhbatdosh bilan\" — shaxsiy suhbatning o\'chirilgan va tahrirlangan xabarlarini barcha qurilmalaringizda saqlaydi va suhbatdoshingizga ham ko\'rsatadi; uning xabarlarini u ham yoqsa ko\'rasiz. \"Faqat mening qurilmalarim\" — faqat barcha qurilmalaringizda saqlaydi. Alohida suhbatni o\'sha suhbat ichidan o\'chirib qo\'yishingiz mumkin. Guruh, kanal yoki Maxfiy chatlarga hech qachon qo\'llanmaydi.</string>
+    <string name="SvipeMsgSyncOffConfirm">Sinxronni o\'chirsangiz, siz sinxronlagan o\'chirilgan va tahrirlangan xabarlar serverdan o\'chiriladi, boshqa qurilmalaringizga kelmaydi va suhbatdoshingiz ularni ko\'ra olmaydi. O\'chirilsinmi?</string>
     <string name="SvipeMsgSyncDelete">Serverdan hammasini o\'chirish</string>
     <string name="SvipeMsgSyncDeleteInfo">Siz sinxronlagan barcha xabarni o\'chiradi. Qurilmangizda qoladi.</string>
     <string name="SvipeMsgSyncDeleteConfirm">Serverga sinxronlagan barcha xabaringiz o\'chirilsinmi?</string>
@@ -73,7 +73,7 @@
     <string name="SvipeMsgSyncFailed">Serverga ulanib bo\'lmadi. Qayta urinib ko\'ring.</string>
     <string name="SvipeMsgSyncBanner">Suhbatdoshingiz Svipe ishlatadi. Shu suhbatning o\'chirilgan xabarlarini sinxronlab, ikkovingiz bir xil tarixni saqlaysizmi?</string>
     <string name="SvipeMsgSyncPromptTitle">O\'chirilgan va tahrirlangan xabarlar sinxronlansinmi?</string>
-    <string name="SvipeMsgSyncPromptMessage">**Svipe** o\'chirgan yoki tahrirlagan xabarlaringizni saqlab, yo\'qotmasligingizga yordam beradi. **Ruxsat** — suhbatdosh bilan (faqat ikkalangiz ham yoqsangiz) va o\'z qurilmalaringiz aro sinxronlash. **O\'zimga** — faqat o\'z xabarlaringizni zaxiralash. **Rad etish** — sinxronlamaslik. Istalgan payt Sozlamalarda o\'zgartirasiz.</string>
+    <string name="SvipeMsgSyncPromptMessage">**Svipe** o\'chirgan yoki tahrirlagan xabarlaringizni saqlab, yo\'qotmasligingizga yordam beradi. **Ruxsat** — barcha qurilmalaringizda va suhbatdosh bilan. **O\'zimga** — faqat o\'z qurilmalaringizda. **Rad etish** — sinxronlamaslik. Istalgan payt Sozlamalarda o\'zgartirasiz.</string>
     <string name="SvipeMsgSyncSnackbar">O\'chirilgan va tahrirlangan xabarlar sinxronlansinmi?</string>
     <string name="SvipeMsgSyncAllow">Ruxsat</string>
     <string name="SvipeMsgSyncForMe">O\'zimga</string>

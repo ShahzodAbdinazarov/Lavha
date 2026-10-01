@@ -11055,8 +11055,8 @@
     <string name="SvipeMsgSyncWithPartner">With the other person</string>
     <string name="SvipeMsgSyncSelfOnly">Only my own devices</string>
     <string name="SvipeMsgSyncOff">Don\'t sync</string>
-    <string name="SvipeMsgSyncModeInfo">\"With the other person\" keeps a one-to-one chat\'s deleted and edited messages for both of you — only if you both turn it on. \"Only my own devices\" backs up just the messages you sent, for yourself. You can turn a single chat off from inside that chat. Never applies to groups, channels or Secret Chats.</string>
-    <string name="SvipeMsgSyncOffConfirm">If you turn sync off, the other person\'s deleted messages won\'t reach you either — just like hiding your last seen. Turn it off?</string>
+    <string name="SvipeMsgSyncModeInfo">\"With the other person\" keeps a one-to-one chat\'s deleted and edited messages on all your devices and lets the other person see them too; you see theirs when they turn it on. \"Only my own devices\" keeps them on all your devices only. You can turn a single chat off from inside that chat. Never applies to groups, channels or Secret Chats.</string>
+    <string name="SvipeMsgSyncOffConfirm">If you turn sync off, the deleted and edited messages you have synced are removed from the server, your other devices stop receiving them and the other person can no longer see them. Turn it off?</string>
     <string name="SvipeMsgSyncDelete">Delete everything from the server</string>
     <string name="SvipeMsgSyncDeleteInfo">Removes every message you have synced. It stays on your device.</string>
     <string name="SvipeMsgSyncDeleteConfirm">Delete every message you have synced to the server?</string>
@@ -11064,7 +11064,7 @@
     <string name="SvipeMsgSyncFailed">Couldn\'t reach the server. Try again.</string>
     <string name="SvipeMsgSyncBanner">The other person uses Svipe. Sync this chat\'s deleted messages so you both keep the same history?</string>
     <string name="SvipeMsgSyncPromptTitle">Sync deleted &amp; edited messages?</string>
-    <string name="SvipeMsgSyncPromptMessage">**Svipe** can keep the messages you delete or edit so you don\'t lose them. **Allow** — sync with the other person (only if you both allow) and across your own devices. **For me** — back up only your own messages. **Decline** — don\'t sync. You can change this any time in Settings.</string>
+    <string name="SvipeMsgSyncPromptMessage">**Svipe** can keep the messages you delete or edit so you don\'t lose them. **Allow** — on all your devices and with the other person. **For me** — only on all your own devices. **Decline** — don\'t sync. You can change this any time in Settings.</string>
     <string name="SvipeMsgSyncSnackbar">Sync deleted &amp; edited messages?</string>
     <string name="SvipeMsgSyncAllow">Allow</string>
     <string name="SvipeMsgSyncForMe">For me</string>
