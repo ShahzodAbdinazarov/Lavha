@@ -59,8 +59,10 @@ else echo "  ✗ targetSdkVersion=${TSDK:-unknown} (< 36)"; fail=1; fi
 VC="$(grep -oE 'versionCode="[0-9]+"' <<<"$MF" | grep -oE '[0-9]+' | head -1)"
 echo "  · versionCode=$VC  versionName=$(grep -oE 'versionName="[^"]+"' <<<"$MF" | head -1 | cut -d'"' -f2)"
 # The Play variant stamps versionCode as-is; the forbidden afat variant stamps versionCode*10+9.
-if [ -n "$VC" ] && [ "$((VC % 10))" -eq 9 ] && [ "$VC" -gt 99 ]; then
-  echo "  ✗ versionCode ends in 9 and is large — this smells like the afat variant, not bundleBundleAfat"; fail=1
+# Compare with gradle.properties exactly: "ends in 9" alone misfires on a Play code like 109.
+WANT="$(grep -E '^APP_VERSION_CODE=' "$(dirname "$0")/../gradle.properties" | cut -d= -f2)"
+if [ -n "$VC" ] && [ -n "$WANT" ] && [ "$VC" -ne "$WANT" ]; then
+  echo "  ✗ versionCode=$VC but APP_VERSION_CODE=$WANT — $( [ "$VC" -eq $((WANT * 10 + 9)) ] && echo 'this is the afat variant, not bundleBundleAfat' || echo 'stale or wrong build')"; fail=1
 fi
 
 # --- 4. every permission the bundle asks for must be disclosed on the published privacy policy ---
