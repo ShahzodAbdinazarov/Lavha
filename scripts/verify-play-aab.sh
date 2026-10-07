@@ -56,6 +56,10 @@ TSDK="$(grep -oE 'targetSdkVersion="[0-9]+"' <<<"$MF" | grep -oE '[0-9]+' | head
 if [ -n "$TSDK" ] && [ "$TSDK" -ge 36 ]; then echo "  ✓ targetSdkVersion=$TSDK (>= 36)"
 else echo "  ✗ targetSdkVersion=${TSDK:-unknown} (< 36)"; fail=1; fi
 
+MINSDK="$(grep -oE 'minSdkVersion="[0-9]+"' <<<"$MF" | grep -oE '[0-9]+' | head -1)"
+if [ -n "$MINSDK" ] && [ "$MINSDK" -ge 24 ]; then echo "  ✓ minSdkVersion=$MINSDK (>= 24, Play automatic protection)"
+else echo "  ✗ minSdkVersion=${MINSDK:-unknown} (< 24) — Play automatic protection rejects it"; fail=1; fi
+
 VC="$(grep -oE 'versionCode="[0-9]+"' <<<"$MF" | grep -oE '[0-9]+' | head -1)"
 echo "  · versionCode=$VC  versionName=$(grep -oE 'versionName="[^"]+"' <<<"$MF" | head -1 | cut -d'"' -f2)"
 # The Play variant stamps versionCode as-is; the forbidden afat variant stamps versionCode*10+9.

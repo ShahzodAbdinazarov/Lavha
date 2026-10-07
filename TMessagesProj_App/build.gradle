@@ -132,6 +132,9 @@ android {
             ndk {
                 abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
             }
+            // Play's automatic protection refuses a bundle below API 24. The direct-download build
+            // (afat, svipe.uz) keeps 21, so Android 5-6 phones still have a way in.
+            minSdkVersion 24
             ext {
                 abiVersionCode = 1
             }
