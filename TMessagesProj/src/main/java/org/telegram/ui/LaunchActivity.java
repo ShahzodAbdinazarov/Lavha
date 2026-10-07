@@ -7034,6 +7034,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         // returning user nothing. Delayed past the resume frame — it walks the whole dialog list.
         AndroidUtilities.runOnUIThread(
                 () -> org.telegram.svipe.SvipeChannelSync.syncAll(currentAccount), 4000);
+        org.telegram.svipe.SvipeSettingsSync.pullOnResume(currentAccount);
         //FileLog.d("UI resume time = " + (SystemClock.elapsedRealtime() - ApplicationLoader.startTime));
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.startAllHeavyOperations, 4096);
         MediaController.getInstance().setFeedbackView(feedbackView = actionBarLayout.getView(), true);

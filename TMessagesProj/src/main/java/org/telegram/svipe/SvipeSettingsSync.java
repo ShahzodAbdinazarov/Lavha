@@ -111,6 +111,21 @@ public final class SvipeSettingsSync {
      * Ask what the other devices know and adopt it if it is newer. Called at app start; cheap
      * enough (one small GET) that it rides along with the rest of the warm-up.
      */
+    private static final long RESUME_PULL_EVERY_MS = 60_000L;
+    private static final long[] lastResumePull = new long[16];
+
+    /**
+     * Coming back to the app: a rule set on another device since start must hold here too, or a
+     * forward muted on the desktop keeps ringing on the phone until the next cold start.
+     */
+    public static void pullOnResume(final int account) {
+        if (account < 0 || account >= lastResumePull.length) return;
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (lastResumePull[account] != 0 && now - lastResumePull[account] < RESUME_PULL_EVERY_MS) return;
+        lastResumePull[account] = now;
+        pull(account);
+    }
+
     public static void pull(final int account) {
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {

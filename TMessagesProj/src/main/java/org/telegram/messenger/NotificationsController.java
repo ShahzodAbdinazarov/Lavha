@@ -71,6 +71,7 @@ import org.telegram.messenger.utils.tlutils.TLKeyboardHelper;
 import org.telegram.messenger.utils.tlutils.TlUtils;
 import org.telegram.messenger.voip.VoIPGroupNotification;
 import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.tgnet.tl.TL_account;
 import org.telegram.tgnet.tl.TL_keyboard;
@@ -1137,9 +1138,7 @@ public class NotificationsController extends BaseController implements Notificat
                         FileLog.d("holding push for dialog " + dialogId + " mid = " + mid + " until the real message can name its type");
                     }
                     rememberDeferredTypeCheck(dialogId, mid);
-                    final ArrayList<MessageObject> retry = new ArrayList<>(1);
-                    retry.add(messageObject);
-                    notificationsQueue.postRunnable(() -> processNewMessages(retry, true, true, null), MUTED_TYPE_PUSH_DELAY);
+                    judgeByServer(dialogId, mid, messageObject, 0);
                     continue;
                 }
                 if (isMutedMessageType(dialogId, messageObject) || isKnownMutedTypeMessage(dialogId, mid)) {
@@ -6411,6 +6410,105 @@ public class NotificationsController extends BaseController implements Notificat
         return false;
     }
 
+    /**
+     * Waiting for the MTProto copy is not enough: with the app asleep it often never comes in time,
+     * and the push rang as if it were an ordinary message. So ask Telegram for this one message —
+     * only in a chat that carries a message-type exception, only once per message — and let the
+     * copy that knows its type decide. Costs a request per such push; the user asked for exactly
+     * that over a muted forward ringing.
+     */
+    private static final long[] TYPE_CHECK_RETRY = {2000L, 5000L, 15000L, 30000L};
+    // After the push was let through for want of an answer: keep asking, as Telegram itself takes
+    // back a notification for a message that turns out to be gone. Opening the app does the same
+    // through getDifference, which reaches processNewMessages and the retract below.
+    private static final long[] TYPE_CHECK_LATE = {60_000L, 300_000L, 900_000L};
+    private static final long TYPE_CHECK_TIMEOUT = 10000L;
+
+    private void judgeByServer(long dialogId, int mid, MessageObject push, int attempt) {
+        final ArrayList<MessageObject> retry = new ArrayList<>(1);
+        retry.add(push);
+        final boolean shown = attempt > TYPE_CHECK_RETRY.length; // already on screen, unjudged
+        final Runnable release = () -> {
+            if (!shown) processNewMessages(retry, true, true, null);
+        };
+        TLObject request;
+        if (DialogObject.isChatDialog(dialogId) && (push.localChannel
+                || ChatObject.isChannel(getMessagesController().getChat(-dialogId)))) {
+            TLRPC.InputChannel channel = getMessagesController().getInputChannel(-dialogId);
+            if (channel == null || channel.access_hash == 0) {
+                // No way to address the channel from here: fall back to waiting for the real copy.
+                if (!shown) notificationsQueue.postRunnable(release, MUTED_TYPE_PUSH_DELAY);
+                return;
+            }
+            TLRPC.TL_channels_getMessages req = new TLRPC.TL_channels_getMessages();
+            req.channel = channel;
+            req.id.add(mid);
+            request = req;
+        } else {
+            TLRPC.TL_messages_getMessages req = new TLRPC.TL_messages_getMessages();
+            req.id.add(mid);
+            request = req;
+        }
+        final boolean[] settled = {false};
+        final Runnable failed = () -> {
+            if (settled[0]) return;
+            settled[0] = true;
+            if (isKnownMutedTypeMessage(dialogId, mid)) {
+                // The real copy arrived meanwhile and already judged (and retracted) it.
+                release.run();
+                return;
+            }
+            if (attempt == TYPE_CHECK_RETRY.length) {
+                // Telegram never answered: an ordinary message must not be lost to a check that
+                // failed. Let it ring, and keep asking so a muted one is taken back.
+                release.run();
+            }
+            if (attempt < TYPE_CHECK_RETRY.length) {
+                notificationsQueue.postRunnable(() -> judgeByServer(dialogId, mid, push, attempt + 1), TYPE_CHECK_RETRY[attempt]);
+            } else {
+                int late = attempt - TYPE_CHECK_RETRY.length;
+                if (late < TYPE_CHECK_LATE.length) {
+                    notificationsQueue.postRunnable(() -> judgeByServer(dialogId, mid, push, attempt + 1), TYPE_CHECK_LATE[late]);
+                }
+            }
+        };
+        final int reqId = getConnectionsManager().sendRequest(request, (response, error) -> notificationsQueue.postRunnable(() -> {
+            if (settled[0]) return;
+            if (!(response instanceof TLRPC.messages_Messages)) {
+                failed.run();
+                return;
+            }
+            settled[0] = true;
+            TLRPC.messages_Messages res = (TLRPC.messages_Messages) response;
+            TLRPC.Message found = null;
+            for (int i = 0; i < res.messages.size(); i++) {
+                TLRPC.Message m = res.messages.get(i);
+                if (m != null && m.id == mid && !(m instanceof TLRPC.TL_messageEmpty)) {
+                    found = m;
+                    break;
+                }
+            }
+            boolean muted = found == null // gone before we could look: nothing left to ring for
+                    || isMutedMessageType(dialogId, new MessageObject(currentAccount, found, false, false));
+            if (muted) {
+                if (BuildVars.LOGS_ENABLED) {
+                    FileLog.d("server says push for dialog " + dialogId + " mid = " + mid + " is a muted type" + (shown ? ", taking it back" : ""));
+                }
+                rememberMutedTypeMessage(dialogId, mid);
+                if (shown) {
+                    retractMutedTypeNotification(dialogId, mid);
+                }
+            }
+            release.run();
+        }));
+        notificationsQueue.postRunnable(() -> {
+            if (!settled[0]) {
+                getConnectionsManager().cancelRequest(reqId, true);
+                failed.run();
+            }
+        }, TYPE_CHECK_TIMEOUT);
+    }
+
     private void rememberDeferredTypeCheck(long dialogId, int mid) {
         HashSet<Integer> deferred = deferredTypeChecks.get(dialogId);
         if (deferred == null) {
@@ -6458,14 +6556,22 @@ public class NotificationsController extends BaseController implements Notificat
         if (mid == 0) {
             return;
         }
-        SparseArray<MessageObject> shown = pushMessagesDict.get(dialogId);
+        // pushMessagesDict keeps channels under -channel_id and everything else under 0 (those ids
+        // are unique per account), so a private chat's notification is never under its dialog id.
+        long key = dialogId;
+        SparseArray<MessageObject> shown = pushMessagesDict.get(key);
         if (shown == null || shown.get(mid) == null) {
-            return;
+            key = 0;
+            shown = pushMessagesDict.get(key);
+            MessageObject found = shown == null ? null : shown.get(mid);
+            if (found == null || found.getDialogId() != dialogId) {
+                return;
+            }
         }
         LongSparseArray<ArrayList<Integer>> deleted = new LongSparseArray<>();
         ArrayList<Integer> ids = new ArrayList<>();
         ids.add(mid);
-        deleted.put(dialogId, ids);
+        deleted.put(key, ids);
         removeDeletedMessagesFromNotifications(deleted, false);
     }
 
