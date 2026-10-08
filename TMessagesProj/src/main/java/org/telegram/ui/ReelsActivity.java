@@ -121,7 +121,10 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
 
     private final int account = UserConfig.selectedAccount;
     private static final String LIKE_EMOJI = "❤";
-    private static final int PREFETCH_AHEAD = 5; // resolve + warm bytes for the next N reels
+    private static final int PREFETCH_AHEAD = 5;
+    // How far ahead a reel's document is fetched through its public link (messages.getWebPage) so
+    // its head can be cached before the swipe reaches it.
+    private static final int WEB_READ_AHEAD = 3; // resolve + warm bytes for the next N reels
     private static final int LOAD_MORE_AHEAD = 4; // ask for the next page this close to the end
     private static final int MAX_EMPTY_APPEND_PAGES = 25; // safety cap: chain through this many all-watched pages before giving up
     // Stuck-reel watchdog thresholds. A cached/fast reel fires its first frame in <100ms (well inside
@@ -351,6 +354,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         int preloadPriority = FileLoader.PRIORITY_LOW;   // set by prefetchAround before resolve
         boolean preloadBypassGate;                       // next-in-line skips the data-saving gate
         boolean urlMintTried;                            // the embed page was asked for a sessionless URL (once)
+        boolean webRefTried;                             // read-ahead asked messages.getWebPage (once)
         boolean fromQueue;                               // restored from the persisted offline queue
         boolean fullDownloadStarted;                     // a full (cacheType 0) download was requested
         long downloadDocId;                              // the rendition doc a full download targets (0 = none); the observers key off this
@@ -1740,6 +1744,15 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             it.preloadPriority = SvipePreloadPlan.priorityFor(i, pos) == SvipePreloadPlan.NORMAL
                     ? FileLoader.PRIORITY_NORMAL : FileLoader.PRIORITY_LOW;
             it.preloadBypassGate = SvipePreloadPlan.bypassesGate(i, pos);
+            if (it.mo == null && i <= pos + WEB_READ_AHEAD) {
+                // Measured on a 3G-throttled emulator swiping every 1.5 s: the reels behind the one
+                // prepared player had only a URL or nothing, so they started from zero (1.1-3.4 s,
+                // some never). messages.getWebPage hands over the document WITHOUT
+                // contacts.resolveUsername — it is not the flood-limited call this read-ahead was
+                // kept away from — and with the document in hand the head goes into Telegram's cache
+                // like any resolved reel, so the swipe that reaches it starts from disk.
+                readAheadWebRef(it);
+            }
             if (it.mo == null && hasPlayUrl(it)) {
                 // Nothing to resolve and nothing for FileLoader to do: this reel's bytes arrive over
                 // HTTPS, and prepareNextPlayer already buffers the one the user is about to reach.
@@ -1769,6 +1782,22 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 stopLoadingFor(it);
             }
         }
+    }
+
+    /** Read-ahead through the post's public link: never a resolveUsername, once per reel. */
+    private void readAheadWebRef(FeedItem it) {
+        if (it.webRefTried || it.mo != null || it.resolving || it.username == null) return;
+        it.webRefTried = true;
+        org.telegram.svipe.video.SvipeWebRef.fetch(account, it.username, it.messageId, it.channelId, (mo, page) -> {
+            if (mo == null || it.mo != null) return;
+            it.mo = mo;
+            it.refParent = page;
+            FileLog.d("svipe: read-ahead web ref " + it.username + "/" + it.messageId);
+            final int index = items.indexOf(it);
+            if (index > currentPosition && index <= currentPosition + PREFETCH_AHEAD) {
+                preloadMedia(it);
+            }
+        });
     }
 
     /** Is this item playable entirely from disk (ANY rendition or the original fully present)? */
@@ -2592,7 +2621,21 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 p.setLooping(true);   // under the embed ceiling, so never long-form
                 p.setDelegate(new VideoPlayer.VideoPlayerDelegate() {
                     @Override public void onStateChanged(boolean playWhenReady, int playbackState) {}
-                    @Override public void onError(VideoPlayer player, Exception e) { FileLog.e(e); }
+                    @Override public void onError(VideoPlayer player, Exception e) {
+                        FileLog.e(e);
+                        // The t.me URL died while waiting (measured: "Loading finished before
+                        // preparation is complete"). Find out NOW, not when the swipe lands on it:
+                        // drop the URL and prepare again — from the document if the read-ahead has
+                        // it, else from a fresh URL.
+                        AndroidUtilities.runOnUIThread(() -> {
+                            if (nextPlayer != player || nextPlayerPos != pos) return;
+                            FileLog.d("svipe: prepared next player pos=" + pos + " failed — re-preparing");
+                            item.playUrl = null;
+                            item.urlMintTried = false;
+                            releaseNextPlayer();
+                            prepareNextPlayer(pos);
+                        });
+                    }
                     @Override public void onVideoSizeChanged(int w, int h, int rot, float par) {}
                     @Override public void onRenderedFirstFrame() {}
                     @Override public void onSurfaceTextureUpdated(SurfaceTexture st) {}
