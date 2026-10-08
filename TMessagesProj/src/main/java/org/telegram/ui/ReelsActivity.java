@@ -262,6 +262,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     // priority; the swipe just attaches it to the texture — no setup, no buffer ramp-up.
     private VideoPlayer nextPlayer;
     private int nextPlayerPos = -1;
+    private android.view.TextureView nextPlayerSurface; // the page TextureView it draws into, if any
     /** What the prepared player was handed, carried over to {@link #playbackSource} on the swipe.
      *  Without it every prefetched reel reported the PREVIOUS reel's source, and prefetched reels
      *  are most of them — so the one number that says which route a reel took was wrong for the
@@ -463,7 +464,15 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         root.setBackgroundColor(0xFF000000);
 
         listView = new RecyclerListView(context);
-        layoutManager = new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false);
+        layoutManager = new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false) {
+            // Keep the NEXT page laid out off screen, so the prepared next player can draw into its
+            // own TextureView from the start (see attachNextSurface).
+            @Override
+            protected void calculateExtraLayoutSpace(@androidx.annotation.NonNull RecyclerView.State state, @androidx.annotation.NonNull int[] extraLayoutSpace) {
+                extraLayoutSpace[0] = 0;
+                extraLayoutSpace[1] = listView != null ? listView.getHeight() : 0;
+            }
+        };
         listView.setLayoutManager(layoutManager);
         adapter = new ReelsAdapter(context);
         listView.setAdapter(adapter);
@@ -2082,6 +2091,13 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             // pulled down in full — see SvipeVideoLadder.isLongForm. Anything reachable by URL is
             // under the ~20 MB public-embed ceiling, so it is never long-form.
             final boolean longForm = !viaUrl && SvipeVideoLadder.isLongForm(doc);
+            if (nextPlayer != null && nextPlayerPos == pos && nextPlayerSurface != holder.textureView) {
+                // Prepared before its page was laid out (a cold start), so it would have to switch
+                // surfaces now — the switch that leaves the page black. A fresh player off the same
+                // cached bytes starts in ~0.4 s; the stuck watchdog took 6 s to notice the black one.
+                FileLog.d("svipe: prepared player for pos=" + pos + " has no surface of its own — starting fresh");
+                releaseNextPlayer();
+            }
             final boolean prepared = nextPlayer != null && nextPlayerPos == pos;
             VideoPlayer player;
             if (prepared) {
@@ -2310,6 +2326,23 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         } catch (Exception e) {
             FileLog.e(e);
             holder.showLoading(false);
+        }
+    }
+
+    /**
+     * Give the prepared next player its page's TextureView NOW, while the page sits laid out below
+     * the screen. A player prepared without a surface and handed one when the swipe lands has to
+     * switch its decoder's output surface mid-stream; measured on svipe_test (2026-10-08) the
+     * decoder then kept producing frames — the SurfaceTexture's timestamp moved — but every one of
+     * them was black, behind a progress line that ran on. A player that draws into the same surface
+     * from the start never switches.
+     */
+    private void attachNextSurface(VideoPlayer p, int pos) {
+        ReelsHolder next = holderAt(pos);
+        nextPlayerSurface = null;
+        if (next != null && next.textureView != null) {
+            p.setTextureView(next.textureView);
+            nextPlayerSurface = next.textureView;
         }
     }
 
@@ -2643,6 +2676,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 });
                 p.preparePlayer(Uri.parse(item.playUrl), "other");
                 p.setPlayWhenReady(false);
+                attachNextSurface(p, pos);
                 nextPlayer = p;
                 nextPlayerPos = pos;
                 nextPlayerSource = "public_url";
@@ -2714,6 +2748,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 p.preparePlayer(vu.uri, "other");
             }
             p.setPlayWhenReady(false);
+            attachNextSurface(p, pos);
             nextPlayer = p;
             nextPlayerPos = pos;
             FileLog.d("svipe: prepared next player pos=" + pos + " source=" + nextPlayerSource);
@@ -2728,6 +2763,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             nextPlayer = null;
         }
         nextPlayerPos = -1;
+        nextPlayerSurface = null;
     }
 
     private void togglePlayPause() {
