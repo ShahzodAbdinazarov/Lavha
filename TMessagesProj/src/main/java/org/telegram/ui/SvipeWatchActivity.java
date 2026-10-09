@@ -35,6 +35,7 @@ import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.messenger.UserConfig;
 import org.telegram.svipe.SvipeDiscover;
 import org.telegram.svipe.SvipeMovies;
+import org.telegram.svipe.SvipeSocial;
 import org.telegram.svipe.SvipeSavedChannels;
 import org.telegram.svipe.video.SvipeDownloadButton;
 import org.telegram.tgnet.ConnectionsManager;
@@ -377,6 +378,7 @@ public class SvipeWatchActivity extends BaseFragment {
         this.watched.chat = chat;
         this.liked = isLiked(mo);
         this.likeCount = totalReactions(mo);
+        syncSocial();
         // Known from the reference, not from the playlist. A show page opens on the poster post and
         // the episode list catches up seconds later, so asking getPlaylist() at open time still says
         // "not a show" and the film lookup goes out anyway — measured 2.6 s for a 404 while the first
@@ -546,6 +548,7 @@ public class SvipeWatchActivity extends BaseFragment {
         relatedFailures = 0;
         liked = isLiked(row.mo);
         likeCount = totalReactions(row.mo);
+        syncSocial();
         captionExpanded = false;
         rebuildRows();
         if (playerHole != null) {
@@ -1036,7 +1039,7 @@ public class SvipeWatchActivity extends BaseFragment {
             if (row != watched) {
                 return;   // the page swapped to another video while this resolve was in flight
             }
-            if (row.mo != null) {
+            if (row.mo != null && !svipeSocial()) {
                 liked = isLiked(row.mo);
                 likeCount = totalReactions(row.mo);
             }
@@ -1508,7 +1511,44 @@ public class SvipeWatchActivity extends BaseFragment {
      * message's reaction list — reels learned the hard way that reading it back breaks UNLIKING, because
      * emoji variation selectors make the equality check miss.
      */
+    /**
+     * A public post's like and subscribe are Svipe's own (SvipeSocial, kept on our server): they need
+     * neither the message nor the chat, so they never cost a resolve. A local source — a video from
+     * the user's own chats — keeps Telegram's reaction and membership: it is not ours to record.
+     */
+    private boolean svipeSocial() {
+        return watched != null && watched.ref != null && watched.ref.channelId != 0 && !isLocal();
+    }
+
+    private void syncSocial() {
+        if (!svipeSocial()) {
+            return;
+        }
+        final Row row = watched;
+        final long channelId = row.ref.channelId;
+        final int messageId = row.ref.messageId;
+        SvipeSocial.State known = SvipeSocial.peek(currentAccount, channelId, messageId);
+        liked = known.loaded && known.liked;
+        likeCount = known.loaded ? known.likes : 0;
+        SvipeSocial.load(currentAccount, channelId, messageId, state -> {
+            if (row != watched) {
+                return;
+            }
+            liked = state.liked;
+            likeCount = state.likes;
+            rebuildRows();
+        });
+    }
+
     private void toggleLike() {
+        if (svipeSocial()) {
+            SvipeSocial.State state = SvipeSocial.setLiked(currentAccount, watched.ref.channelId,
+                    watched.ref.messageId, !liked, watched.ref.recId);
+            liked = state.liked;
+            likeCount = state.likes;
+            rebuildRows();
+            return;
+        }
         final MessageObject mo = watched.mo;
         if (mo == null) {
             return;
@@ -1677,6 +1717,14 @@ public class SvipeWatchActivity extends BaseFragment {
 
     /** Subscribe / unsubscribe, exactly as the reels rail does it. */
     private void toggleFollow() {
+        if (svipeSocial()) {
+            final boolean following = !SvipeSocial.peek(currentAccount, watched.ref.channelId,
+                    watched.ref.messageId).following;
+            SvipeSocial.setFollowing(currentAccount, watched.ref.channelId, watched.ref.messageId,
+                    following, watched.ref.recId);
+            rebuildRows();
+            return;
+        }
         final TLRPC.Chat chat = watched.chat;
         // isLocal() as well as the null check: a private channel or a group seed has a perfectly real
         // Chat, and subscribing to it is neither something this page should offer nor something whose
@@ -2448,7 +2496,9 @@ public class SvipeWatchActivity extends BaseFragment {
                 subtitle.setVisibility(GONE);
             }
 
-            final boolean following = chat != null && ChatObject.isInChat(chat);
+            final boolean following = svipeSocial()
+                    ? SvipeSocial.peek(currentAccount, watched.ref.channelId, watched.ref.messageId).following
+                    : chat != null && ChatObject.isInChat(chat);
             // Unlike the reels rail, a subscribed channel keeps its button and reads "Subscribed": on a
             // watch page a vanishing button just looks like the tap failed.
             follow.setText(getString(following ? R.string.SvipeReelsSubscribed : R.string.SvipeReelsSubscribe));
@@ -2460,7 +2510,7 @@ public class SvipeWatchActivity extends BaseFragment {
                     Theme.getColor(Theme.key_listSelector)));
             // Hidden for a local source: subscribing is a public-channel action, and on a private
             // channel the user is already in, this button would offer to LEAVE it from a video page.
-            follow.setVisibility(chat == null || isLocal() ? GONE : VISIBLE);
+            follow.setVisibility(isLocal() || (chat == null && !svipeSocial()) ? GONE : VISIBLE);
         }
     }
 

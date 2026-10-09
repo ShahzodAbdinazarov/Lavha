@@ -49,6 +49,7 @@ import org.json.JSONObject;
 import org.telegram.svipe.SvipeApi;
 import org.telegram.svipe.SvipeAuth;
 import org.telegram.svipe.SvipeBlockedChannels;
+import org.telegram.svipe.SvipeSocial;
 import org.telegram.svipe.SvipeColdStart;
 import org.telegram.svipe.SvipeConfig;
 import org.telegram.svipe.SvipeDiscover;
@@ -511,7 +512,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                     // message behind the reel has not been fetched yet — and the reaction is sent
                     // when it arrives (requireMessage resolves only because the user just asked).
                     showHeartBurst((FrameLayout) h.itemView, e.getX(), e.getY());
-                    requireMessage(it, h.likeIcon, () -> setLike(it, h, true, true));
+                    setLike(it, h, true, true); // Svipe's own like: no message needed
                 }
                 return false;
             }
@@ -966,8 +967,6 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 if (e.recId != null && SvipeRecAttribution.attributableId(e.recId) == null) staleRec++;
                 it.mo = mo;
                 it.fromQueue = true;
-                it.liked = isLiked(mo);
-                it.likeCount = totalReactions(mo);
                 rebuilt.add(it);
             }
             final int fTotal = total, fSkipWatched = skipWatched, fSkipDeser = skipDeser, fSkipNoFile = skipNoFile;
@@ -1037,10 +1036,6 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             it.durationMs = r.durationMs;
             it.mo = r.mo;
             it.chat = r.chat;
-            if (it.mo != null) {
-                it.liked = isLiked(it.mo);
-                it.likeCount = totalReactions(it.mo);
-            }
             items.add(it);
         }
         if (items.isEmpty()) return false;
@@ -1583,8 +1578,6 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         public void onResolved(SvipeRefResolver.Ref ref) {
             FeedItem item = (FeedItem) ref;
             item.resolveAttempts = 0;
-            item.liked = isLiked(item.mo);
-            item.likeCount = totalReactions(item.mo);
             preloadMedia(item);
         }
 
@@ -2817,7 +2810,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         final FeedItem fit = it;
         final ReelsHolder fh = h;
         if (pointInView(h.likeIcon, e) || pointInView(h.likeCount, e)) {
-            requireMessage(it, h.likeIcon, () -> toggleLike(fit, fh));
+            toggleLike(fit, fh); // Svipe's own like: no message, no resolve
             return true;
         }
         if (pointInView(h.commentIcon, e) || pointInView(h.commentCount, e)) {
@@ -2836,7 +2829,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         }
         if (pointInView(h.moreIcon, e)) { showMore(it, h); return true; }
         if (pointInView(h.followBtn, e)) {
-            requireChat(it, h.followBtn, () -> toggleFollow(fit, fh));
+            toggleFollow(fit, fh); // Svipe's own subscription: no chat, no resolve
             return true;
         }
         if (pointInView(h.avatar, e) || pointInView(h.channelName, e)) {
@@ -3189,7 +3182,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void toggleLike(FeedItem item, ReelsHolder holder) {
-        if (item == null || item.mo == null) return;
+        if (item == null) return;
         setLike(item, holder, !item.liked, false);
     }
 
@@ -3200,12 +3193,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
      * network call but still let the caller show the heart-burst animation.
      */
     private void setLike(FeedItem item, ReelsHolder holder, boolean newLiked, boolean big) {
-        if (item == null || item.mo == null) return;
+        if (item == null) return;
         if (item.liked == newLiked) return;
-        ReactionsLayoutInBubble.VisibleReaction heart = ReactionsLayoutInBubble.VisibleReaction.fromEmojicon(LIKE_EMOJI);
-        ArrayList<ReactionsLayoutInBubble.VisibleReaction> visible = new ArrayList<>();
-        if (newLiked) visible.add(heart);
-        SendMessagesHelper.getInstance(account).sendReaction(item.mo, visible, newLiked ? heart : null, big, true, this, null);
+        // Svipe's own like, kept on our server (SvipeSocial) — not a Telegram reaction, which would
+        // need the message and so a resolve.
+        SvipeSocial.applyLiked(account, item.channelId, item.messageId, newLiked);
         item.liked = newLiked;
         item.likeCount = Math.max(0, item.likeCount + (newLiked ? 1 : -1));
         if (holder != null) {
@@ -3401,18 +3393,35 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
     }
 
     private void toggleFollow(FeedItem item, ReelsHolder holder) {
-        if (item == null || item.chat == null) return;
-        TLRPC.User self = MessagesController.getInstance(account).getUser(UserConfig.getInstance(account).getClientUserId());
-        if (ChatObject.isInChat(item.chat)) {
-            MessagesController.getInstance(account).deleteParticipantFromChat(item.channelId, self);
-            item.chat.left = true;
-            sendEvent("UNFOLLOW", item);
-        } else {
-            MessagesController.getInstance(account).addUserToChat(item.channelId, self, 0, null, this, null);
-            item.chat.left = false;
-            sendEvent("FOLLOW", item);
+        if (item == null) return;
+        // Svipe's own subscription (SvipeSocial), not a Telegram join: no chat, no resolve.
+        final boolean following = !SvipeSocial.peek(account, item.channelId, item.messageId).following;
+        SvipeSocial.applyFollowing(account, item.channelId, following);
+        sendEvent(following ? "FOLLOW" : "UNFOLLOW", item);
+        if (holder != null) holder.setFollowing(following);
+    }
+
+    /** Bring a bound holder up to the server's like and subscription for its item. */
+    private void bindSocial(ReelsHolder h, FeedItem item) {
+        SvipeSocial.State known = SvipeSocial.peek(account, item.channelId, item.messageId);
+        if (known.loaded) {
+            item.liked = known.liked;
+            item.likeCount = known.likes;
         }
-        if (holder != null) holder.setFollowing(!item.chat.left);
+        h.setLiked(item.liked);
+        h.setLikeCount(item.likeCount);
+        h.setFollowing(known.following);
+        SvipeSocial.load(account, item.channelId, item.messageId, state -> {
+            item.liked = state.liked;
+            item.likeCount = state.likes;
+            final int pos = items.indexOf(item);
+            final ReelsHolder now = pos >= 0 ? holderAt(pos) : null;
+            if (now != null) {
+                now.setLiked(state.liked);
+                now.setLikeCount(state.likes);
+                now.setFollowing(state.following);
+            }
+        });
     }
 
     /**
@@ -3447,14 +3456,12 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             bindAvatar(h, item);
             h.channelName.setText(item.chat.title != null ? item.chat.title : ("@" + item.username));
             h.setVerified(item.chat.verified);
-            h.setFollowing(ChatObject.isInChat(item.chat));
         }
+        bindSocial(h, item);
         // No else: onBindViewHolder already draws the unresolved rail from what the feed knows (the
         // @handle and a letter avatar), and no chat is fetched until a control is tapped, so that is
         // now the state a reel legitimately sits in rather than a gap waiting to be filled.
         if (item.mo != null) {
-            h.setLikeCount(item.likeCount);
-            h.setLiked(item.liked);
             h.setCommentCount(item.mo.getRepliesCount());
             h.setShareCount(item.mo.messageOwner.forwards);
             h.setTitle(captionOf(item.mo));
@@ -4227,8 +4234,6 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
             // this reel's own first frame arrives (the cover thumbnail shows through instead).
             h.textureView.setAlpha(0f);
             h.channelName.setText("@" + item.username);
-            h.setLikeCount(item.mo != null ? item.likeCount : 0);
-            h.setLiked(item.liked);
             h.setCommentCount(item.mo != null ? item.mo.getRepliesCount() : 0);
             h.setShareCount(item.mo != null ? item.mo.messageOwner.forwards : 0);
             h.titleExpanded = false;
@@ -4238,12 +4243,11 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
                 bindAvatar(h, item);
                 h.channelName.setText(item.chat.title != null ? item.chat.title : ("@" + item.username));
                 h.setVerified(item.chat.verified);
-                h.setFollowing(ChatObject.isInChat(item.chat));
             } else {
                 bindAvatar(h, item);
                 h.setVerified(false);
-                h.setFollowing(false);
             }
+            bindSocial(h, item);
         }
 
         @Override
