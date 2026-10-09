@@ -371,10 +371,10 @@ public class SvipeWideVideoCell extends LinearLayout {
                 // empty, Saved is a library you mean to keep — see SvipeSavedChannels.
                 .addIf(message != null, R.drawable.msg_recent,
                         LocaleController.getString(R.string.SvipeSaveWatchLater), () ->
-                        saveTo(fragment, account, SvipeSavedChannels.Kind.WATCH_LATER, message))
+                        saveTo(fragment, account, SvipeSavedChannels.Kind.WATCH_LATER, item, message))
                 .addIf(message != null, R.drawable.msg_saved,
                         LocaleController.getString(R.string.SvipeSaveToList), () ->
-                        saveTo(fragment, account, SvipeSavedChannels.Kind.SAVED_VIDEOS, message))
+                        saveTo(fragment, account, SvipeSavedChannels.Kind.SAVED_VIDEOS, item, message))
                 .add(R.drawable.msg_share, LocaleController.getString(R.string.SvipeReelsShare), () -> share(fragment, item, message))
                 .add(R.drawable.msg2_block2, LocaleController.getString(R.string.SvipeReelsNotInterested), () -> {
                     SvipeDiscover.sendEvent(account, item.channelId, item.messageId, "NOT_INTERESTED", null);
@@ -399,17 +399,28 @@ public class SvipeWideVideoCell extends LinearLayout {
                 .show();
     }
 
-    /** Forward a post into one of the user's saved-list channels, then confirm it landed. */
+    /**
+     * Put a post into one of the user's saved-list channels, then confirm it landed. A public post is
+     * saved as its video with the link (no forward, so no resolve); a local one is forwarded.
+     */
     private static void saveTo(BaseFragment fragment, int account, SvipeSavedChannels.Kind kind,
-                               MessageObject message) {
-        SvipeSavedChannels.save(account, kind, message, fragment,
+                               SvipeDiscover.Item item, MessageObject message) {
+        final SvipeSavedChannels.Callback confirm =
                 chatId -> AndroidUtilities.runOnUIThread(() -> {
                     if (chatId != 0) {
                         BulletinFactory.of(fragment).createSimpleBulletin(
                                 R.raw.saved_messages,
                                 LocaleController.getString(R.string.SvipeSavedToList)).show();
                     }
-                }));
+                });
+        if (item != null && !item.local && item.channelId != 0) {
+            final String link = (item.shareUrl != null && !item.shareUrl.isEmpty())
+                    ? item.shareUrl
+                    : (item.username != null ? "https://t.me/" + item.username + "/" + item.messageId : null);
+            SvipeSavedChannels.saveDocument(account, kind, message, link, fragment, confirm);
+        } else {
+            SvipeSavedChannels.save(account, kind, message, fragment, confirm);
+        }
     }
 
     /** Share a reference: the owned svipe.uz link when the feed carried one, else the t.me post. */

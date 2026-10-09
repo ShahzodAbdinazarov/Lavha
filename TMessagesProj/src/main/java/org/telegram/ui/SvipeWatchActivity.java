@@ -1348,6 +1348,22 @@ public class SvipeWatchActivity extends BaseFragment {
         if (watched == null || watched.mo == null) {
             return;
         }
+        // The video itself with the post's link — not a forward, which would need the source message
+        // and so a resolve. A local source keeps the forward: it is the user's own chat.
+        if (svipeSocial()) {
+            final String link = watched.ref.username != null
+                    ? "https://t.me/" + watched.ref.username + "/" + watched.ref.messageId : null;
+            SvipeSavedChannels.saveDocument(currentAccount, SvipeSavedChannels.Kind.SAVED_VIDEOS, watched.mo,
+                    link, this, chatId -> AndroidUtilities.runOnUIThread(() -> {
+                        if (chatId != 0) {
+                            BulletinFactory.of(this)
+                                    .createSimpleBulletin(R.raw.saved_messages,
+                                            getString(R.string.SvipeSavedToList))
+                                    .show();
+                        }
+                    }));
+            return;
+        }
         SvipeSavedChannels.save(currentAccount, SvipeSavedChannels.Kind.SAVED_VIDEOS, watched.mo, this,
                 chatId -> AndroidUtilities.runOnUIThread(() -> {
                     if (chatId != 0) {

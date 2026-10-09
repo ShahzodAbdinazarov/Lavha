@@ -177,6 +177,39 @@ public final class SvipeSavedChannels {
      * @param mo the RESOLVED message (the app already has it — every surface that offers "save" has
      *           the {@link MessageObject} it is about).
      */
+    /**
+     * Save the video itself, not a forward: the document the post carries — from the real message or
+     * from its link preview (getWebPage) — sent into the list with the post's link as its caption.
+     * A forward needs the source message, and so the channel's access_hash and a resolveUsername; a
+     * document send needs neither. The copy still survives the source deleting the post.
+     *
+     * @param mo   a message holding the document; a link-preview message is enough (it is also the
+     *             parent the file_reference is re-fetched through)
+     * @param link the post's link (svipe.uz/... or t.me/...), or null
+     */
+    public static void saveDocument(int account, Kind kind, MessageObject mo, String link,
+                                    BaseFragment fragment, Callback done) {
+        final TLRPC.Document d = mo == null ? null : mo.getDocument();
+        if (!(d instanceof TLRPC.TL_document)) {
+            if (done != null) done.onReady(0);
+            return;
+        }
+        final TLRPC.TL_document document = (TLRPC.TL_document) d;
+        final String caption = link == null ? null : link.replaceFirst("^https?://", "");
+        ensureChannel(account, kind, fragment, chatId -> {
+            if (chatId == 0) {
+                if (done != null) done.onReady(0);
+                return;
+            }
+            AndroidUtilities.runOnUIThread(() -> {
+                SendMessagesHelper.getInstance(account).sendMessage(
+                        SendMessagesHelper.SendMessageParams.of(document, null, null, -chatId, null, null,
+                                caption, null, null, null, false, 0, 0, 0, mo, null, false));
+                if (done != null) done.onReady(chatId);
+            });
+        });
+    }
+
     public static void save(int account, Kind kind, MessageObject mo, BaseFragment fragment, Callback done) {
         if (mo == null) {
             if (done != null) done.onReady(0);

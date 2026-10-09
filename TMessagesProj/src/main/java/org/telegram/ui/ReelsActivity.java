@@ -2824,7 +2824,7 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
         // Share works with no message at all (it falls back to the link), so it never blocks on one.
         if (pointInView(h.shareIcon, e) || pointInView(h.shareCount, e)) { share(it); return true; }
         if (pointInView(h.saveIcon, e) || pointInView(h.saveLabel, e)) {
-            requireMessage(it, h.saveIcon, () -> saveReel(fit));
+            saveReel(fit); // the video itself, from the link preview: no resolve
             return true;
         }
         if (pointInView(h.moreIcon, e)) { showMore(it, h); return true; }
@@ -2850,10 +2850,31 @@ public class ReelsActivity extends BaseFragment implements NotificationCenter.No
      * is what makes it outlive the source channel deleting the post.
      */
     private void saveReel(FeedItem it) {
-        if (it == null || it.mo == null) {
+        if (it == null) {
             return;
         }
-        SvipeSavedChannels.save(currentAccount, SvipeSavedChannels.Kind.SAVED_REELS, it.mo, this,
+        if (it.mo == null) {
+            // Not played far enough to have its video yet: take it from the post's public link
+            // (getWebPage) — never a resolveUsername.
+            if (it.username == null) return;
+            org.telegram.svipe.video.SvipeWebRef.fetch(account, it.username, it.messageId, it.channelId, (mo, page) -> {
+                if (mo == null) {
+                    AndroidUtilities.runOnUIThread(() -> BulletinFactory.of(this).createSimpleBulletin(
+                            R.raw.chats_infotip, getString(R.string.SvipeReelsActionUnavailable)).show());
+                    return;
+                }
+                if (it.mo == null) {
+                    it.mo = mo;
+                    it.refParent = page;
+                }
+                saveReel(it);
+            });
+            return;
+        }
+        final String link = (it.shareUrl != null && !it.shareUrl.isEmpty())
+                ? it.shareUrl
+                : (it.username != null ? "https://t.me/" + it.username + "/" + it.messageId : null);
+        SvipeSavedChannels.saveDocument(currentAccount, SvipeSavedChannels.Kind.SAVED_REELS, it.mo, link, this,
                 chatId -> AndroidUtilities.runOnUIThread(() -> {
                     if (chatId != 0) {
                         BulletinFactory.of(this)
