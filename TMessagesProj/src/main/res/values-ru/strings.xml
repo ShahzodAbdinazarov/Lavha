@@ -359,7 +359,7 @@
 
     <!-- Bottom tabs -->
     <string name="MainTabsMusic">Музыка</string>
-    <string name="MainTabsReels">Clips</string>
+    <string name="MainTabsReels">Lavha</string>
     <string name="MainTabsSearch">Поиск</string>
     <string name="MainTabsVideo">Видео</string>
 
@@ -530,7 +530,7 @@
     <string name="SvipeMoviesEmpty">Пока пусто</string>
     <string name="SvipeActorFilmography">Фильмы</string>
     <string name="SvipeWatchLaterChannel">Смотреть позже</string>
-    <string name="SvipeSavedReelsChannel">Сохранённые Clips</string>
+    <string name="SvipeSavedReelsChannel">Сохранённые Lavha</string>
     <string name="SvipeSavedVideosChannel">Сохранённые видео</string>
     <string name="SvipeSaveWatchLater">Смотреть позже</string>
     <string name="SvipeSavedToList">Сохранено</string>

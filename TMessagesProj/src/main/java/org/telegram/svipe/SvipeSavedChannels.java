@@ -92,6 +92,7 @@ public final class SvipeSavedChannels {
         if (stored != 0) {
             TLRPC.Chat chat = MessagesController.getInstance(account).getChat(stored);
             if (chat != null && !ChatObject.isNotInChat(chat)) {
+                renameOldTitle(account, kind, chat);
                 cb.onReady(stored);
                 return;
             }
@@ -131,6 +132,26 @@ public final class SvipeSavedChannels {
         MessagesController.getInstance(account).createChat(
                 LocaleController.getString(kind.titleRes), new ArrayList<>(), null,
                 ChatObject.CHAT_TYPE_CHANNEL, false, null, null, 0, fragment);
+    }
+
+    /**
+     * The reels list was "Saved Clips" before the tab became Lavha. A channel made under the old name
+     * is renamed the first time it is used, so it carries on under the new one — on every device, since
+     * desktop finds the same channel by either name and renames it the same way.
+     */
+    private static final String[] OLD_REELS_TITLES = {"Saved Clips", "Saqlangan Clips", "Сохранённые Clips"};
+
+    private static void renameOldTitle(int account, Kind kind, TLRPC.Chat chat) {
+        if (kind != Kind.SAVED_REELS || chat.title == null) {
+            return;
+        }
+        for (String old : OLD_REELS_TITLES) {
+            if (old.equals(chat.title)) {
+                MessagesController.getInstance(account).changeChatTitle(
+                        chat.id, LocaleController.getString(kind.titleRes));
+                return;
+            }
+        }
     }
 
     /** Move the new channel into the Archive folder so it never sits in the main chat list. */

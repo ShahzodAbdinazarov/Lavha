@@ -10567,7 +10567,7 @@
     <string name="MainTabsChats">Chats</string>
     <string name="MainTabsMusic">Music</string>
     <string name="MainTabsProfile">Profile</string>
-    <string name="MainTabsReels">Clips</string>
+    <string name="MainTabsReels">Lavha</string>
     <string name="MainTabsSearch">Search</string>
     <string name="MainTabsVideo">Video</string>
     <string name="MainTabsSettings">Settings</string>
@@ -11483,7 +11483,7 @@
     <string name="SvipeMoviesEmpty">Nothing here yet</string>
     <string name="SvipeActorFilmography">Films</string>
     <string name="SvipeWatchLaterChannel">Watch Later</string>
-    <string name="SvipeSavedReelsChannel">Saved Clips</string>
+    <string name="SvipeSavedReelsChannel">Saved Lavha</string>
     <string name="SvipeSavedVideosChannel">Saved Videos</string>
     <string name="SvipeSaveWatchLater">Save to Watch Later</string>
     <string name="SvipeSavedToList">Saved</string>

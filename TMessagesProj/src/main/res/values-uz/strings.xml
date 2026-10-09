@@ -97,7 +97,7 @@
 
     <!-- Bottom tabs -->
     <string name="MainTabsMusic">Musiqa</string>
-    <string name="MainTabsReels">Clips</string>
+    <string name="MainTabsReels">Lavha</string>
     <string name="MainTabsSearch">Qidiruv</string>
     <string name="MainTabsVideo">Video</string>
 
@@ -265,7 +265,7 @@
     <string name="SvipeMoviesEmpty">Hozircha bo\'sh</string>
     <string name="SvipeActorFilmography">Filmlar</string>
     <string name="SvipeWatchLaterChannel">Keyinroq ko\'rish</string>
-    <string name="SvipeSavedReelsChannel">Saqlangan Clips</string>
+    <string name="SvipeSavedReelsChannel">Saqlangan lavhalar</string>
     <string name="SvipeSavedVideosChannel">Saqlangan videolar</string>
     <string name="SvipeSaveWatchLater">Keyinroq ko\'rishga saqlash</string>
     <string name="SvipeSavedToList">Saqlandi</string>
