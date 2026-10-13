@@ -142,16 +142,6 @@ android {
             }
             buildConfigField "boolean", "BUNDLE", "true"
         }
-        bundleAfat_SDK23 {
-            ndk {
-                abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
-            }
-            minSdkVersion 23
-            ext {
-                abiVersionCode = 2
-            }
-            buildConfigField "boolean", "BUNDLE", "true"
-        }
         afat {
             ndk {
                 abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
@@ -173,7 +163,6 @@ android {
     // Play bundle ended up carrying READ_CALL_LOG while the code read as if it did not.
     sourceSets {
         bundleAfatRelease       { manifest.srcFile '../TMessagesProj/config/release/AndroidManifest.xml' }
-        bundleAfat_SDK23Release { manifest.srcFile '../TMessagesProj/config/release/AndroidManifest_SDK23.xml' }
         afatRelease             { manifest.srcFile '../TMessagesProj/config/release/AndroidManifest_SDK23.xml' }
         // The .web build reuses the SDK23 release manifest: upstream's AndroidManifest_standalone.xml
         // references *_launcher_sa icons that don't exist in the Svipe rebrand, so .web simply ships
