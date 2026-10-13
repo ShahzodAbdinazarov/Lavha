@@ -45,7 +45,6 @@ android {
     defaultConfig.applicationId = APP_PACKAGE
     defaultConfig.manifestPlaceholders = ['MAPS_API_KEY': svipeMapsApiKey()]
 
-    sourceSets.main.jniLibs.srcDirs = ['../TMessagesProj/jni/']
 
     lintOptions {
         disable 'MissingTranslation'
@@ -79,6 +78,12 @@ android {
             storePassword project.findProperty('SVIPE_UPLOAD_STORE_PASSWORD') ?: ''
             keyAlias project.findProperty('SVIPE_UPLOAD_KEY_ALIAS') ?: 'svipe-upload'
             keyPassword project.findProperty('SVIPE_UPLOAD_KEY_PASSWORD') ?: ''
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 
@@ -203,7 +208,7 @@ android {
     }
 
     defaultConfig {
-        minSdkVersion 21
+        minSdkVersion 23
         targetSdkVersion 36
         versionName APP_VERSION_NAME
         ndkVersion "27.2.12479018"
