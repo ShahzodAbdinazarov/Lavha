@@ -1,7 +1,12 @@
 // Kotlin is needed only by this module's existing instrumentation tests.
 buildscript {
     repositories {
-        google()
+        // Svipe: JetBrains artifacts only from Maven Central. google() first made every configure
+        // of this module wait on dl.google.com for a plugin it does not host, and a read timeout
+        // there failed the whole build (2026-10-13, merging 13.0.0).
+        google {
+            content { excludeGroupByRegex "org\\.jetbrains.*" }
+        }
         mavenCentral()
     }
     dependencies {
