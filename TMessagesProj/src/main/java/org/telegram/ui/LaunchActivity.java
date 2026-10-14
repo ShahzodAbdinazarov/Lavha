@@ -6684,6 +6684,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         }
         super.onActivityResult(requestCode, resultCode, data);
         if (GramWalletStorageAuth.onActivityResult(this, requestCode, resultCode)) return;
+        if (org.telegram.svipe.SvipeMediaPicker.onActivityResult(requestCode, resultCode, data)) return;
         if (requestCode == SCREEN_CAPTURE_REQUEST_CODE) {
             if (resultCode == Activity.RESULT_OK) {
                 VoIPService service = VoIPService.getSharedInstance();

@@ -105,6 +105,7 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.BasePermissionsActivity;
 import org.telegram.ui.Cells.PhotoAttachCameraCell;
 import org.telegram.ui.Cells.PhotoAttachPermissionCell;
+import org.telegram.svipe.SvipeMediaPicker;
 import org.telegram.ui.Cells.PhotoAttachPhotoCell;
 import org.telegram.ui.ChatActivity;
 import org.telegram.ui.Components.blur3.capture.IBlur3Capture;
@@ -926,7 +927,9 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
                     }
                     return;
                 } else if (noGalleryPermissions) {
-                    if (Build.VERSION.SDK_INT >= 33) {
+                    if (SvipeMediaPicker.systemOnly()) {
+                        openSystemPicker();
+                    } else if (Build.VERSION.SDK_INT >= 33) {
                         try {
                             fragment.getParentActivity().requestPermissions(new String[]{Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_IMAGES}, BasePermissionsActivity.REQUEST_CODE_EXTERNAL_STORAGE);
                         } catch (Exception ignore) {}
@@ -1509,6 +1512,10 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
 
 
     private void requestGalleryPermission() {
+        if (SvipeMediaPicker.systemOnly()) {
+            openSystemPicker();
+            return;
+        }
         try {
             if (Build.VERSION.SDK_INT >= 33) {
                 parentAlert.baseFragment.getParentActivity().requestPermissions(new String[]{Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_IMAGES}, BasePermissionsActivity.REQUEST_CODE_EXTERNAL_STORAGE);
@@ -3190,6 +3197,36 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
         }
     }
 
+    // The Play build declares no media permissions (see SvipeMediaPicker), so the in-app gallery is
+    // always empty there: the "no access" screen opens the system picker instead, and what comes back
+    // is added like a photo taken with the camera — selected, then the usual editor and send path.
+    private void openSystemPicker() {
+        BaseFragment fragment = parentAlert.baseFragment != null ? parentAlert.baseFragment : LaunchActivity.getLastFragment();
+        Activity activity = fragment != null ? fragment.getParentActivity() : AndroidUtilities.findActivity(getContext());
+        boolean chatMedia = (parentAlert.baseFragment instanceof ChatActivity || parentAlert.getChat() != null) && parentAlert.avatarPicker == 0;
+        boolean allowVideo = videoEnabled && !parentAlert.isStickerMode && (chatMedia || shouldLoadAllMedia());
+        int max = parentAlert.maxSelectedPhotos > 0 ? parentAlert.maxSelectedPhotos - selectedPhotos.size() : 0;
+        if (parentAlert.maxSelectedPhotos > 0 && max <= 0) {
+            return;
+        }
+        SvipeMediaPicker.open(activity, allowVideo, max, uris -> SvipeMediaPicker.toPhotoEntries(uris, entries -> {
+            if (parentAlert.destroyed || entries.isEmpty()) {
+                return;
+            }
+            mediaFromExternalCamera = true;
+            for (MediaController.PhotoEntry entry : entries) {
+                entry.imageId = lastImageId--;
+                cameraPhotos.add(entry);
+                selectedPhotos.put(entry.imageId, entry);
+                selectedPhotosOrder.add(entry.imageId);
+            }
+            parentAlert.updateCountButton(0);
+            adapter.notifyDataSetChanged();
+            cameraAttachAdapter.notifyDataSetChanged();
+            openPhotoViewer(null, false, true);
+        }));
+    }
+
     private boolean isNoGalleryPermissions() {
         Activity activity = AndroidUtilities.findActivity(getContext());
         if (activity == null) {
@@ -4528,6 +4565,9 @@ public class ChatAttachAlertPhotoLayout extends ChatAttachAlert.AttachAlertLayou
                     emptyView.isClickable();
                     emptyView.doOnCameraAccess(ChatAttachAlertPhotoLayout.this::openCameraWithPermissionCheck);
                     emptyView.doOnGalleryAccessClick(ChatAttachAlertPhotoLayout.this::requestGalleryPermission);
+                    if (SvipeMediaPicker.systemOnly()) {
+                        emptyView.setSystemPicker();
+                    }
                     emptyView.doOnEmojiButton(d -> {
                         showAvatarConstructorFragment(null, null, d);
                         parentAlert.dismiss();

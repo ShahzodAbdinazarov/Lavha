@@ -20,6 +20,7 @@ import android.provider.MediaStore;
 
 import androidx.core.content.FileProvider;
 
+import org.telegram.svipe.SvipeMediaPicker;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLoader;
@@ -111,6 +112,14 @@ public class WallpaperUpdater {
     public void openGallery() {
         if (parentFragment != null) {
             final Activity activity = parentFragment.getParentActivity();
+            if (activity != null && SvipeMediaPicker.systemOnly()) {
+                try {
+                    parentActivity.startActivityForResult(SvipeMediaPicker.imageIntent(), 11);
+                } catch (Exception e) {
+                    FileLog.e(e);
+                }
+                return;
+            }
             if (activity != null) {
                 if (Build.VERSION.SDK_INT >= 33) {
                     if (activity.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {

@@ -92,6 +92,7 @@ import androidx.dynamicanimation.animation.SpringForce;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import org.telegram.svipe.SvipeMediaPicker;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
 import org.telegram.messenger.BuildVars;
@@ -2821,7 +2822,10 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                     if (!documentsEnabled && checkCanRemoveRestrictionsByBoosts()) {
                         return;
                     }
-                    if (Build.VERSION.SDK_INT >= 33) {
+                    if (SvipeMediaPicker.systemOnly()) {
+                        // Svipe: nothing to ask for in the build without media permissions; the
+                        // documents layout picks through the system file picker.
+                    } else if (Build.VERSION.SDK_INT >= 33) {
                         if (activity.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED ||
                                 activity.checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
                             activity.requestPermissions(new String[]{Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO}, BasePermissionsActivity.REQUEST_CODE_EXTERNAL_STORAGE);
@@ -6468,7 +6472,10 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
 
 
     private static boolean checkPhotoAndCameraPermission(Context context) {
-        if (Build.VERSION.SDK_INT >= 33) {
+        if (SvipeMediaPicker.systemOnly()) {
+            // No gallery permission to miss in the build that picks through the system picker.
+            return ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        } else if (Build.VERSION.SDK_INT >= 33) {
             return ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
                 && ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
                 && ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
@@ -6480,7 +6487,9 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
     }
 
     private static boolean checkPhotoAndDocumentsPermission(Context context) {
-        if (Build.VERSION.SDK_INT >= 33) {
+        if (SvipeMediaPicker.systemOnly()) {
+            return true;
+        } else if (Build.VERSION.SDK_INT >= 33) {
             return ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
                 && ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED;
         } else if (Build.VERSION.SDK_INT >= 23) {

@@ -27,6 +27,7 @@ import android.view.View;
 
 import androidx.core.content.FileProvider;
 
+import org.telegram.svipe.SvipeMediaPicker;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BuildVars;
@@ -721,6 +722,10 @@ public class ImageUpdater implements NotificationCenter.NotificationCenterDelega
             return;
         }
         final Activity activity = parentFragment.getParentActivity();
+        if (activity != null && SvipeMediaPicker.systemOnly()) {
+            SvipeMediaPicker.open(activity, false, 1, uris -> startCrop(null, uris.get(0)));
+            return;
+        }
         if (Build.VERSION.SDK_INT >= 33 && activity != null) {
             if (activity.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED || activity.checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
                 activity.requestPermissions(new String[]{Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO}, BasePermissionsActivity.REQUEST_CODE_EXTERNAL_STORAGE_FOR_AVATAR);

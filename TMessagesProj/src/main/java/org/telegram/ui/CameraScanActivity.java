@@ -65,6 +65,7 @@ import com.google.zxing.ResultPoint;
 import com.google.zxing.common.GlobalHistogramBinarizer;
 import com.google.zxing.qrcode.QRCodeReader;
 
+import org.telegram.svipe.SvipeMediaPicker;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
@@ -675,6 +676,14 @@ public class CameraScanActivity extends BaseFragment {
                         return;
                     }
                     final Activity activity = getParentActivity();
+                    if (SvipeMediaPicker.systemOnly()) {
+                        try {
+                            activity.startActivityForResult(SvipeMediaPicker.imageIntent(), 11);
+                        } catch (Exception e) {
+                            FileLog.e(e);
+                        }
+                        return;
+                    }
                     if (Build.VERSION.SDK_INT >= 33) {
                         if (activity.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
                             activity.requestPermissions(new String[]{Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO}, BasePermissionsActivity.REQUEST_CODE_EXTERNAL_STORAGE);

@@ -164,6 +164,7 @@ import org.telegram.ui.Components.ZoomControlView;
 import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.PremiumPreviewFragment;
 import org.telegram.ui.ProfileActivity;
+import org.telegram.svipe.SvipeMediaPicker;
 import org.telegram.ui.Stories.DarkThemeResourceProvider;
 import org.telegram.ui.Stories.DialogStoriesCell;
 import org.telegram.ui.Stories.LivePlayer;
@@ -4751,86 +4752,10 @@ public class StoryRecorder implements NotificationCenter.NotificationCenterDeleg
             lastGallerySelectedAlbum = null;
         });
         galleryListView.setOnSelectListener((entry, blurredBitmap) -> {
-            if (entry == null || galleryListViewOpening != null || scrollingY || !isGalleryOpen()) {
+            if (galleryListViewOpening != null || scrollingY || !isGalleryOpen()) {
                 return;
             }
-
-            if (forAddingPart) {
-                if (outputEntry == null) {
-                    return;
-                }
-                createPhotoPaintView();
-                outputEntry.editedMedia = true;
-                if (entry instanceof MediaController.PhotoEntry) {
-                    MediaController.PhotoEntry photoEntry = (MediaController.PhotoEntry) entry;
-                    paintView.appearAnimation(paintView.createPhoto(photoEntry.path, false));
-                } else if (entry instanceof TLObject) {
-                    paintView.appearAnimation(paintView.createPhoto((TLObject) entry, false));
-                }
-                animateGalleryListView(false);
-            } else {
-                StoryEntry storyEntry;
-                showVideoTimer(false, true);
-                modeSwitcherView.switchMode(mode);
-                recordControl.startAsVideo(mode == MODE_VIDEO);
-
-                animateGalleryListView(false);
-                if (entry instanceof MediaController.PhotoEntry) {
-                    MediaController.PhotoEntry photoEntry = (MediaController.PhotoEntry) entry;
-                    mode = photoEntry.isVideo && !photoEntry.isLivePhoto() ? MODE_VIDEO : MODE_PHOTO;
-                    storyEntry = StoryEntry.fromPhotoEntry(photoEntry);
-                    storyEntry.blurredVideoThumb = blurredBitmap;
-                    storyEntry.botId = botId;
-                    storyEntry.botLang = botLang;
-                    storyEntry.setupMatrix();
-                    fromGallery = true;
-
-                    if (collageLayoutView.hasLayout()) {
-                        outputFile = null;
-                        storyEntry.videoVolume = 1.0f;
-                        if (collageLayoutView.push(storyEntry)) {
-                            outputEntry = StoryEntry.asCollage(collageLayoutView.getLayout(), collageLayoutView.getContent());
-//                            StoryPrivacySelector.applySaved(currentAccount, outputEntry);
-//                            navigateTo(PAGE_PREVIEW, true);
-                        }
-                        updateActionBarButtons(true);
-                    } else {
-                        storyEntry.setupMultipleStoriesSelector();
-                        outputEntry = storyEntry;
-                        if (entry instanceof MediaController.PhotoEntry) {
-                            StoryPrivacySelector.applySaved(currentAccount, outputEntry);
-                        }
-                        navigateTo(PAGE_PREVIEW, true);
-                    }
-                } else if (entry instanceof StoryEntry) {
-                    storyEntry = (StoryEntry) entry;
-                    if (storyEntry.file == null && !storyEntry.isCollage()) {
-                        downloadButton.showToast(R.raw.error, "Failed to load draft");
-                        MessagesController.getInstance(currentAccount).getStoriesController().getDraftsController().delete(storyEntry);
-                        return;
-                    }
-                    storyEntry.botId = botId;
-                    storyEntry.botLang = botLang;
-//                    storyEntry.setupMatrix();
-                    mode = storyEntry.isVideo ? MODE_VIDEO : MODE_PHOTO;
-                    storyEntry.blurredVideoThumb = blurredBitmap;
-                    fromGallery = false;
-
-                    collageLayoutView.set(storyEntry, true);
-                    outputEntry = storyEntry;
-                    if (entry instanceof MediaController.PhotoEntry) {
-                        StoryPrivacySelector.applySaved(currentAccount, outputEntry);
-                    }
-                    navigateTo(PAGE_PREVIEW, true);
-                } else {
-                    return;
-                }
-            }
-
-            if (galleryListView != null) {
-                lastGalleryScrollPosition = galleryListView.layoutManager.onSaveInstanceState();
-                lastGallerySelectedAlbum = galleryListView.getSelectedAlbum();
-            }
+            onGallerySelected(entry, blurredBitmap, forAddingPart);
         });
         galleryListView.setOnSelectMultipleListener((collage, entries, bitmaps) -> {
             if (currentPage != PAGE_CAMERA) return;
@@ -7223,7 +7148,104 @@ public class StoryRecorder implements NotificationCenter.NotificationCenterDeleg
         }
     }
 
+    private void onGallerySelected(Object entry, Bitmap blurredBitmap, boolean forAddingPart) {
+        if (entry == null) {
+            return;
+        }
+
+        if (forAddingPart) {
+            if (outputEntry == null) {
+                return;
+            }
+            createPhotoPaintView();
+            outputEntry.editedMedia = true;
+            if (entry instanceof MediaController.PhotoEntry) {
+                MediaController.PhotoEntry photoEntry = (MediaController.PhotoEntry) entry;
+                paintView.appearAnimation(paintView.createPhoto(photoEntry.path, false));
+            } else if (entry instanceof TLObject) {
+                paintView.appearAnimation(paintView.createPhoto((TLObject) entry, false));
+            }
+            animateGalleryListView(false);
+        } else {
+            StoryEntry storyEntry;
+            showVideoTimer(false, true);
+            modeSwitcherView.switchMode(mode);
+            recordControl.startAsVideo(mode == MODE_VIDEO);
+
+            animateGalleryListView(false);
+            if (entry instanceof MediaController.PhotoEntry) {
+                MediaController.PhotoEntry photoEntry = (MediaController.PhotoEntry) entry;
+                mode = photoEntry.isVideo && !photoEntry.isLivePhoto() ? MODE_VIDEO : MODE_PHOTO;
+                storyEntry = StoryEntry.fromPhotoEntry(photoEntry);
+                storyEntry.blurredVideoThumb = blurredBitmap;
+                storyEntry.botId = botId;
+                storyEntry.botLang = botLang;
+                storyEntry.setupMatrix();
+                fromGallery = true;
+
+                if (collageLayoutView.hasLayout()) {
+                    outputFile = null;
+                    storyEntry.videoVolume = 1.0f;
+                    if (collageLayoutView.push(storyEntry)) {
+                        outputEntry = StoryEntry.asCollage(collageLayoutView.getLayout(), collageLayoutView.getContent());
+//                            StoryPrivacySelector.applySaved(currentAccount, outputEntry);
+//                            navigateTo(PAGE_PREVIEW, true);
+                    }
+                    updateActionBarButtons(true);
+                } else {
+                    storyEntry.setupMultipleStoriesSelector();
+                    outputEntry = storyEntry;
+                    if (entry instanceof MediaController.PhotoEntry) {
+                        StoryPrivacySelector.applySaved(currentAccount, outputEntry);
+                    }
+                    navigateTo(PAGE_PREVIEW, true);
+                }
+            } else if (entry instanceof StoryEntry) {
+                storyEntry = (StoryEntry) entry;
+                if (storyEntry.file == null && !storyEntry.isCollage()) {
+                    downloadButton.showToast(R.raw.error, "Failed to load draft");
+                    MessagesController.getInstance(currentAccount).getStoriesController().getDraftsController().delete(storyEntry);
+                    return;
+                }
+                storyEntry.botId = botId;
+                storyEntry.botLang = botLang;
+//                    storyEntry.setupMatrix();
+                mode = storyEntry.isVideo ? MODE_VIDEO : MODE_PHOTO;
+                storyEntry.blurredVideoThumb = blurredBitmap;
+                fromGallery = false;
+
+                collageLayoutView.set(storyEntry, true);
+                outputEntry = storyEntry;
+                if (entry instanceof MediaController.PhotoEntry) {
+                    StoryPrivacySelector.applySaved(currentAccount, outputEntry);
+                }
+                navigateTo(PAGE_PREVIEW, true);
+            } else {
+                return;
+            }
+        }
+
+        if (galleryListView != null) {
+            lastGalleryScrollPosition = galleryListView.layoutManager.onSaveInstanceState();
+            lastGallerySelectedAlbum = galleryListView.getSelectedAlbum();
+        }
+    }
+
+    // Svipe: the Play build has no media permissions (SvipeMediaPicker), so the gallery button picks
+    // one item through the system picker and hands it to the same path as a tap in the gallery list.
+    private void openSystemPicker() {
+        SvipeMediaPicker.open(activity, true, 1, uris -> SvipeMediaPicker.toPhotoEntries(uris, entries -> {
+            if (!entries.isEmpty() && currentPage == PAGE_CAMERA) {
+                onGallerySelected(entries.get(0), null, false);
+            }
+        }));
+    }
+
     private boolean requestGalleryPermission() {
+        if (activity != null && SvipeMediaPicker.systemOnly()) {
+            openSystemPicker();
+            return false;
+        }
         if (activity != null) {
             boolean noGalleryPermission = false;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

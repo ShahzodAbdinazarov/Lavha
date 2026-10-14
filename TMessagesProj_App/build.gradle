@@ -240,6 +240,10 @@ ext.playForbiddenPermissions = [
         'android.permission.SEND_SMS',
         'android.permission.READ_SMS',
         'android.permission.RECEIVE_SMS',
+        // Photo and Video Permissions policy: only gallery-type apps may hold these; Svipe picks
+        // through the system photo picker (SvipeMediaPicker). Removed in config/release/AndroidManifest.xml.
+        'android.permission.READ_MEDIA_IMAGES',
+        'android.permission.READ_MEDIA_VIDEO',
 ]
 
 tasks.configureEach { theTask ->
@@ -265,7 +269,7 @@ tasks.configureEach { theTask ->
         def offenders = project.ext.playForbiddenPermissions.findAll { requested.contains(it) }
         if (!offenders.isEmpty()) {
             throw new GradleException(
-                    "Play bundle declares permissions Google Play rejects for a non-dialer app:\n" +
+                    "Play bundle declares permissions Google Play rejects for this app:\n" +
                     offenders.collect { "  - ${it}" }.join('\n') + "\n\n" +
                     "These belong to the direct-download build only. Check that bundleAfatRelease still\n" +
                     "maps to config/release/AndroidManifest.xml — see the 'Manifest per distribution\n" +

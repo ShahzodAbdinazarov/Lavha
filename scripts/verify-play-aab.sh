@@ -5,6 +5,7 @@
 #
 # Defaults to the bundleBundleAfatRelease output. Checks the merged manifest inside the bundle for:
 #   1. no READ_CALL_LOG / no <uses-permission CALL_PHONE>  (Play rejects the afat variant, which has both)
+#      no READ_MEDIA_IMAGES / READ_MEDIA_VIDEO  (Photo and Video Permissions policy; system picker instead)
 #   2. targetSdkVersion >= 36
 #   3. the applicationId is uz.svipe.app
 # Downloads bundletool on first run; aapt2 cannot read an .aab and there is no system copy.
@@ -50,6 +51,8 @@ echo "AAB: $AAB"
 echo "     $(du -h "$AAB" | cut -f1), built $(date -r "$AAB" '+%Y-%m-%d %H:%M')"
 check "READ_CALL_LOG"                 'uses-permission[^>]*READ_CALL_LOG' absent
 check "uses-permission CALL_PHONE"    'uses-permission[^>]*CALL_PHONE'    absent
+check "READ_MEDIA_IMAGES"             'uses-permission[^>]*READ_MEDIA_IMAGES' absent
+check "READ_MEDIA_VIDEO"              'uses-permission[^>]*READ_MEDIA_VIDEO'  absent
 check "package uz.svipe.app"          'package="uz\.svipe\.app"'          present
 
 TSDK="$(grep -oE 'targetSdkVersion="[0-9]+"' <<<"$MF" | grep -oE '[0-9]+' | head -1)"

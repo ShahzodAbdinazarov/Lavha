@@ -117,6 +117,13 @@ public class GalleryEmptyView extends LinearLayout {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
     }
 
+    // Svipe: the build without media permissions picks through the system picker, so there is no
+    // access to allow — the title goes and the button says what it does now.
+    public void setSystemPicker() {
+        titleTextView.setVisibility(GONE);
+        galleryAccessButton.setText(getString(R.string.SelectFromGallery), false);
+    }
+
     public void setUseAnEmojiVisible(boolean visible) {
         useAnEmojiButton.setVisibility(visible ? VISIBLE : GONE);
     }

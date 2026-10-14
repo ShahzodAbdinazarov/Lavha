@@ -122,6 +122,7 @@ import androidx.dynamicanimation.animation.FloatValueHolder;
 import androidx.dynamicanimation.animation.SpringAnimation;
 import androidx.dynamicanimation.animation.SpringForce;
 
+import org.telegram.svipe.SvipeMediaPicker;
 import org.telegram.ui.Wallet.GramWallet;
 import org.telegram.ui.Wallet.WalletEngine2;
 import org.telegram.ui.Wallet.WalletSendEnterAmount;
@@ -14107,6 +14108,12 @@ public class ChatActivity extends BaseFragment implements
             }
         } else if (which == attach_gallery) {
             final Activity activity = getParentActivity();
+            if (SvipeMediaPicker.systemOnly()) {
+                // Svipe: no in-app gallery without media permissions; the attach sheet picks
+                // through the system picker and keeps the usual editor and send path.
+                openAttachMenu();
+                return;
+            }
             if (Build.VERSION.SDK_INT >= 33) {
                 if (activity.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
                     try {

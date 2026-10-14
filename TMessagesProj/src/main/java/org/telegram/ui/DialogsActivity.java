@@ -92,6 +92,7 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
+import org.telegram.svipe.SvipeMediaPicker;
 import org.telegram.ui.recyclerview.LinearSmoothScrollerCustom;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.viewpager.widget.ViewPager;
@@ -10682,11 +10683,14 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
             permissons.add(Manifest.permission.GET_ACCOUNTS);
         }
         if (Build.VERSION.SDK_INT >= 33) {
-            if (activity.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
-                permissons.add(Manifest.permission.READ_MEDIA_IMAGES);
-            }
-            if (activity.checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
-                permissons.add(Manifest.permission.READ_MEDIA_VIDEO);
+            // Svipe: not asked at all in the build that does not declare them (SvipeMediaPicker).
+            if (!SvipeMediaPicker.systemOnly()) {
+                if (activity.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
+                    permissons.add(Manifest.permission.READ_MEDIA_IMAGES);
+                }
+                if (activity.checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
+                    permissons.add(Manifest.permission.READ_MEDIA_VIDEO);
+                }
             }
             if (activity.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 permissons.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);

@@ -44,6 +44,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.LinearSmoothScroller;
 import androidx.recyclerview.widget.RecyclerView;
 
+import org.telegram.svipe.SvipeMediaPicker;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.AnimationNotificationsLocker;
@@ -428,7 +429,11 @@ public class ChatAttachAlertDocumentLayout extends ChatAttachAlert.AttachAlertLa
                 if (!BuildVars.NO_SCOPED_STORAGE && (item.icon == R.drawable.files_storage || item.icon == R.drawable.files_internal) && !isExternalStorageManager) {
                     delegate.startDocumentSelectActivity();
                 } else if (file == null) {
-                    if (item.icon == R.drawable.files_gallery) {
+                    if (item.icon == R.drawable.files_gallery && SvipeMediaPicker.systemOnly()) {
+                        // Svipe: no in-app gallery without media permissions; photos as files come
+                        // from the system file picker, the same one "Internal storage" opens.
+                        delegate.startDocumentSelectActivity();
+                    } else if (item.icon == R.drawable.files_gallery) {
                         HashMap<Object, Object> selectedPhotos = new HashMap<>();
                         ArrayList<Object> selectedPhotosOrder = new ArrayList<>();
                         ChatActivity chatActivity;
