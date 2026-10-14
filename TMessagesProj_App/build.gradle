@@ -335,6 +335,35 @@ tasks.configureEach { theTask ->
     }
 }
 
+// The mirror image of the Play guard: the .web build (afatStandalone) keeps Telegram's in-app gallery,
+// so it must still declare the media permissions the Play bundle removes. config/release/
+// AndroidManifest.xml is Play-only; if that removal ever reaches the shared or the SDK23 manifest,
+// .web users silently lose their gallery, so the merged .web manifest is checked on every build.
+tasks.configureEach { theTask ->
+    if (theTask.name != 'processAfatStandaloneMainManifest') {
+        return
+    }
+    theTask.doLast {
+        def mergedDir = layout.buildDirectory.dir('intermediates/merged_manifest/afatStandalone').get().asFile
+        def merged = fileTree(mergedDir).matching { include '**/AndroidManifest.xml' }.files.find()
+        if (merged == null) {
+            throw new GradleException(".web manifest guard: no merged manifest under ${mergedDir}.")
+        }
+        def root = new groovy.xml.XmlSlurper(false, false).parse(merged)
+        def requested = []
+        root.'uses-permission'.each { requested << it.@'android:name'.toString() }
+        def missing = ['android.permission.READ_MEDIA_IMAGES', 'android.permission.READ_MEDIA_VIDEO'].findAll { !requested.contains(it) }
+        if (!missing.isEmpty()) {
+            throw new GradleException(
+                    ".web build lost its gallery permissions:\n" +
+                    missing.collect { "  - ${it}" }.join('\n') + "\n\n" +
+                    "Only the Play bundle drops them (config/release/AndroidManifest.xml). The .web build\n" +
+                    "keeps the in-app gallery and must declare both.\n" +
+                    "Merged manifest: ${merged}")
+        }
+    }
+}
+
 // gradle.properties is committed to a public repo. A Maps key sat there once and had to be rotated
 // after GitHub flagged it, so make the mistake impossible to repeat quietly: any non-empty value in
 // the tracked file fails the build before it can be pushed.

@@ -19,3 +19,8 @@
    - **Backend:** prod = `main` branch. Chiqarish `dev` → `main` merge + push (CI `deploy_prod` o'zi deploy qiladi). ⚠️ ff-merge yangi pipeline yaratmaydi (SHA bir xil) — GitLab API bilan `POST /projects/83095280/pipeline?ref=main` qilib qo'lda trigger qil.
    - **Mobil:** prod = **reliz**, ya'ni build + imzo + Play/`.web` publish. Branch merge emas. Ish `dev`da boradi va `dev`da qoladi.
    - **`master` branch mobil repoda faqat bitta narsa uchun bor: upstream (DrKLO/Telegram) o'zgarishini qabul qilish.** Upstreamdan yangilanish kelmagunicha `master` bizga umuman kerak emas — unga merge qilma, undan branch ochma, uni "prod" deb o'ylama. Upstream update kelganda: upstream → `master` → `dev`.
+
+7. **Galereya ruxsatlari: Play'da YO'Q, `.web`da BOR — har relizda tekshir.** Play'ning Photo and Video Permissions siyosati tufayli Play AAB'da `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO` bo'lmasligi shart (faqat `TMessagesProj/config/release/AndroidManifest.xml` olib tashlaydi; ilova `SvipeMediaPicker` orqali tizim picker'iga o'tadi). **`.web` (standalone) relizda esa ikkalasi ham QOLISHI shart** — `.web` foydalanuvchilari Telegram'ning ichki galereyasidan foydalanadi. Bu olib tashlashni hech qachon umumiy (`src/main`) yoki `AndroidManifest_SDK23.xml` manifestga ko'chirma.
+   - Har **AAB** relizdan oldin: `scripts/verify-play-aab.sh` — ikkalasi **yo'q** bo'lishi kerak.
+   - Har **`.web`** relizda: `scripts/deploy_prod_mac.sh` APK'ning o'zidan tekshiradi — ikkalasi **bor** bo'lishi kerak, aks holda publish to'xtaydi. Gradle ham ikkala tomonni merged manifestdan tekshiradi.
+   - Qo'riqchi xato bersa — uni chetlab o'tma, manifestni tuzat. Upstream merge'dan keyin yangi `READ_MEDIA_IMAGES` so'rovi chiqsa, `SvipeMediaPicker.systemOnly()` bilan o'ra.

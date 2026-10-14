@@ -48,6 +48,17 @@ if [ -n "$VN" ] && [ "$VN" != "$APK_VN" ]; then
 fi
 VN="$APK_VN"; VC="$APK_VC"
 
+echo "== 0b. .web keeps the in-app gallery permissions =="
+# The Play bundle drops READ_MEDIA_IMAGES / READ_MEDIA_VIDEO (Play's photo picker policy), the .web
+# build must NOT: its users keep Telegram's own gallery in the attach sheet. A manifest edit that
+# leaks the Play removal into the shared or standalone manifest would quietly turn the .web gallery
+# into the system picker, so the published APK itself is checked.
+PERMS=$("$AAPT" dump permissions "$APK")
+for p in android.permission.READ_MEDIA_IMAGES android.permission.READ_MEDIA_VIDEO; do
+  echo "$PERMS" | grep -q "name='$p'" || { echo "!! $p missing from the .web APK - refusing (the Play-only removal leaked into .web)"; exit 1; }
+  echo "  ok $p"
+done
+
 echo "== 1. signature =="
 APKSIGNER=$(ls "$HOME"/Library/Android/sdk/build-tools/*/apksigner 2>/dev/null | tail -1)
 CERT=$("$APKSIGNER" verify --print-certs "$APK" | grep -i "SHA-256 digest" | head -1 \
