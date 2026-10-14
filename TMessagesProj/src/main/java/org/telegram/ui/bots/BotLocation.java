@@ -475,6 +475,11 @@ public class BotLocation {
         private final RectF rect = new RectF();
 
         public BotUserLocationDrawable(Context context, TLRPC.User user, TLRPC.User bot) {
+            this(context, user, bot, R.drawable.filled_location);
+        }
+
+        // Svipe: the same "user > bot" picture with another badge (SvipeBotContacts uses a person).
+        public BotUserLocationDrawable(Context context, TLRPC.User user, TLRPC.User bot, int badgeResId) {
 
             arrowPaint.setColor(0xFFFFFFFF);
             arrowPaint.setStyle(Paint.Style.STROKE);
@@ -483,7 +488,7 @@ public class BotLocation {
             arrowPaint.setStrokeCap(Paint.Cap.ROUND);
             whitePaint.setColor(0xFFFFFFFF);
 
-            locationDrawable = context.getResources().getDrawable(R.drawable.filled_location).mutate();
+            locationDrawable = context.getResources().getDrawable(badgeResId).mutate();
             locationDrawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_dialogTopBackground), PorterDuff.Mode.SRC_IN));
 
             AvatarDrawable avatarDrawable = new AvatarDrawable();

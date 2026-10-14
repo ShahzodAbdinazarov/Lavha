@@ -124,7 +124,7 @@ public class SvipeBotContacts {
         final boolean[] answered = new boolean[1];
         final AlertDialog.Builder b = new AlertDialog.Builder(activity, null);
         b.setMessage(AndroidUtilities.replaceTags(LocaleController.formatString(R.string.SvipeBotContactsPermissionRequest, UserObject.getUserName(bot), UserObject.getUserName(bot))));
-        b.setTopImage(new BotLocation.BotUserLocationDrawable(context, UserConfig.getInstance(currentAccount).getCurrentUser(), bot), Theme.getColor(Theme.key_dialogTopBackground));
+        b.setTopImage(new BotLocation.BotUserLocationDrawable(context, UserConfig.getInstance(currentAccount).getCurrentUser(), bot, R.drawable.msg_filled_menu_users), Theme.getColor(Theme.key_dialogTopBackground));
         b.setPositiveButton(LocaleController.getString(R.string.BotLocationPermissionAllow), (di, w) -> {
             answered[0] = true;
             answer(true, whenDone);
