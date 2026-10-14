@@ -363,5 +363,8 @@
     <string name="SvipeMapPin">Xaritani ochiq ushlab turish</string>
     <string name="SvipeContinueAsGuest">Mehmon sifatida davom etish</string>
     <string name="SvipeBotContactsPermissionRequest">**%1$s** Telegram kontaktlaringizga — ismlar, username va sizga ko\'rinadigan telefon raqamlariga kirish ruxsatini so\'ramoqda. Bu ruxsatni **%2$s** profil sahifasida bekor qilishingiz mumkin.</string>
+    <string name="SvipeBotContactsGranted">**%s** endi kontaktlaringizni ko\'ra oladi</string>
+    <string name="SvipeBotContactsDenied">**%s** kontaktlaringizni ko\'ra olmaydi.</string>
+    <string name="SvipeBotContactsDeniedSettings">Bot sozlamalarida o\'zgartiring &gt;</string>
     <string name="SvipeBotProfilePermissionContacts">Kontaktlar</string>
 </resources>

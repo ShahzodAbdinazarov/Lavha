@@ -655,6 +655,40 @@ public class BotWebViewSheet extends Dialog implements NotificationCenter.Notifi
                 }
             }
 
+            // Svipe: the same bulletins as geolocation, for SvipeBotContacts.
+            @Override
+            public void onContactsGranted(boolean granted) {
+                final TLRPC.User bot = MessagesController.getInstance(currentAccount).getUser(botId);
+                if (granted) {
+                    BulletinFactory.UndoObject undo = new BulletinFactory.UndoObject();
+                    undo.undoText = LocaleController.getString(R.string.UndoNoCaps);
+                    undo.onUndo = () -> {
+                        org.telegram.svipe.SvipeBotContacts.get(getContext(), currentAccount, botId).setGranted(false, null);
+                    };
+                    showBulletin(b ->
+                            b
+                                    .createUsersBulletin(Arrays.asList(bot), AndroidUtilities.replaceTags(LocaleController.formatString(R.string.SvipeBotContactsGranted, UserObject.getUserName(bot))), null, undo)
+                                    .setDuration(DURATION_PROLONG)
+                    );
+                } else {
+                    SpannableStringBuilder text = new SpannableStringBuilder();
+                    text.append(AndroidUtilities.replaceTags(LocaleController.formatString(R.string.SvipeBotContactsDenied, UserObject.getUserName(bot))));
+                    text.append(" ");
+                    text.append(AndroidUtilities.replaceArrows(AndroidUtilities.makeClickable(LocaleController.getString(R.string.SvipeBotContactsDeniedSettings), () -> {
+                        BaseFragment lastFragment = LaunchActivity.getSafeLastFragment();
+                        if (lastFragment == null || lastFragment.getParentLayout() == null) return;
+                        final INavigationLayout parentLayout = lastFragment.getParentLayout();
+                        lastFragment.presentFragment(ProfileActivity.of(botId));
+                        AndroidUtilities.scrollToFragmentRow(parentLayout, "botPermissionContacts");
+                        dismiss(true);
+                    }), true));
+                    showBulletin(b ->
+                            b.createSimpleBulletinDetail(R.raw.error, text)
+                                    .setDuration(DURATION_PROLONG)
+                    );
+                }
+            }
+
             @Override
             public void onEmojiStatusGranted(boolean granted) {
                 final TLRPC.User bot = MessagesController.getInstance(currentAccount).getUser(botId);

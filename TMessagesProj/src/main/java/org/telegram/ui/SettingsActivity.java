@@ -1766,6 +1766,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             } else if (which == 29) {
                 BotBiometry.clear();
                 BotLocation.clear();
+                org.telegram.svipe.SvipeBotContacts.clear();
                 BotDownloads.clear();
                 SetupEmojiStatusSheet.clear();
             } else if (which == 30) {

@@ -39,6 +39,7 @@ import java.util.HashSet;
  * Mini app side (Svipe extension, sent like any Telegram.WebView event):
  *   postEvent('web_app_request_contacts')  → event 'contacts_requested' {status, contacts?}
  *   postEvent('web_app_check_contacts')    → event 'contacts_checked'   {available, access_requested, access_granted}
+ *   postEvent('web_app_open_contacts_settings') → the bot's profile at the switch (right after a tap only)
  */
 public class SvipeBotContacts {
 
@@ -86,37 +87,33 @@ public class SvipeBotContacts {
         listeners.remove(changed);
     }
 
-    /** The switch on the bot's profile page. Turning it on asks again, like geolocation does. */
+    /**
+     * The switch on the bot's profile page. The user flips it themselves, so like geolocation it
+     * takes effect without another dialog.
+     */
     public void setGranted(boolean value, Runnable whenDone) {
-        if (value && !granted) {
-            request(allowed -> {
-                if (whenDone != null) {
-                    whenDone.run();
-                }
-            });
-            return;
-        }
-        requested = true;
-        granted = value;
-        save();
-        notifyListeners();
+        answer(value, null);
         if (whenDone != null) {
             whenDone.run();
         }
     }
 
-    /** Shows the permission dialog unless the user already allowed this bot; reports the answer. */
-    public void request(Utilities.Callback<Boolean> whenDone) {
-        if (granted) {
+    /**
+     * The mini app's request. Like geolocation the dialog is shown once: after an answer (a dismiss
+     * counts as a decline) the bot gets that answer back without the user being asked again, and only
+     * the profile switch changes it. {@code whenDone} gets (whether the dialog was shown now, granted).
+     */
+    public void request(Utilities.Callback2<Boolean, Boolean> whenDone) {
+        if (granted || requested) {
             if (whenDone != null) {
-                whenDone.run(true);
+                whenDone.run(false, granted);
             }
             return;
         }
         final Activity activity = LaunchActivity.instance;
         if (activity == null) {
             if (whenDone != null) {
-                whenDone.run(false);
+                whenDone.run(false, false);
             }
             return;
         }
@@ -126,28 +123,30 @@ public class SvipeBotContacts {
         b.setMessage(AndroidUtilities.replaceTags(LocaleController.formatString(R.string.SvipeBotContactsPermissionRequest, UserObject.getUserName(bot), UserObject.getUserName(bot))));
         b.setTopImage(new BotLocation.BotUserLocationDrawable(context, UserConfig.getInstance(currentAccount).getCurrentUser(), bot, R.drawable.msg_filled_menu_users), Theme.getColor(Theme.key_dialogTopBackground));
         b.setPositiveButton(LocaleController.getString(R.string.BotLocationPermissionAllow), (di, w) -> {
+            if (answered[0]) return;
             answered[0] = true;
             answer(true, whenDone);
         });
         b.setNegativeButton(LocaleController.getString(R.string.BotLocationPermissionDecline), (di, w) -> {
+            if (answered[0]) return;
             answered[0] = true;
             answer(false, whenDone);
         });
         b.setOnDismissListener(di -> {
-            if (!answered[0] && whenDone != null) {
-                whenDone.run(false);
-            }
+            if (answered[0]) return;
+            answered[0] = true;
+            answer(false, whenDone);
         });
         b.show();
     }
 
-    private void answer(boolean allowed, Utilities.Callback<Boolean> whenDone) {
+    private void answer(boolean allowed, Utilities.Callback2<Boolean, Boolean> whenDone) {
         requested = true;
         granted = allowed;
         save();
         notifyListeners();
         if (whenDone != null) {
-            whenDone.run(allowed);
+            whenDone.run(true, allowed);
         }
     }
 

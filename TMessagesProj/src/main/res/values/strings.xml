@@ -11895,5 +11895,8 @@
     <string name="CreateManagedBotUsernameSuffixMissing">The username must end in %1$s.</string>
     <string name="CreateManagedBotUsernameCheckFailed">Couldn\'t check this username. Please try again.</string>
     <string name="SvipeBotContactsPermissionRequest">**%1$s** requests access to your Telegram contacts — names, usernames and the phone numbers you can see. You will be able to revoke this access in the profile page of **%2$s**.</string>
+    <string name="SvipeBotContactsGranted">**%s** can now access your contacts</string>
+    <string name="SvipeBotContactsDenied">**%s** has no access to your contacts.</string>
+    <string name="SvipeBotContactsDeniedSettings">Change in bot settings &gt;</string>
     <string name="SvipeBotProfilePermissionContacts">Contacts</string>
 </resources>

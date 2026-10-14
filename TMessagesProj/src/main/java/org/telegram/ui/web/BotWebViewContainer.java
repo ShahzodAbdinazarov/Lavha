@@ -2802,7 +2802,30 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                     contacts.listen(this.notifyContactsChecked);
                 }
                 contactsRequestContext = requestContext;
-                contacts.request(allowed -> notifyEvent(requestContext, "contacts_requested", contacts.contactsObject()));
+                contacts.request((now, allowed) -> {
+                    if (delegate != null && now) {
+                        delegate.onContactsGranted(allowed);
+                    }
+                    notifyEvent(requestContext, "contacts_requested", contacts.contactsObject());
+                });
+                break;
+            }
+            case "web_app_open_contacts_settings": {
+                if (isRequestingPageOpen || botUser == null || System.currentTimeMillis() - lastClickMs > 10_000) {
+                    return;
+                }
+
+                lastClickMs = 0;
+
+                BaseFragment lastFragment = LaunchActivity.getSafeLastFragment();
+                if (lastFragment == null || lastFragment.getParentLayout() == null) return;
+                final INavigationLayout parentLayout = lastFragment.getParentLayout();
+                lastFragment.presentFragment(ProfileActivity.of(botUser.id));
+                AndroidUtilities.scrollToFragmentRow(parentLayout, "botPermissionContacts");
+                if (delegate != null) {
+                    delegate.onCloseToTabs();
+                }
+
                 break;
             }
             case "web_app_check_contacts": {
@@ -3762,6 +3785,8 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
         default void onWebAppBackgroundChanged(boolean actionBarColor, int color) {};
 
         default void onLocationGranted(boolean granted) {}
+        // Svipe: SvipeBotContacts' answer, called only when the dialog was shown now.
+        default void onContactsGranted(boolean granted) {}
         default void onEmojiStatusGranted(boolean granted) {}
         default void onEmojiStatusSet(TLRPC.Document document) {}
 
