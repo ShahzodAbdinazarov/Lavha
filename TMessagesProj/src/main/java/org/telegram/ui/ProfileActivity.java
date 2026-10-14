@@ -119,6 +119,7 @@ import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.LinearLayoutManager;
 
+import org.telegram.svipe.SvipeBotContacts;
 import org.telegram.ui.Components.ScrimOptions;
 import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
 import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceBitmap;
@@ -538,6 +539,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
 
     private boolean isBot;
     private BotLocation botLocation;
+    private SvipeBotContacts botContacts;
     private BotBiometry botBiometry;
 
     private TLRPC.ChatFull chatInfo;
@@ -693,6 +695,8 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
     private int botPermissionsHeader;
     @Keep
     private int botPermissionLocation;
+    @Keep
+    private int botPermissionContacts;
     @Keep
     private int botPermissionEmojiStatus;
     private int botPermissionEmojiStatusReqId;
@@ -4612,6 +4616,12 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                         ((TextCell) view).setChecked(botLocation.granted());
                     });
                 }
+            } else if (position == botPermissionContacts) {
+                if (botContacts != null) {
+                    botContacts.setGranted(!botContacts.granted(), () -> {
+                        ((TextCell) view).setChecked(botContacts.granted());
+                    });
+                }
             } else if (position == botPermissionBiometry) {
                 if (botBiometry != null) {
                     botBiometry.setGranted(!botBiometry.granted());
@@ -5004,6 +5014,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                             } else if (which == 29) {
                                 BotBiometry.clear();
                                 BotLocation.clear();
+                                SvipeBotContacts.clear();
                                 BotDownloads.clear();
                                 SetupEmojiStatusSheet.clear();
                             } else if (which == 30) {
@@ -10519,6 +10530,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         botPermissionBiometry = -1;
         botPermissionEmojiStatus = -1;
         botPermissionLocation = -1;
+        botPermissionContacts = -1;
         botPermissionsDivider = -1;
         unofficialSecurityRiskRow = -1;
         unofficialSecurityRiskDividerRow = -1;
@@ -10771,17 +10783,23 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                         botLocation = BotLocation.get(getContext(), currentAccount, userId);
                     if (botBiometry == null && getContext() != null)
                         botBiometry = BotBiometry.get(getContext(), currentAccount, userId);
+                    if (botContacts == null && getContext() != null)
+                        botContacts = SvipeBotContacts.get(getContext(), currentAccount, userId);
                     final boolean containsPermissionLocation = botLocation != null && botLocation.asked();
+                    final boolean containsPermissionContacts = botContacts != null && botContacts.asked();
                     final boolean containsPermissionBiometry = botBiometry != null && botBiometry.asked();
                     final boolean containsPermissionEmojiStatus = userInfo != null && userInfo.bot_can_manage_emoji_status || SetupEmojiStatusSheet.getAccessRequested(getContext(), currentAccount, userId);
 
-                    if (containsPermissionEmojiStatus || containsPermissionLocation || containsPermissionBiometry) {
+                    if (containsPermissionEmojiStatus || containsPermissionLocation || containsPermissionContacts || containsPermissionBiometry) {
                         botPermissionsHeader = rowCount++;
                         if (containsPermissionEmojiStatus) {
                             botPermissionEmojiStatus = rowCount++;
                         }
                         if (containsPermissionLocation) {
                             botPermissionLocation = rowCount++;
+                        }
+                        if (containsPermissionContacts) {
+                            botPermissionContacts = rowCount++;
                         }
                         if (containsPermissionBiometry) {
                             botPermissionBiometry = rowCount++;
@@ -14024,7 +14042,9 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                         textCell.setTextAndIcon(LocaleController.getString(R.string.SendAGift), R.drawable.menu_gift, false);
                         textCell.setImageLeft(23);
                     } else if (position == botPermissionLocation) {
-                        textCell.setTextAndCheckAndColorfulIcon(LocaleController.getString(R.string.BotProfilePermissionLocation), botLocation != null && botLocation.granted(), R.drawable.filled_access_location, getThemedColor(Theme.key_color_green), botPermissionBiometry != -1);
+                        textCell.setTextAndCheckAndColorfulIcon(LocaleController.getString(R.string.BotProfilePermissionLocation), botLocation != null && botLocation.granted(), R.drawable.filled_access_location, getThemedColor(Theme.key_color_green), botPermissionContacts != -1 || botPermissionBiometry != -1);
+                    } else if (position == botPermissionContacts) {
+                        textCell.setTextAndCheckAndColorfulIcon(LocaleController.getString(R.string.SvipeBotProfilePermissionContacts), botContacts != null && botContacts.granted(), R.drawable.msg_contacts, getThemedColor(Theme.key_color_blue), botPermissionBiometry != -1);
                     } else if (position == botPermissionBiometry) {
                         textCell.setTextAndCheckAndColorfulIcon(LocaleController.getString(R.string.BotProfilePermissionBiometry), botBiometry != null && botBiometry.granted(), R.drawable.filled_access_fingerprint, getThemedColor(Theme.key_color_orange), false);
                     } else if (position == botPermissionEmojiStatus) {
@@ -14463,7 +14483,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                     position == clearLogsRow || position == switchBackendRow || position == setAvatarRow || position == addToGroupButtonRow ||
                     position == addToContactsRow || position == liteModeRow || position == premiumGiftingRow || position == businessRow ||
                     position == botStarsBalanceRow || position == botTonBalanceRow || position == channelBalanceRow || position == botPermissionLocation ||
-                    position == botPermissionBiometry || position == botPermissionEmojiStatus || position == tonRow
+                    position == botPermissionContacts || position == botPermissionBiometry || position == botPermissionEmojiStatus || position == tonRow
             ) {
                 return VIEW_TYPE_TEXT;
             } else if (position == notificationsDividerRow) {
@@ -15891,6 +15911,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             put(++pointer, botAppRow, sparseIntArray);
             put(++pointer, botPermissionsHeader, sparseIntArray);
             put(++pointer, botPermissionLocation, sparseIntArray);
+            put(++pointer, botPermissionContacts, sparseIntArray);
             put(++pointer, botPermissionEmojiStatus, sparseIntArray);
             put(++pointer, botPermissionBiometry, sparseIntArray);
             put(++pointer, botPermissionsDivider, sparseIntArray);

@@ -362,4 +362,6 @@
     <string name="SvipeNotificationsBotsOnlyBots">Bu yerga faqat botlarni qo&#8217;shish mumkin.</string>
     <string name="SvipeMapPin">Xaritani ochiq ushlab turish</string>
     <string name="SvipeContinueAsGuest">Mehmon sifatida davom etish</string>
+    <string name="SvipeBotContactsPermissionRequest">**%1$s** Telegram kontaktlaringizga — ismlar, username va sizga ko\'rinadigan telefon raqamlariga kirish ruxsatini so\'ramoqda. Bu ruxsatni **%2$s** profil sahifasida bekor qilishingiz mumkin.</string>
+    <string name="SvipeBotProfilePermissionContacts">Kontaktlar</string>
 </resources>

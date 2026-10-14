@@ -635,4 +635,6 @@
     <string name="SvipeNotificationsBotsOnlyBots">Сюда можно добавлять только ботов.</string>
     <string name="SvipeMapPin">Держать карту открытой</string>
     <string name="SvipeContinueAsGuest">Продолжить как гость</string>
+    <string name="SvipeBotContactsPermissionRequest">**%1$s** запрашивает доступ к вашим контактам Telegram — именам, юзернеймам и номерам телефонов, которые вам видны. Вы сможете отозвать доступ на странице профиля **%2$s**.</string>
+    <string name="SvipeBotProfilePermissionContacts">Контакты</string>
 </resources>

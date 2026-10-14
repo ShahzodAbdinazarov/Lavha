@@ -85,6 +85,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.json.JSONTokener;
+import org.telegram.svipe.SvipeBotContacts;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BotWebViewVibrationEffect;
@@ -243,6 +244,8 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
 
     private BotBiometry biometry;
     private BotLocation location;
+    private SvipeBotContacts contacts;
+    private WebRequestContext contactsRequestContext;
     private BotDownloads downloads;
     private BotStorage storage;
     private BotStorage secureStorage;
@@ -1156,6 +1159,11 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                 location.unlisten(this.notifyLocationChecked);
                 location = null;
                 locationRequestContext = null;
+            }
+            if (contacts != null) {
+                contacts.unlisten(this.notifyContactsChecked);
+                contacts = null;
+                contactsRequestContext = null;
             }
         }
     }
@@ -2784,6 +2792,31 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                 }
                 break;
             }
+            // Svipe: contacts, on the same per-bot permission model as geolocation (SvipeBotContacts).
+            case "web_app_request_contacts": {
+                if (isRequestingPageOpen || botUser == null) {
+                    return;
+                }
+                if (contacts == null) {
+                    contacts = SvipeBotContacts.get(getContext(), currentAccount, botUser.id);
+                    contacts.listen(this.notifyContactsChecked);
+                }
+                contactsRequestContext = requestContext;
+                contacts.request(allowed -> notifyEvent(requestContext, "contacts_requested", contacts.contactsObject()));
+                break;
+            }
+            case "web_app_check_contacts": {
+                if (botUser == null) {
+                    return;
+                }
+                if (contacts == null) {
+                    contacts = SvipeBotContacts.get(getContext(), currentAccount, botUser.id);
+                    contacts.listen(this.notifyContactsChecked);
+                }
+                contactsRequestContext = requestContext;
+                notifyContactsChecked.run();
+                break;
+            }
             case "web_app_check_location": {
                 if (location == null) {
                     location = BotLocation.get(getContext(), currentAccount, botUser.id);
@@ -3411,6 +3444,12 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
     private WebRequestContext locationRequestContext;
     private final Runnable notifyLocationChecked = () ->
             notifyEvent(locationRequestContext, "location_checked", location.checkObject());
+
+    private final Runnable notifyContactsChecked = () -> {
+        if (contacts != null) {
+            notifyEvent(contactsRequestContext, "contacts_checked", contacts.checkObject());
+        }
+    };
 
     private int lastDialogType = -1;
     private int shownDialogsCount = 0;
