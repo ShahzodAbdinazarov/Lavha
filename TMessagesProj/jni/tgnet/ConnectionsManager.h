@@ -92,6 +92,7 @@ private:
     static void *ThreadProc(void *data);
 
     void initDatacenters();
+    void addBuiltInFallbackAddresses();
     void loadConfig();
     void saveConfig();
     void saveConfigInternal(NativeByteBuffer *buffer);

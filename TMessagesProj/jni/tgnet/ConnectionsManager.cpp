@@ -1876,6 +1876,38 @@ void ConnectionsManager::initDatacenters() {
             datacenters[3] = datacenter;
         }
     }
+    addBuiltInFallbackAddresses();
+}
+
+// Svipe: a config replaces a datacenter's built-in addresses with its own list, and when every
+// address on that list is unreachable from the user's network the app never connects again — so it
+// never gets the config that could fix it. Seen 2026-10-15: the config gave DC 2 only
+// 149.154.167.41, refused by the network, while the built-in .51 answered. The built-in addresses
+// stay at the end of the list, so a working config address is still the one used and these are
+// only reached by the usual rotation after it fails.
+void ConnectionsManager::addBuiltInFallbackAddresses() {
+    struct BuiltIn { uint32_t dc; const char *address; uint32_t flags; };
+    static const BuiltIn production[] = {
+        { 1, "149.154.175.50", 0 }, { 1, "2001:b28:f23d:f001:0000:0000:0000:000a", 1 },
+        { 2, "149.154.167.51", 0 }, { 2, "95.161.76.100", 0 }, { 2, "2001:67c:4e8:f002:0000:0000:0000:000a", 1 },
+        { 3, "149.154.175.100", 0 }, { 3, "2001:b28:f23d:f003:0000:0000:0000:000a", 1 },
+        { 4, "149.154.167.91", 0 }, { 4, "2001:67c:4e8:f004:0000:0000:0000:000a", 1 },
+        { 5, "149.154.171.5", 0 }, { 5, "2001:b28:f23f:f005:0000:0000:0000:000a", 1 },
+    };
+    static const BuiltIn test[] = {
+        { 1, "149.154.175.40", 0 }, { 1, "2001:b28:f23d:f001:0000:0000:0000:000e", 1 },
+        { 2, "149.154.167.40", 0 }, { 2, "2001:67c:4e8:f002:0000:0000:0000:000e", 1 },
+        { 3, "149.154.175.117", 0 }, { 3, "2001:b28:f23d:f003:0000:0000:0000:000e", 1 },
+    };
+    const BuiltIn *list = testBackend ? test : production;
+    const size_t count = testBackend ? sizeof(test) / sizeof(test[0]) : sizeof(production) / sizeof(production[0]);
+    for (size_t a = 0; a < count; a++) {
+        auto iter = datacenters.find(list[a].dc);
+        if (iter == datacenters.end() || iter->second->isCdnDatacenter) {
+            continue;
+        }
+        iter->second->addAddressAndPort(list[a].address, 443, list[a].flags, "");
+    }
 }
 
 void ConnectionsManager::attachConnection(ConnectionSocket *connection) {
@@ -3476,6 +3508,7 @@ void ConnectionsManager::updateDcSettings(uint32_t dcNum, bool workaround, bool 
                         moveToDatacenter(iter.first);
                     }
                 }
+                addBuiltInFallbackAddresses();
                 saveConfig();
                 scheduleTask([&] {
                     processRequestQueue(AllConnectionTypes, 0);
