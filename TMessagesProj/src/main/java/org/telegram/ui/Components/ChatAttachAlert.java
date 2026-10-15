@@ -94,6 +94,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.svipe.SvipeMediaPicker;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.svipe.SvipeAttachMenu;
 import org.telegram.messenger.AnimationNotificationsLocker;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ChatObject;
@@ -1268,6 +1269,18 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
             glassTabView.setAttachBotUser(user, currentAccount);
             currentUser = user;
             attachMenuBot = null;
+            glassTabView.setSelected(false, false);
+            invalidate();
+        }
+
+        // Svipe: a SvipeAttachMenu bot has no attach menu icon; it shows its avatar, like an inline bot.
+        public void setSvipeBot(TLRPC.User user, TLRPC.TL_attachMenuBot bot) {
+            if (user == null || bot == null) {
+                return;
+            }
+            glassTabView.setAttachBotUser(user, currentAccount);
+            currentUser = user;
+            attachMenuBot = bot;
             glassTabView.setSelected(false, false);
             invalidate();
         }
@@ -4389,7 +4402,12 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                 .setTitle(getString(R.string.BotRemoveFromMenuTitle))
                 .setMessage(AndroidUtilities.replaceTags(attachMenuBot != null ? description : LocaleController.formatString("BotRemoveInlineFromMenu", R.string.BotRemoveInlineFromMenu, botName)))
                 .setPositiveButton(getString("OK", R.string.OK), (dialogInterface, i) -> {
-                    if (attachMenuBot != null) {
+                    if (SvipeAttachMenu.isSvipeBot(attachMenuBot)) {
+                        SvipeAttachMenu.get(currentAccount).remove(attachMenuBot.bot_id);
+                        if (currentAttachLayout == botAttachLayouts.get(attachMenuBot.bot_id)) {
+                            showLayout(photoLayout);
+                        }
+                    } else if (attachMenuBot != null) {
                         TLRPC.TL_messages_toggleBotInAttachMenu req = new TLRPC.TL_messages_toggleBotInAttachMenu();
                         req.bot = MessagesController.getInstance(currentAccount).getInputUser(currentUser);
                         req.enabled = false;
@@ -6699,7 +6717,11 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                         position -= attachBotsStartRow;
                         child.setTag(position);
                         TLRPC.TL_attachMenuBot bot = attachMenuBots.get(position);
-                        child.setAttachBot(MessagesController.getInstance(currentAccount).getUser(bot.bot_id), bot);
+                        if (SvipeAttachMenu.isSvipeBot(bot)) {
+                            child.setSvipeBot(MessagesController.getInstance(currentAccount).getUser(bot.bot_id), bot);
+                        } else {
+                            child.setAttachBot(MessagesController.getInstance(currentAccount).getUser(bot.bot_id), bot);
+                        }
                         break;
                     }
 
@@ -6830,6 +6852,16 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                         attachMenuBots.clear();
                         for (TLRPC.TL_attachMenuBot bot : MediaDataController.getInstance(currentAccount).getAttachMenuBots().bots) {
                             if (bot.show_in_attach_menu && MediaDataController.canShowAttachMenuBot(bot, chatActivity.getCurrentChat() != null ? chatActivity.getCurrentChat() : chatActivity.getCurrentUser())) {
+                                attachMenuBots.add(bot);
+                            }
+                        }
+                        // Svipe: the bots the user added themselves (SvipeAttachMenu), after Telegram's.
+                        for (TLRPC.TL_attachMenuBot bot : SvipeAttachMenu.get(currentAccount).getBots()) {
+                            boolean listed = false;
+                            for (TLRPC.TL_attachMenuBot other : attachMenuBots) {
+                                listed |= other.bot_id == bot.bot_id;
+                            }
+                            if (!listed && MessagesController.getInstance(currentAccount).getUser(bot.bot_id) != null && MediaDataController.canShowAttachMenuBot(bot, chatActivity.getCurrentChat() != null ? chatActivity.getCurrentChat() : chatActivity.getCurrentUser())) {
                                 attachMenuBots.add(bot);
                             }
                         }

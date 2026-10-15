@@ -34,6 +34,8 @@ import org.telegram.ui.recyclerview.ChatListItemAnimator;
 
 import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.FileLog;
+import org.telegram.svipe.SvipeAttachMenu;
 import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.GenericProvider;
@@ -175,8 +177,12 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
             for (TLRPC.TL_attachMenuBot bot : MediaDataController.getInstance(currentAccount).getAttachMenuBots().bots) {
                 if (bot.bot_id == botId) {
                     parentAlert.onLongClickBotButton(bot, MessagesController.getInstance(currentAccount).getUser(botId));
-                    break;
+                    return;
                 }
+            }
+            final SvipeAttachMenu.Bot svipeBot = SvipeAttachMenu.get(currentAccount).find(botId);
+            if (svipeBot != null) {
+                parentAlert.onLongClickBotButton(svipeBot, MessagesController.getInstance(currentAccount).getUser(botId));
             }
         } else if (id == R.id.menu_settings) {
             webViewContainer.onSettingsButtonPressed();
@@ -508,13 +514,31 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
         webViewContainer.setBotUser(MessagesController.getInstance(currentAccount).getUser(botId));
         webViewContainer.loadFlickerAndSettingsItem(currentAccount, botId, settingsItem);
 
+        // Svipe: Telegram opens only the bots it approved this way. Any other bot opens its Main Mini
+        // App in this chat (initData carries chat_type and chat_instance); a bot with only a menu button
+        // opens it as from its own chat, since the server refuses a menu button URL anywhere else
+        // (BOT_WEBVIEW_DISABLED).
+        final SvipeAttachMenu.Bot svipeBot = SvipeAttachMenu.get(currentAccount).find(botId);
+        final TLRPC.User svipeBotUser = svipeBot != null ? MessagesController.getInstance(currentAccount).getUser(botId) : null;
+        if (svipeBot != null && (svipeBotUser == null || svipeBotUser.bot_has_main_app || SvipeAttachMenu.get(currentAccount).urlFor(svipeBot) == null)) {
+            requestSvipeMainWebView(startCommand);
+            NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.webViewResultSent);
+            return;
+        }
+
         TLRPC.TL_messages_requestWebView req = new TLRPC.TL_messages_requestWebView();
         req.peer = MessagesController.getInstance(currentAccount).getInputPeer(peerId);
+        if (svipeBot != null) {
+            req.peer = MessagesController.getInstance(currentAccount).getInputPeer(botId);
+            req.from_bot_menu = true;
+            req.url = svipeBot.url;
+            req.flags |= 2;
+        }
         req.bot = MessagesController.getInstance(currentAccount).getInputUser(botId);
         req.silent = silent;
         req.platform = "android";
 
-        if (peerId < 0) {
+        if (svipeBot == null && peerId < 0) {
             TLRPC.ChatFull chatFull = MessagesController.getInstance(currentAccount).getChatFull(-peerId);
             if (chatFull != null) {
                 TLRPC.Peer peer = chatFull.default_send_as;
@@ -524,12 +548,14 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
                 }
             }
         }
-        if (startCommand != null) {
+        if (startCommand != null && svipeBot == null) {
             req.start_param = startCommand;
             req.flags |= 8;
         }
 
-        if (replyToMsgId != 0) {
+        if (svipeBot != null) {
+            // The bot's own chat: nothing here replies to or sends as anything in this one.
+        } else if (replyToMsgId != 0) {
             req.reply_to = SendMessagesHelper.getInstance(currentAccount).createReplyInput(replyToMsgId);
             if (monoforumTopicId != 0) {
                 req.reply_to.monoforum_peer_id = MessagesController.getInstance(currentAccount).getInputPeer(monoforumTopicId);
@@ -556,6 +582,8 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
                 webViewContainer.loadUrl(currentAccount, resultUrl.url, resultUrl.same_origin);
 
                 AndroidUtilities.runOnUIThread(pollRunnable);
+            } else if (error != null && svipeBot != null) {
+                FileLog.e("svipe attach menu: requestWebView " + error.text);
             }
         }));
 
@@ -695,9 +723,39 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
         }
     }
 
+    // Svipe: a SvipeAttachMenu bot with only a Main Mini App (no menu button URL).
+    private void requestSvipeMainWebView(String startCommand) {
+        TLRPC.TL_messages_requestMainWebView req = new TLRPC.TL_messages_requestMainWebView();
+        req.peer = MessagesController.getInstance(currentAccount).getInputPeer(peerId);
+        req.bot = MessagesController.getInstance(currentAccount).getInputUser(botId);
+        req.platform = "android";
+        if (startCommand != null) {
+            req.start_param = startCommand;
+            req.flags |= 2;
+        }
+        JSONObject theme_params = BotWebViewSheet.makeThemeParams(resourcesProvider);
+        if (theme_params != null) {
+            req.theme_params = new TLRPC.TL_dataJSON();
+            req.theme_params.data = theme_params.toString();
+            req.flags |= 1;
+        }
+        ConnectionsManager.getInstance(currentAccount).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+            if (response instanceof TLRPC.TL_webViewResultUrl) {
+                TLRPC.TL_webViewResultUrl resultUrl = (TLRPC.TL_webViewResultUrl) response;
+                queryId = resultUrl.query_id;
+                webViewContainer.loadUrl(currentAccount, resultUrl.url, resultUrl.same_origin);
+                if (queryId != 0) {
+                    AndroidUtilities.runOnUIThread(pollRunnable);
+                }
+            } else if (error != null) {
+                FileLog.e("svipe attach menu: requestMainWebView " + error.text);
+            }
+        }));
+    }
+
     public void showJustAddedBulletin() {
         TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(botId);
-        TLRPC.TL_attachMenuBot currentBot = null;
+        TLRPC.TL_attachMenuBot currentBot = SvipeAttachMenu.get(currentAccount).find(botId);
         for (TLRPC.TL_attachMenuBot bot : MediaDataController.getInstance(currentAccount).getAttachMenuBots().bots) {
             if (bot.bot_id == botId) {
                 currentBot = bot;

@@ -85,6 +85,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.json.JSONTokener;
+import org.telegram.svipe.SvipeAttachMenu;
 import org.telegram.svipe.SvipeBotContacts;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
@@ -2720,6 +2721,32 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                 ));
                 break;
             }
+            // Svipe: the attachment menu for any bot, with the user's consent (SvipeAttachMenu). Shaped
+            // like add_to_home_screen: a tap first, then the attach bot dialog; once per bot.
+            case "web_app_add_to_attach_menu": {
+                if (isRequestingPageOpen || botUser == null || System.currentTimeMillis() - lastClickMs > 10_000) {
+                    return;
+                }
+                final TLRPC.User bot = botUser;
+                SvipeAttachMenu.get(currentAccount).request(bot, true, (shown, added) -> {
+                    if (added) {
+                        if (shown && delegate != null) {
+                            delegate.onSvipeAttachMenuAdded();
+                        }
+                        notifyEvent(requestContext, "attach_menu_added", null);
+                    } else {
+                        notifyEvent(requestContext, "attach_menu_failed", obj("error", "declined".equals(SvipeAttachMenu.get(currentAccount).status(bot.id)) ? "USER_DECLINED" : "UNSUPPORTED"));
+                    }
+                });
+                break;
+            }
+            case "web_app_check_attach_menu": {
+                if (botUser == null) {
+                    return;
+                }
+                notifyEvent(requestContext, "attach_menu_checked", obj("status", SvipeAttachMenu.get(currentAccount).status(botUser.id)));
+                break;
+            }
             case "web_app_set_emoji_status": {
                 if (isRequestingPageOpen || botUser == null || System.currentTimeMillis() - lastClickMs > 10_000) {
                     return;
@@ -3787,6 +3814,8 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
         default void onLocationGranted(boolean granted) {}
         // Svipe: SvipeBotContacts' answer, called only when the dialog was shown now.
         default void onContactsGranted(boolean granted) {}
+        // Svipe: SvipeAttachMenu added the bot, from the dialog shown now.
+        default void onSvipeAttachMenuAdded() {}
         default void onEmojiStatusGranted(boolean granted) {}
         default void onEmojiStatusSet(TLRPC.Document document) {}
 

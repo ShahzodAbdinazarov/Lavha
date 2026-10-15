@@ -95,6 +95,7 @@ import com.google.firebase.appindexing.builders.AssistActionBuilder;
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.svipe.SvipeAttachMenu;
 import org.telegram.messenger.AnimationNotificationsLocker;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.AutoDeleteMediaTask;
@@ -4448,7 +4449,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                                 if (user.bot_attach_menu) {
                                     processAttachMenuBot(intentAccount, peerId, attachMenuBotChoose, user, setAsAttachBot, botAppStartParam);
                                 } else {
-                                    BulletinFactory.of(mainFragmentsStack.get(mainFragmentsStack.size() - 1)).createErrorBulletin(LocaleController.getString(R.string.BotCantAddToAttachMenu)).show();
+                                    processSvipeAttachMenuBot(intentAccount, user, setAsAttachBot);
                                 }
                             } else {
                                 BulletinFactory.of(mainFragmentsStack.get(mainFragmentsStack.size() - 1)).createErrorBulletin(LocaleController.getString(R.string.BotSetAttachLinkNotBot)).show();
@@ -5868,9 +5869,42 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                     }, attachMenuBot.request_write_access ? user : null, null);
                 }
             } else {
-                BulletinFactory.of(mainFragmentsStack.get(mainFragmentsStack.size() - 1)).createErrorBulletin(LocaleController.getString(R.string.BotCantAddToAttachMenu)).show();
+                processSvipeAttachMenuBot(intentAccount, user, setAsAttachBot);
             }
         }));
+    }
+
+    /**
+     * Svipe: t.me/<bot>?startattach for a bot Telegram didn't approve. Telegram ends here with "This
+     * bot can't be added to the attachment menu"; Svipe asks the user with the same dialog and adds the
+     * bot to its own list (SvipeAttachMenu), then opens it in the current chat the way Telegram does
+     * for a bot it just added: the menu opens on the bot with the "shortcut added" bulletin.
+     */
+    private void processSvipeAttachMenuBot(int intentAccount, TLRPC.User user, String startCommand) {
+        SvipeAttachMenu.get(intentAccount).request(user, false, (shown, added) -> {
+            BaseFragment lastFragment = mainFragmentsStack.isEmpty() ? null : mainFragmentsStack.get(mainFragmentsStack.size() - 1);
+            if (AndroidUtilities.isTablet() && !(lastFragment instanceof ChatActivity) && !rightFragmentsStack.isEmpty()) {
+                lastFragment = rightFragmentsStack.get(rightFragmentsStack.size() - 1);
+            }
+            if (lastFragment == null) {
+                return;
+            }
+            if (!added) {
+                if (!shown) {
+                    BulletinFactory.of(lastFragment).createErrorBulletin(LocaleController.getString(R.string.BotCantAddToAttachMenu)).show();
+                }
+                return;
+            }
+            SvipeAttachMenu.Bot bot = SvipeAttachMenu.get(intentAccount).find(user.id);
+            if (lastFragment instanceof ChatActivity) {
+                ChatActivity chatActivity = (ChatActivity) lastFragment;
+                if (bot != null && MediaDataController.canShowAttachMenuBot(bot, chatActivity.getCurrentUser() != null ? chatActivity.getCurrentUser() : chatActivity.getCurrentChat())) {
+                    chatActivity.openAttachBotLayout(user.id, startCommand, shown);
+                    return;
+                }
+            }
+            BulletinFactory.of(lastFragment).createSimpleBulletin(R.raw.contact_check, AndroidUtilities.replaceTags(LocaleController.formatString(shown ? R.string.BotAttachMenuShortcatAddedAttach : R.string.BotAlreadyAddedToAttachMenu, UserObject.getFirstName(user)))).show();
+        });
     }
 
     private void openForumFromLink(long dialogId, Integer messageId, String quote, Integer taskId, byte[] pollOptionId, Runnable onOpened, int fromMessageId, int quoteOffset) {

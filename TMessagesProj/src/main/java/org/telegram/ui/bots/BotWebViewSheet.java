@@ -689,6 +689,17 @@ public class BotWebViewSheet extends Dialog implements NotificationCenter.Notifi
                 }
             }
 
+            // Svipe: Telegram's "shortcut added" bulletin, for a bot SvipeAttachMenu just added.
+            @Override
+            public void onSvipeAttachMenuAdded() {
+                final TLRPC.User bot = MessagesController.getInstance(currentAccount).getUser(botId);
+                showBulletin(b ->
+                        b
+                                .createUsersBulletin(Arrays.asList(bot), AndroidUtilities.replaceTags(LocaleController.formatString(R.string.BotAttachMenuShortcatAddedAttach, UserObject.getFirstName(bot))))
+                                .setDuration(DURATION_PROLONG)
+                );
+            }
+
             @Override
             public void onEmojiStatusGranted(boolean granted) {
                 final TLRPC.User bot = MessagesController.getInstance(currentAccount).getUser(botId);

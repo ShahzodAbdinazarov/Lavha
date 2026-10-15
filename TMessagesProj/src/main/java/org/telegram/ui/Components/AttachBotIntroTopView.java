@@ -56,6 +56,18 @@ public class AttachBotIntroTopView extends View {
         }
     }
 
+    // Svipe: a bot added by SvipeAttachMenu has no attach menu icon of its own; it shows its avatar.
+    private boolean userImage;
+
+    public void setUser(int currentAccount, TLRPC.User user) {
+        userImage = true;
+        AvatarDrawable avatarDrawable = new AvatarDrawable();
+        avatarDrawable.setInfo(currentAccount, user);
+        imageReceiver.setRoundRadius(AndroidUtilities.dp(ICONS_SIZE_DP) / 2);
+        imageReceiver.setColorFilter(null);
+        imageReceiver.setForUserOrChat(user, avatarDrawable);
+    }
+
     public void setBackgroundColor(int color) {
         backgroundPaint.setColor(color);
     }
@@ -63,7 +75,9 @@ public class AttachBotIntroTopView extends View {
     public void setColor(int color) {
         attachDrawable.setColorFilter(color, PorterDuff.Mode.SRC_IN);
         paint.setColor(color);
-        imageReceiver.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+        if (!userImage) {
+            imageReceiver.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+        }
     }
 
     @Override
