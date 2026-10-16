@@ -1291,6 +1291,14 @@ public class ChatEditActivity extends BaseFragment implements ImageUpdater.Image
             }
 
             infoContainer.addView(reactionsCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            if (ChatObject.isChannelAndNotMegaGroup(currentChat) && ChatObject.canChangeChatInfo(currentChat)) {
+                // Svipe: the channel's bot tab (svipe.uz/bots/profile-tabs).
+                TextCell botTabCell = new TextCell(context);
+                botTabCell.setBackground(Theme.getSelectorDrawable(false));
+                botTabCell.setTextAndIcon(getString(R.string.SvipeBotTab), R.drawable.msg_bots, true);
+                botTabCell.setOnClickListener(v -> presentFragment(new org.telegram.svipe.SvipeBotTabSettingsActivity(chatId)));
+                infoContainer.addView(botTabCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            }
             if (welcomeMessagesCell != null) {
                 infoContainer.addView(welcomeMessagesCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
             }
