@@ -6956,8 +6956,13 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             if (state == null || dialog_id != -channelId) {
                 return;
             }
+            boolean wasActive = hasBotTab();
             botTabAdapter.setState(state);
             updateTabs(true);
+            if (wasActive != state.active && profileActivity instanceof ProfileActivity) {
+                // A channel with no media has no shared-media row at all; the tab alone must bring it in.
+                ((ProfileActivity) profileActivity).updateListAnimated(false);
+            }
         });
         botTabAdapter.setOnNearEnd(() -> {
             org.telegram.svipe.SvipeBotTab.State state = botTabAdapter.getState();
@@ -7787,6 +7792,8 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             } else if (mediaPages[a].selectedType == TAB_OLD_PROFILES
                     || mediaPages[a].selectedType == TAB_OLD_NUMBERS) { // Svipe
                 rebuildOldIdentity(true);
+            } else if (mediaPages[a].selectedType == TAB_BOT_TAB) { // Svipe: the cards are already loaded
+
             } else {
                 int type = mediaPages[a].selectedType;
                 if (type == TAB_POLL) {

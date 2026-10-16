@@ -10623,6 +10623,10 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         if (!hasMedia && chatInfo != null) {
             hasMedia = chatInfo.stories_pinned_available;
         }
+        if (!hasMedia && chatId != 0) { // Svipe: a bot's tab is enough to show the tabs
+            org.telegram.svipe.SvipeBotTab.State botTab = org.telegram.svipe.SvipeBotTab.cached(chatId);
+            hasMedia = botTab != null && botTab.active;
+        }
         if (!hasMedia) {
             if (chatId != 0 && MessagesController.ChannelRecommendations.hasRecommendations(currentAccount, -chatId)) {
                 hasMedia = true;
