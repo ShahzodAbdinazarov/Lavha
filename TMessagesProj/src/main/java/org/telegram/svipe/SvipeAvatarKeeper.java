@@ -63,13 +63,17 @@ public class SvipeAvatarKeeper implements NotificationCenter.NotificationCenterD
      * each real user profile photo. No-op for chats (dialogId &lt;= 0) and empty lists.
      */
     public void onDialogPhotos(long dialogId, ArrayList<TLRPC.Photo> photos) {
-        if (dialogId <= 0 || photos == null || photos.isEmpty()) {
+        if (dialogId <= 0 || photos == null) {
             return;
         }
         final long userId = dialogId;
         // Same seam feeds the shared archive: report what is live and what has gone (SvipeAvatarSync).
-        // Called here on the UI thread because it has to read the UI-owned DialogPhotos model.
+        // Called here on the UI thread because it has to read the UI-owned DialogPhotos model. An
+        // empty list counts too: someone with no photo now may still have archived ones.
         SvipeAvatarSync.onProfileSeen(account, userId);
+        if (photos.isEmpty()) {
+            return;
+        }
         final ArrayList<TLRPC.Photo> snapshot = new ArrayList<>(photos);
         Utilities.globalQueue.postRunnable(() -> {
             for (TLRPC.Photo photo : snapshot) {

@@ -197,7 +197,29 @@ public class SvipeAvatarSync {
             return;
         }
         final boolean complete = liveSetComplete(slots, live.size(), loaded, fromCache);
+        if (loaded && !fromCache && slots == 0) {
+            // No photo we can see now: deleted, or hidden from us. That is no evidence of deletion,
+            // so nothing is reported, but this account may have seen the photos on another device.
+            fetchWithoutProof(account, userId);
+            return;
+        }
         Utilities.globalQueue.postRunnable(() -> report(account, userId, live, complete));
+    }
+
+    private static final HashMap<Long, Long> lastBlindFetchAt = new HashMap<>();
+
+    private static void fetchWithoutProof(int account, long userId) {
+        long now = System.currentTimeMillis();
+        Long last = lastBlindFetchAt.get(userId);
+        if (last != null && now - last < MIN_REPORT_INTERVAL_MS) {
+            return;
+        }
+        lastBlindFetchAt.put(userId, now);
+        SvipeAuth.ensureToken(account, token -> {
+            if (token != null) {
+                fetchArchive(account, userId, 0, token);
+            }
+        });
     }
 
     private static void report(int account, long userId, HashSet<Long> live, boolean complete) {
@@ -294,14 +316,10 @@ public class SvipeAvatarSync {
      *
      * <p>The request carries a photo id the caller's own Telegram client is showing right now. That is
      * the proof the server checks: only someone Telegram lets see this person could have obtained it.
-     * With no live photo there is no proof, so we do not even ask — except for our own archive, which
-     * needs none (and is how a fresh install gets its own deleted photos back).
+     * With no live photo there is no proof; the server then lets this account see only what it
+     * already saw itself, on any device (and its own archive, which needs no proof at all).
      */
     private static void fetchArchive(int account, long userId, long proofPhotoId, String token) {
-        boolean self = userId == UserConfig.getInstance(account).getClientUserId();
-        if (proofPhotoId == 0 && !self) {
-            return;
-        }
         String path = "/v1/avatars/" + userId + (proofPhotoId != 0 ? "?proof_photo_id=" + proofPhotoId : "");
         SvipeApi.get(path, token, (res, code, err) -> {
             // 403 is the normal answer for "Telegram would not show you this person" — nothing to do.
