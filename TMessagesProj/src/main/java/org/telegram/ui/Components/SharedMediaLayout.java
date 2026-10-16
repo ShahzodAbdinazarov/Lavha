@@ -1692,7 +1692,8 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             .add(NotificationCenter.starUserGiftsLoaded)
             .add(NotificationCenter.updatedChatRanks)
             .add(NotificationCenter.didUpdatePollResults)
-            .add(NotificationCenter.svipeAvatarArchiveUpdated); // Svipe: pooled avatars arrived
+            .add(NotificationCenter.svipeAvatarArchiveUpdated) // Svipe: pooled avatars arrived
+            .add(NotificationCenter.dialogPhotosUpdate); // Svipe: the profile-images grid follows the live photo list
 
         for (int a = 0; a < 10; a++) {
             //cellCache.add(new SharedPhotoVideoCell(context));
@@ -6146,10 +6147,16 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         // (a person whose photos are ALL deleted has no tab to refresh until this runs).
         if (id == NotificationCenter.svipeAvatarArchiveUpdated) {
             if (args != null && args.length > 0 && args[0] instanceof Long && (Long) args[0] == dialog_id) {
+                imagesKnownFor = Long.MIN_VALUE;
                 updateTabs(false);
-                if (imagesAdapter != null) {
-                    imagesAdapter.notifyDataSetChanged();
-                }
+                refreshImagesIfShown();
+            }
+            return;
+        }
+        if (id == NotificationCenter.dialogPhotosUpdate) {
+            if (args != null && args.length > 0 && args[0] instanceof MessagesController.DialogPhotos
+                    && ((MessagesController.DialogPhotos) args[0]).dialogId == dialog_id) {
+                refreshImagesIfShown();
             }
             return;
         }
@@ -6892,20 +6899,44 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
     private long giftsLastHash;
     private boolean wasReordering;
     private int firstTab = -1;
-    // Svipe: rebuild the profile-images tab data (live current photos + captured/deleted ones) and its
-    // visibility count. Cheap (prefs + a few file stats); driven from updateTabs and tab selection.
-    private void rebuildImages() {
+    // Svipe: the profile-images tab. Whether it exists is known up front (the user has a photo, or we
+    // kept some), so the tab is there as soon as the profile opens; the grid itself is built only when
+    // the tab is shown, and again when the photo list changes. updateTabs runs constantly, so it only
+    // decides visibility, once per profile.
+    private long imagesKnownFor = Long.MIN_VALUE;
+
+    private void updateImagesTabVisibility() {
+        if (imagesKnownFor == dialog_id) {
+            return;
+        }
+        imagesKnownFor = dialog_id;
+        imagesCount = 0;
         if (profileActivity != null && dialog_id > 0) {
-            java.util.List<org.telegram.svipe.SvipeProfileImages.Item> items =
-                    org.telegram.svipe.SvipeProfileImages.build(profileActivity.getCurrentAccount(), dialog_id);
-            imagesCount = items.size();
-            if (imagesAdapter != null) {
-                imagesAdapter.setItems(items);
-            }
-        } else {
-            imagesCount = 0;
-            if (imagesAdapter != null) {
-                imagesAdapter.setItems(null);
+            TLRPC.User user = profileActivity.getMessagesController().getUser(dialog_id);
+            boolean hasPhoto = user != null && user.photo != null && user.photo.photo_id != 0;
+            imagesCount = hasPhoto ? 1 : org.telegram.svipe.SvipeAvatarStore.getInstance().getForUser(dialog_id).size();
+        }
+    }
+
+    private void rebuildImages() {
+        java.util.List<org.telegram.svipe.SvipeProfileImages.Item> items = null;
+        if (profileActivity != null && dialog_id > 0) {
+            items = org.telegram.svipe.SvipeProfileImages.build(profileActivity.getCurrentAccount(), dialog_id);
+        }
+        if (imagesAdapter != null) {
+            imagesAdapter.setItems(items);
+            imagesAdapter.notifyDataSetChanged();
+        }
+    }
+
+    private void refreshImagesIfShown() {
+        if (mediaPages == null) {
+            return;
+        }
+        for (MediaPage page : mediaPages) {
+            if (page != null && page.selectedType == TAB_IMAGES && page.getVisibility() == View.VISIBLE) {
+                rebuildImages();
+                return;
             }
         }
     }
@@ -6962,7 +6993,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         if (!delegate.isFragmentOpened()) {
             animated = false;
         }
-        rebuildImages(); // Svipe: refresh the profile-images count/data before deciding tab visibility
+        updateImagesTabVisibility(); // Svipe: decide whether the profile-images tab exists
         rebuildOldIdentity(); // Svipe: same, for the number-history tabs
         boolean hasRecommendations = false;
         boolean hasSavedDialogs = false;
@@ -7636,9 +7667,6 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
 
             } else if (mediaPages[a].selectedType == TAB_IMAGES) { // Svipe
                 rebuildImages();
-                if (imagesAdapter != null) {
-                    imagesAdapter.notifyDataSetChanged();
-                }
             } else if (mediaPages[a].selectedType == TAB_OLD_PROFILES
                     || mediaPages[a].selectedType == TAB_OLD_NUMBERS) { // Svipe
                 rebuildOldIdentity(true);

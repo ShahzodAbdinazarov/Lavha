@@ -8363,6 +8363,16 @@ public class MessagesController extends BaseController implements NotificationCe
             this.dialogId = dialogId;
         }
 
+        // Svipe: every profile photo list passes through here (profile carousel, avatar viewer,
+        // chat header), so this is where the photos the user sees are kept for the Profile Images tab.
+        private void postPhotosUpdate() {
+            org.telegram.svipe.SvipeAvatarKeeper keeper = org.telegram.svipe.SvipeAvatarKeeper.getInstance(currentAccount);
+            if (keeper != null) {
+                keeper.onDialogPhotos(dialogId, photos);
+            }
+            getNotificationCenter().postNotificationName(NotificationCenter.dialogPhotosUpdate, this);
+        }
+
         public void loadAfter(int position, boolean after) {
             if (photos.isEmpty()) {
                 load(0, STEP);
@@ -8517,7 +8527,7 @@ public class MessagesController extends BaseController implements NotificationCe
             }
 
             saveCache();
-            getNotificationCenter().postNotificationName(NotificationCenter.dialogPhotosUpdate, this);
+            postPhotosUpdate();
 
             if (!wasLoaded && offset == 0 && count < photos.size() && photos.size() - count > STEP) {
                 load(photos.size() - STEP, STEP);
@@ -8536,13 +8546,13 @@ public class MessagesController extends BaseController implements NotificationCe
             photos.add(0, photo);
             saveCache();
 
-            getNotificationCenter().postNotificationName(NotificationCenter.dialogPhotosUpdate, this);
+            postPhotosUpdate();
         }
 
         public void removePhoto(long photoId) {
             if (removePhotoInternal(photoId)) {
                 saveCache();
-                getNotificationCenter().postNotificationName(NotificationCenter.dialogPhotosUpdate, this);
+                postPhotosUpdate();
             }
         }
 
@@ -8553,7 +8563,7 @@ public class MessagesController extends BaseController implements NotificationCe
 
             photos.add(0, photos.remove(index));
             saveCache();
-            getNotificationCenter().postNotificationName(NotificationCenter.dialogPhotosUpdate, this);
+            postPhotosUpdate();
         }
 
         private boolean removePhotoInternal(long photoId) {
@@ -8628,7 +8638,7 @@ public class MessagesController extends BaseController implements NotificationCe
                     for (Map.Entry<Integer, TLRPC.Photo> entry : photoEntries.entrySet()) {
                         photos.set(entry.getKey(), entry.getValue());
                     }
-                    getNotificationCenter().postNotificationName(NotificationCenter.dialogPhotosUpdate, this);
+                    postPhotosUpdate();
 
                     load(0, STEP);
                 });

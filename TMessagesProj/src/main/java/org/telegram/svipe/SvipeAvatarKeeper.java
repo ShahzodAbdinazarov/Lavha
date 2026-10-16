@@ -96,9 +96,7 @@ public class SvipeAvatarKeeper implements NotificationCenter.NotificationCenterD
             return;
         }
         // Fast path: already downloaded (e.g. the carousel just showed it) — copy straight away.
-        File cached = FileLoader.getInstance(account).getPathToAttach(size, false);
-        if (cached != null && cached.exists() && cached.length() > 0) {
-            copyInto(userId, photo.id, cached);
+        if (copyIfDownloaded(userId, photo.id, size)) {
             return;
         }
         // Otherwise pull it into cache and copy when it lands.
@@ -110,8 +108,45 @@ public class SvipeAvatarKeeper implements NotificationCenter.NotificationCenterD
         if (loc == null) {
             return;
         }
-        pending.put(name, new long[]{userId, photo.id});
+        if (pending.put(name, new long[]{userId, photo.id}) != null) {
+            return; // already on its way
+        }
         FileLoader.getInstance(account).loadFile(loc, photo, "jpg", FileLoader.PRIORITY_LOW, 1);
+        // fileLoaded does not always reach us (a load that joins one already running, or a file
+        // that was already there), so also look for the file itself a few times.
+        checkLater(name, userId, photo.id, size, 0);
+    }
+
+    private static final long[] CHECK_DELAYS_MS = {2_000, 8_000, 30_000, 120_000};
+
+    private void checkLater(String name, long userId, long photoId, TLRPC.PhotoSize size, int attempt) {
+        if (attempt >= CHECK_DELAYS_MS.length) {
+            pending.remove(name);
+            return;
+        }
+        Utilities.globalQueue.postRunnable(() -> {
+            if (!pending.containsKey(name)) {
+                return; // fileLoaded already handled it
+            }
+            if (copyIfDownloaded(userId, photoId, size)) {
+                pending.remove(name);
+            } else {
+                checkLater(name, userId, photoId, size, attempt + 1);
+            }
+        }, CHECK_DELAYS_MS[attempt]);
+    }
+
+    /** Profile photos land in the cache directory, but a saved one can sit with the other images. */
+    private boolean copyIfDownloaded(long userId, long photoId, TLRPC.PhotoSize size) {
+        FileLoader loader = FileLoader.getInstance(account);
+        for (boolean forceCache : new boolean[]{true, false}) {
+            File file = loader.getPathToAttach(size, forceCache);
+            if (file != null && file.exists() && file.length() > 0) {
+                copyInto(userId, photoId, file);
+                return SvipeAvatarStore.getInstance().hasFile(userId, photoId);
+            }
+        }
+        return false;
     }
 
     private void copyInto(long userId, long photoId, File src) {
