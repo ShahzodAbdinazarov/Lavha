@@ -6914,7 +6914,17 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         if (profileActivity != null && dialog_id > 0) {
             TLRPC.User user = profileActivity.getMessagesController().getUser(dialog_id);
             boolean hasPhoto = user != null && user.photo != null && user.photo.photo_id != 0;
-            imagesCount = hasPhoto ? 1 : org.telegram.svipe.SvipeAvatarStore.getInstance().getForUser(dialog_id).size();
+            if (hasPhoto) {
+                imagesCount = 1;
+            } else {
+                // No photo now: the tab is there only for kept photos we can actually show.
+                org.telegram.svipe.SvipeAvatarStore store = org.telegram.svipe.SvipeAvatarStore.getInstance();
+                for (org.telegram.svipe.SvipeAvatarStore.Photo kept : store.getForUser(dialog_id)) {
+                    if (store.hasFile(dialog_id, kept.photoId)) {
+                        imagesCount++;
+                    }
+                }
+            }
         }
     }
 
