@@ -36,8 +36,6 @@ dependencies {
     implementation project(':TMessagesProj')
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
     implementation files('../TMessagesProj/libs/libgsaverification-client.aar')
-    // Google Play's in-app updates, for the Play build only (src/bundleAfat/.../PlayUpdates.java).
-    bundleAfatImplementation 'com.google.android.play:app-update:2.1.0'
 }
 
 android {
@@ -383,3 +381,9 @@ task checkMapsKeyNotCommitted {
     }
 }
 preBuild.dependsOn checkMapsKeyNotCommitted
+
+// After android { }: the bundleAfat flavor's configuration exists only once the flavors are declared.
+dependencies {
+    // Google Play's in-app updates, for the Play build only (src/bundleAfat/.../PlayUpdates.java).
+    bundleAfatImplementation 'com.google.android.play:app-update:2.1.0'
+}
