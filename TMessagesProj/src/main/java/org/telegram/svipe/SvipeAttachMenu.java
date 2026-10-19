@@ -64,7 +64,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * What Telegram keeps on its server for the bots it picked comes from Svipe's (app/api/attach.py):
  *   - the bot's own settings (GET /v1/attach/config): the chat types the button shows in
- *     (peer_types), the side menu, and whether the add dialog asks to let the bot write to the user;
+ *     (peer_types) and whether the add dialog asks to let the bot write to the user. Telegram's side
+ *     menu is not offered: a bot gets the attachment menu, not a place in the app's own menu;
  *   - the same list on every device of the account (/v1/attach/bots);
  *   - who the chat is with: receiver / chat, signed by Svipe and passed to the mini app as the launch
  *     param tgWebAppSvipeData ({@link #signContext}), where Telegram signs them into initData;
@@ -337,7 +338,7 @@ public class SvipeAttachMenu {
     // ---------------------------------------------------------------------------------------------
     // The bot's settings
 
-    /** The chat types the bot's button shows in, the side menu and write access, as the bot set them. */
+    /** The chat types the bot's button shows in and write access, as the bot set them. */
     private static void applyConfig(Bot bot, JSONObject config) {
         bot.peer_types.clear();
         JSONArray types = config != null ? config.optJSONArray("peer_types") : null;
@@ -350,7 +351,6 @@ public class SvipeAttachMenu {
                 addPeerType(bot, types.optString(i));
             }
         }
-        bot.show_in_side_menu = config != null && config.optBoolean("side_menu");
         bot.request_write_access = config != null && config.optBoolean("write_access");
     }
 

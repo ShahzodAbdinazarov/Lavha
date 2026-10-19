@@ -14087,18 +14087,6 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
                 }
             }
         }
-        // Svipe: the bots the user added to the attachment menu themselves that asked for the side menu
-        // too (SvipeAttachMenu); they open their mini app, and a long press takes them out.
-        for (org.telegram.svipe.SvipeAttachMenu.Bot svipeBot : org.telegram.svipe.SvipeAttachMenu.get(currentAccount).getBots()) {
-            if (svipeBot.show_in_side_menu) {
-                io.addBot(svipeBot, () -> {
-                    TLRPC.User botUser = getMessagesController().getUser(svipeBot.bot_id);
-                    if (botUser != null) {
-                        getMessagesController().openApp(DialogsActivity.this, botUser, null, getClassGuid(), null);
-                    }
-                }, () -> org.telegram.svipe.SvipeAttachMenu.get(currentAccount).remove(svipeBot.bot_id));
-            }
-        }
         if (getUserConfig().showCallsTab) {
             io.add(R.drawable.msg_settings_old, getString(R.string.Settings), () -> {
                 presentFragment(new SettingsActivity());
