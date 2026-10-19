@@ -6,6 +6,7 @@ import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLObject;
@@ -35,6 +36,7 @@ public class SvipeAuth {
 
     public static String getStoredToken(int account) {
         SharedPreferences p = MessagesController.getMainSettings(account);
+        forgetOtherUsersTokens(account);
         String t = p.getString(SvipeConfig.PREF_TOKEN, null);
         long exp = p.getLong(SvipeConfig.PREF_EXPIRES, 0);
         if (t != null && t.length() > 0 && System.currentTimeMillis() < exp - 60000L) {
@@ -169,6 +171,47 @@ public class SvipeAuth {
         });
     }
 
+    /**
+     * The tokens belong to the Telegram account they were issued for, but they are kept per account
+     * slot, and a slot can change hands: an account logged out (or thrown out by the server) and
+     * another one logged in kept riding the first one's tokens, so the backend took the new person
+     * for the old one (found 2026-10-19: attach menu signatures carried the previous account's id).
+     * The access token says whose it is (the JWT's sub); anyone else's tokens, the refresh token
+     * with them, are dropped, and the next ensureToken() signs the current person in.
+     */
+    private static void forgetOtherUsersTokens(int account) {
+        long me = UserConfig.getInstance(account).getClientUserId();
+        if (me == 0) {
+            return;
+        }
+        SharedPreferences p = MessagesController.getMainSettings(account);
+        long owner = tokenSubject(p.getString(SvipeConfig.PREF_TOKEN, null));
+        if (owner != 0 && owner != me) {
+            p.edit()
+                    .remove(SvipeConfig.PREF_TOKEN)
+                    .remove(SvipeConfig.PREF_EXPIRES)
+                    .remove(SvipeConfig.PREF_REFRESH)
+                    .commit();
+        }
+    }
+
+    /** The Telegram user id in an access token (its unverified sub), or 0. */
+    static long tokenSubject(String token) {
+        if (token == null) {
+            return 0;
+        }
+        String[] parts = token.split("\\.");
+        if (parts.length < 2) {
+            return 0;
+        }
+        try {
+            String json = new String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE | android.util.Base64.NO_PADDING | android.util.Base64.NO_WRAP), "UTF-8");
+            return Long.parseLong(new JSONObject(json).optString("sub", "0"));
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
     /** Drops the cached access token so the next ensureToken() re-authenticates (e.g. after 401). */
     public static void invalidateAccessToken(int account) {
         MessagesController.getMainSettings(account).edit()
@@ -188,6 +231,14 @@ public class SvipeAuth {
         try { body.put("refresh_token", refresh); } catch (Exception ignore) {}
         SvipeApi.post("/v1/auth/refresh", body, null, (res, code, err) -> {
             if (res != null && "ok".equals(res.optString("status"))) {
+                long me = UserConfig.getInstance(account).getClientUserId();
+                long owner = tokenSubject(res.optString("access_token"));
+                if (me != 0 && owner != 0 && owner != me) {
+                    // The refresh token was the previous account's: drop it, sign this one in.
+                    p.edit().remove(SvipeConfig.PREF_REFRESH).commit();
+                    cb.run(null);
+                    return;
+                }
                 storeTokens(account, res);
                 cb.run(res.optString("access_token"));
             } else {
