@@ -58,6 +58,28 @@ public class SvipeUpdateLayout extends IUpdateLayout {
         updateAppUpdateViews(UserConfig.selectedAccount, true);
     }
 
+    // The Play build's updates come through Google Play (SvipePlayUpdater), the direct-download
+    // builds' over HTTP (SvipeUpdater); the banner is the same for both.
+    private static boolean hasPending() {
+        return SvipePlayUpdater.isActive() ? SvipePlayUpdater.hasPending() : SvipeUpdater.hasPending();
+    }
+
+    private static boolean isReady() {
+        return SvipePlayUpdater.isActive() ? SvipePlayUpdater.isReady() : SvipeUpdater.isReadyForCurrentOffer();
+    }
+
+    private static boolean isDownloading() {
+        return SvipePlayUpdater.isActive() ? SvipePlayUpdater.isDownloading() : SvipeUpdater.isDownloading();
+    }
+
+    private static float progress() {
+        return SvipePlayUpdater.isActive() ? SvipePlayUpdater.getProgress() : SvipeUpdater.getProgress();
+    }
+
+    private static long pendingSize() {
+        return SvipePlayUpdater.isActive() ? SvipePlayUpdater.getPendingSize() : SvipeUpdater.getPendingSize();
+    }
+
     @Override
     public void updateFileProgress(Object[] args) {
         // Svipe downloads over HTTP (not FileLoader); progress is pushed via refresh() instead.
@@ -74,8 +96,12 @@ public class SvipeUpdateLayout extends IUpdateLayout {
         updateLayout.setBackground(Theme.getSelectorDrawable(0x40ffffff, false));
         sideMenuContainer.addView(updateLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 44, Gravity.LEFT | Gravity.BOTTOM));
         updateLayout.setOnClickListener(v -> {
-            if (!SvipeUpdater.hasPending()) return;
-            SvipeUpdater.onBannerClick(activity);
+            if (!hasPending()) return;
+            if (SvipePlayUpdater.isActive()) {
+                SvipePlayUpdater.onBannerClick(activity);
+            } else {
+                SvipeUpdater.onBannerClick(activity);
+            }
             updateAppUpdateViews(currentAccount, true);
         });
 
@@ -123,27 +149,27 @@ public class SvipeUpdateLayout extends IUpdateLayout {
         if (sideMenuContainer == null) {
             return;
         }
-        if (SvipeUpdater.hasPending()) {
+        if (hasPending()) {
             createUpdateUI(currentAccount);
 
             boolean showSize;
             // Identity, not mere existence: a leftover APK for a different (e.g. withdrawn) build must not
             // make the banner read "Update now" when tapping it would download the offered build instead.
-            if (SvipeUpdater.isReadyForCurrentOffer()) {
+            if (isReady()) {
                 updateLayoutIcon.setIcon(MediaActionDrawable.ICON_UPDATE, true, animated);
                 updateTextView.setText(LocaleController.getString(R.string.AppUpdateNow), animated);
                 showSize = false;
-            } else if (SvipeUpdater.isDownloading()) {
+            } else if (isDownloading()) {
                 updateLayoutIcon.setIcon(MediaActionDrawable.ICON_CANCEL, true, animated);
-                updateLayoutIcon.setProgress(SvipeUpdater.getProgress(), true);
-                updateTextView.setText(LocaleController.formatString(R.string.AppUpdateDownloading, (int) (SvipeUpdater.getProgress() * 100)), animated);
+                updateLayoutIcon.setProgress(progress(), true);
+                updateTextView.setText(LocaleController.formatString(R.string.AppUpdateDownloading, (int) (progress() * 100)), animated);
                 showSize = false;
             } else {
                 updateLayoutIcon.setIcon(MediaActionDrawable.ICON_DOWNLOAD, true, animated);
                 updateTextView.setText(LocaleController.getString(R.string.SvipeUpdateTitle), animated);
                 showSize = true;
             }
-            updateSizeTextView.setText(showSize ? AndroidUtilities.formatFileSize(SvipeUpdater.getPendingSize()) : null, animated);
+            updateSizeTextView.setText(showSize ? AndroidUtilities.formatFileSize(pendingSize()) : null, animated);
 
             if (updateLayout.getTag() != null) {
                 return;

@@ -6942,6 +6942,8 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         if (GroupCallActivity.groupCallInstance != null) {
             GroupCallActivity.groupCallInstance.onPause();
         }
+        // Svipe: a Play update downloaded but not tapped goes in now, while nobody is looking.
+        org.telegram.svipe.SvipePlayUpdater.onAppBackground();
     }
 
     @Override
@@ -7187,6 +7189,8 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         // Svipe direct-download builds (.beta/.web) self-update over HTTPS from svipe.uz (Telegram's
         // own MTProto update check above no-ops for our builds; this is the only updater that runs).
         org.telegram.svipe.SvipeUpdater.maybeCheck(this);
+        // The Play build: Google Play's in-app updates, with the same banner (SvipePlayUpdater).
+        org.telegram.svipe.SvipePlayUpdater.maybeCheck(this);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             ApplicationLoader.canDrawOverlays = Settings.canDrawOverlays(this);

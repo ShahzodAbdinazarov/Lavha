@@ -194,6 +194,11 @@ public class SvipeUpdater {
         });
     }
 
+    /** For SvipePlayUpdater: the Play build's state changed; the same broadcast and banner refresh. */
+    static void notifyExternalState() {
+        notifyState();
+    }
+
     /** Per-percent progress: refresh ONLY the banner — no global broadcast (avoids ~100 app-wide relayouts). */
     private static void refreshBannerOnly() {
         AndroidUtilities.runOnUIThread(SvipeUpdater::refreshBanner);
