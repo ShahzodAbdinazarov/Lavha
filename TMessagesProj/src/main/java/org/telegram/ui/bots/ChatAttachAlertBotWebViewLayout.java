@@ -103,14 +103,21 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
     private boolean needCloseConfirmation;
 
     private boolean destroyed;
+    // Svipe: the mini app was opened as from the bot's own chat (a menu button URL, SvipeAttachMenu).
+    private boolean svipeOwnChat;
+
     private Runnable pollRunnable = () -> {
         if (!destroyed) {
             TLRPC.TL_messages_prolongWebView prolongWebView = new TLRPC.TL_messages_prolongWebView();
             prolongWebView.bot = MessagesController.getInstance(currentAccount).getInputUser(botId);
-            prolongWebView.peer = MessagesController.getInstance(currentAccount).getInputPeer(peerId);
+            // Svipe: a menu button mini app opened as from the bot's own chat is prolonged there too;
+            // prolonging it in the chat the menu was opened in answers BOT_INVALID and closes it.
+            prolongWebView.peer = MessagesController.getInstance(currentAccount).getInputPeer(svipeOwnChat ? botId : peerId);
             prolongWebView.query_id = queryId;
             prolongWebView.silent = silent;
-            if (replyToMsgId != 0) {
+            if (svipeOwnChat) {
+                // Nothing in this chat is replied to or sent as.
+            } else if (replyToMsgId != 0) {
                 prolongWebView.reply_to = SendMessagesHelper.getInstance(currentAccount).createReplyInput(replyToMsgId);
                 if (monoforumTopicId != 0) {
                     prolongWebView.reply_to.monoforum_peer_id = MessagesController.getInstance(currentAccount).getInputPeer(monoforumTopicId);
@@ -123,7 +130,7 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
                 prolongWebView.flags |= 1;
             }
 
-            if (peerId < 0) {
+            if (peerId < 0 && !svipeOwnChat) {
                 TLRPC.ChatFull chatFull = MessagesController.getInstance(currentAccount).getChatFull(-peerId);
                 if (chatFull != null) {
                     TLRPC.Peer peer = chatFull.default_send_as;
@@ -514,20 +521,34 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
         webViewContainer.setBotUser(MessagesController.getInstance(currentAccount).getUser(botId));
         webViewContainer.loadFlickerAndSettingsItem(currentAccount, botId, settingsItem);
 
+        // Svipe: a message the bot prepared goes to this chat (web_app_send_to_chat), for any attach bot.
+        webViewContainer.setSvipeAttachPeer(peerId);
+
         // Svipe: Telegram opens only the bots it approved this way. Any other bot opens its Main Mini
         // App in this chat (initData carries chat_type and chat_instance); a bot with only a menu button
         // opens it as from its own chat, since the server refuses a menu button URL anywhere else
         // (BOT_WEBVIEW_DISABLED).
-        // Svipe: a message the bot prepared goes to this chat (web_app_send_to_chat), for any attach bot.
-        webViewContainer.setSvipeAttachPeer(peerId);
         final SvipeAttachMenu.Bot svipeBot = SvipeAttachMenu.get(currentAccount).find(botId);
         final TLRPC.User svipeBotUser = svipeBot != null ? MessagesController.getInstance(currentAccount).getUser(botId) : null;
+        if (svipeBot != null && svipeBotUser != null && !svipeBotUser.bot_has_main_app
+                && MessagesController.getInstance(currentAccount).getUserFull(botId) == null) {
+            // A bot added on another device may not have been seen here: its menu button URL is in
+            // the full user. Opening it as a Main Mini App it doesn't have fails silently.
+            MessagesController.getInstance(currentAccount).loadFullUser(svipeBotUser, 0, true, full -> AndroidUtilities.runOnUIThread(() -> {
+                if (full != null) {
+                    requestWebView(currentAccount, peerId, botId, silent, replyToMsgId, startCommand, monoforumTopicId);
+                }
+            }));
+            return;
+        }
         if (svipeBot != null && (svipeBotUser == null || svipeBotUser.bot_has_main_app || SvipeAttachMenu.get(currentAccount).urlFor(svipeBot) == null)) {
+            svipeOwnChat = false;
             requestSvipeMainWebView(startCommand);
             NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.webViewResultSent);
             return;
         }
 
+        svipeOwnChat = svipeBot != null;
         TLRPC.TL_messages_requestWebView req = new TLRPC.TL_messages_requestWebView();
         req.peer = MessagesController.getInstance(currentAccount).getInputPeer(peerId);
         if (svipeBot != null) {
