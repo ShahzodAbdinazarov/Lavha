@@ -28007,10 +28007,35 @@ public class ChatActivity extends BaseFragment implements
                                 }
                             }
                         }));
+                    } else if (user.bot) {
+                        // Svipe: t.me/<chat>?attach=<bot> and ?startattach&choose=… for a bot Telegram
+                        // didn't pick: the same consent as a startattach link, then the bot in this chat.
+                        getMessagesController().putUsers(resolvedPeer.users, false);
+                        openSvipeAttachBot(user);
                     }
                 }
             }
         }));
+    }
+
+    private void openSvipeAttachBot(TLRPC.User user) {
+        org.telegram.svipe.SvipeAttachMenu.get(currentAccount).request(user, false, (shown, added) -> {
+            if (!added) {
+                if (!shown) {
+                    BulletinFactory.of(this).createErrorBulletin(LocaleController.getString(R.string.BotCantAddToAttachMenu)).show();
+                }
+                return;
+            }
+            TLRPC.TL_attachMenuBot bot = org.telegram.svipe.SvipeAttachMenu.get(currentAccount).find(user.id);
+            if (bot == null) {
+                bot = org.telegram.svipe.SvipeAttachMenu.telegramBot(currentAccount, user.id);
+            }
+            if (bot == null || !MediaDataController.canShowAttachMenuBot(bot, getCurrentUser() != null ? getCurrentUser() : getCurrentChat())) {
+                BulletinFactory.of(this).createErrorBulletin(LocaleController.getString(getCurrentChat() != null && ChatObject.isChannelAndNotMegaGroup(getCurrentChat()) ? R.string.BotCantOpenAttachMenuChannel : getCurrentChat() != null ? R.string.BotCantOpenAttachMenuGroup : getCurrentUser() != null && getCurrentUser().bot ? R.string.BotCantOpenAttachMenuBot : R.string.BotCantOpenAttachMenuUser)).show();
+                return;
+            }
+            openAttachBotLayout(user.id, attachMenuBotStartCommand, shown);
+        });
     }
 
     public void openAttachBotLayout(long botId, String startCommand, boolean justAdded) {

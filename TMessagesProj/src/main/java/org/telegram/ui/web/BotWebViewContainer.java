@@ -219,6 +219,14 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
     private boolean lastExpanded;
     private boolean isRequestingPageOpen;
     private long lastClickMs;
+    // Svipe: the chat the attachment menu opened this mini app in, for web_app_send_to_chat.
+    private long svipeAttachPeerId;
+    private boolean svipeSentToChat;
+
+    public void setSvipeAttachPeer(long peerId) {
+        svipeAttachPeerId = peerId;
+        svipeSentToChat = false;
+    }
     private long lastPostStoryMs;
 
     private boolean isBackButtonVisible;
@@ -2745,6 +2753,43 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                     return;
                 }
                 notifyEvent(requestContext, "attach_menu_checked", obj("status", SvipeAttachMenu.get(currentAccount).status(botUser.id)));
+                break;
+            }
+            // Svipe: answerWebAppQuery for any bot opened from the attachment menu. The bot prepares the
+            // message (savePreparedInlineMessage) and the mini app hands it over; it goes to the chat the
+            // menu was opened in, once per launch, and the mini app closes, as after answerWebAppQuery.
+            case "web_app_send_to_chat": {
+                if (botUser == null || svipeAttachPeerId == 0) {
+                    notifyEvent(requestContext, "send_to_chat_failed", obj("error", "UNSUPPORTED"));
+                    return;
+                }
+                if (svipeSentToChat) {
+                    notifyEvent(requestContext, "send_to_chat_failed", obj("error", "ALREADY_SENT"));
+                    return;
+                }
+                String id = null;
+                try {
+                    id = new JSONObject(eventData).optString("id", null);
+                } catch (Exception e) {
+                    FileLog.e(e);
+                }
+                if (TextUtils.isEmpty(id)) {
+                    notifyEvent(requestContext, "send_to_chat_failed", obj("error", "MESSAGE_EXPIRED"));
+                    return;
+                }
+                svipeSentToChat = true;
+                notifyEvent(requestContext, "send_to_chat_accepted", null);
+                SvipeAttachMenu.sendPrepared(currentAccount, botUser.id, id, svipeAttachPeerId, error -> {
+                    if (error != null) {
+                        svipeSentToChat = false;
+                        notifyEvent(requestContext, "send_to_chat_failed", obj("error", error));
+                        return;
+                    }
+                    notifyEvent(requestContext, "sent_to_chat", null);
+                    if (delegate != null) {
+                        delegate.onCloseRequested(null);
+                    }
+                });
                 break;
             }
             case "web_app_set_emoji_status": {

@@ -4449,7 +4449,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                                 if (user.bot_attach_menu) {
                                     processAttachMenuBot(intentAccount, peerId, attachMenuBotChoose, user, setAsAttachBot, botAppStartParam);
                                 } else {
-                                    processSvipeAttachMenuBot(intentAccount, user, setAsAttachBot);
+                                    processSvipeAttachMenuBot(intentAccount, user, setAsAttachBot, attachMenuBotChoose);
                                 }
                             } else {
                                 BulletinFactory.of(mainFragmentsStack.get(mainFragmentsStack.size() - 1)).createErrorBulletin(LocaleController.getString(R.string.BotSetAttachLinkNotBot)).show();
@@ -5869,7 +5869,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                     }, attachMenuBot.request_write_access ? user : null, null);
                 }
             } else {
-                processSvipeAttachMenuBot(intentAccount, user, setAsAttachBot);
+                processSvipeAttachMenuBot(intentAccount, user, setAsAttachBot, attachMenuBotChoose);
             }
         }));
     }
@@ -5880,7 +5880,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
      * bot to its own list (SvipeAttachMenu), then opens it in the current chat the way Telegram does
      * for a bot it just added: the menu opens on the bot with the "shortcut added" bulletin.
      */
-    private void processSvipeAttachMenuBot(int intentAccount, TLRPC.User user, String startCommand) {
+    private void processSvipeAttachMenuBot(int intentAccount, TLRPC.User user, String startCommand, String choose) {
         SvipeAttachMenu.get(intentAccount).request(user, false, (shown, added) -> {
             BaseFragment lastFragment = mainFragmentsStack.isEmpty() ? null : mainFragmentsStack.get(mainFragmentsStack.size() - 1);
             if (AndroidUtilities.isTablet() && !(lastFragment instanceof ChatActivity) && !rightFragmentsStack.isEmpty()) {
@@ -5896,6 +5896,20 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                 return;
             }
             SvipeAttachMenu.Bot bot = SvipeAttachMenu.get(intentAccount).find(user.id);
+            // ?startattach&choose=users+bots+groups+channels: the user picks the chat first, as with
+            // Telegram's own attach bots; the kinds of chat are those the bot also allows.
+            if (bot != null && !TextUtils.isEmpty(choose)) {
+                ArrayList<String> targets = new ArrayList<>();
+                for (String target : choose.split(" ")) {
+                    if (MediaDataController.canShowAttachMenuBotForTarget(bot, target)) {
+                        targets.add(target);
+                    }
+                }
+                if (!targets.isEmpty()) {
+                    presentFragment(svipeAttachChooser(intentAccount, user, startCommand, targets));
+                    return;
+                }
+            }
             if (lastFragment instanceof ChatActivity) {
                 ChatActivity chatActivity = (ChatActivity) lastFragment;
                 if (bot != null && MediaDataController.canShowAttachMenuBot(bot, chatActivity.getCurrentUser() != null ? chatActivity.getCurrentUser() : chatActivity.getCurrentChat())) {
@@ -5905,6 +5919,40 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             }
             BulletinFactory.of(lastFragment).createSimpleBulletin(R.raw.contact_check, AndroidUtilities.replaceTags(LocaleController.formatString(shown ? R.string.BotAttachMenuShortcatAddedAttach : R.string.BotAlreadyAddedToAttachMenu, UserObject.getFirstName(user)))).show();
         });
+    }
+
+    /** The chat picker of ?startattach&choose=…, opening the bot in the chat picked. */
+    private DialogsActivity svipeAttachChooser(int intentAccount, TLRPC.User user, String startCommand, List<String> targets) {
+        Bundle args = new Bundle();
+        args.putInt("dialogsType", DialogsActivity.DIALOGS_TYPE_START_ATTACH_BOT);
+        args.putBoolean("onlySelect", true);
+        args.putBoolean("allowGroups", targets.contains("groups"));
+        args.putBoolean("allowMegagroups", targets.contains("groups"));
+        args.putBoolean("allowLegacyGroups", targets.contains("groups"));
+        args.putBoolean("allowUsers", targets.contains("users"));
+        args.putBoolean("allowChannels", targets.contains("channels"));
+        args.putBoolean("allowBots", targets.contains("bots"));
+        DialogsActivity dialogsActivity = new DialogsActivity(args);
+        dialogsActivity.setDelegate((fragment, dids, message1, param, notify, scheduleDate, scheduleRepeatPeriod, topicsFragment) -> {
+            long did = dids.get(0).dialogId;
+            Bundle args1 = new Bundle();
+            args1.putBoolean("scrollToTopOnResume", true);
+            if (DialogObject.isUserDialog(did)) {
+                args1.putLong("user_id", did);
+            } else {
+                args1.putLong("chat_id", -did);
+            }
+            args1.putString("attach_bot", UserObject.getPublicUsername(user));
+            if (startCommand != null) {
+                args1.putString("attach_bot_start_command", startCommand);
+            }
+            if (MessagesController.getInstance(intentAccount).checkCanOpenChat(args1, fragment)) {
+                NotificationCenter.getInstance(intentAccount).postNotificationName(NotificationCenter.closeChats);
+                getActionBarLayout().presentFragment(new ChatActivity(args1), true, false, true, false);
+            }
+            return true;
+        });
+        return dialogsActivity;
     }
 
     private void openForumFromLink(long dialogId, Integer messageId, String quote, Integer taskId, byte[] pollOptionId, Runnable onOpened, int fromMessageId, int quoteOffset) {

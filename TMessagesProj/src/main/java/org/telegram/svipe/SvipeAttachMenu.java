@@ -7,25 +7,35 @@ import android.text.TextUtils;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
+import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.tgnet.tl.TL_bots;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.CheckBoxCell;
 import org.telegram.ui.Components.AttachBotIntroTopView;
 import org.telegram.ui.LaunchActivity;
 
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Any bot with a mini app in the attachment menu (📎), with the user's consent: Svipe's version of
@@ -38,26 +48,40 @@ import java.util.ArrayList;
  * and the same ways out (long press on the button, or ⋮ → Delete bot in the open mini app).
  *
  * Ways in:
- *   - t.me/<bot>?startattach[=param] for a bot Telegram didn't approve: it used to end in "This bot
- *     can't be added to the attachment menu"; in Svipe it asks the user instead.
+ *   - t.me/<bot>?startattach[=param], t.me/<chat>?attach=<bot> and ?startattach&choose=… for a bot
+ *     Telegram didn't approve: they used to end in "This bot can't be added to the attachment menu";
+ *     in Svipe they ask the user instead.
  *   - The mini app itself (Svipe extension, sent like any Telegram.WebView event):
  *       postEvent('web_app_add_to_attach_menu') → event 'attach_menu_added', or 'attach_menu_failed' {error}
  *       postEvent('web_app_check_attach_menu')  → event 'attach_menu_checked' {status: added|missed|declined}
  *     A mini app gets the dialog once: after a decline (or a removal) it is answered "declined" without
- *     asking again, so a bot can't nag. A startattach link, which the user taps themselves, always asks.
+ *     asking again, so a bot can't nag. A link, which the user taps themselves, always asks.
  *
  * Opening: a bot with a Main Mini App opens it with messages.requestMainWebView in the current chat
  * (initData carries chat_type and chat_instance). A bot with only a menu button mini app opens it as
  * from its own chat: the server refuses a menu button URL in any other chat (BOT_WEBVIEW_DISABLED,
  * measured on 2026-10-15 with @BotFather and @hamster_kombat_bot).
+ *
+ * What Telegram keeps on its server for the bots it picked comes from Svipe's (app/api/attach.py):
+ *   - the bot's own settings (GET /v1/attach/config): the chat types the button shows in
+ *     (peer_types), the side menu, and whether the add dialog asks to let the bot write to the user;
+ *   - the same list on every device of the account (/v1/attach/bots);
+ *   - who the chat is with: receiver / chat, signed by Svipe and passed to the mini app as the launch
+ *     param tgWebAppSvipeData ({@link #signContext}), where Telegram signs them into initData;
+ *   - answerWebAppQuery: the mini app hands over a message its bot prepared, and the app sends it to
+ *     the chat the menu was opened in ({@link #sendPrepared}).
  */
 public class SvipeAttachMenu {
 
     private static final String PREF = "svipe_attachmenu_";
 
+    /** A bot that gave Svipe no settings shows in every chat but its own. */
+    private static final String[] DEFAULT_PEER_TYPES = {"bots", "users", "groups", "channels"};
+
     /** Marks the bots of this list among Telegram's own in the attachment menu. */
     public static class Bot extends TLRPC.TL_attachMenuBot {
         public String url;
+        public String username;
     }
 
     private static final SvipeAttachMenu[] instances = new SvipeAttachMenu[UserConfig.MAX_ACCOUNT_COUNT];
@@ -65,7 +89,9 @@ public class SvipeAttachMenu {
     private final int currentAccount;
     private final ArrayList<Bot> bots = new ArrayList<>();
     private final ArrayList<Long> declined = new ArrayList<>();
+    private final HashMap<Long, JSONObject> configs = new HashMap<>();
     private boolean usersLoaded;
+    private boolean refreshed;
 
     public static SvipeAttachMenu get(int currentAccount) {
         SvipeAttachMenu instance = instances[currentAccount];
@@ -84,9 +110,19 @@ public class SvipeAttachMenu {
         return bot instanceof Bot;
     }
 
-    /** The bots to show, in the order they were added. Their users are loaded from the cache once. */
+    /**
+     * The bots to show, in the order they were added. Their users are loaded from the cache once; the
+     * bots' settings and the other devices' answers are fetched once per run.
+     */
     public ArrayList<Bot> getBots() {
         loadUsers();
+        if (!refreshed) {
+            refreshed = true;
+            AndroidUtilities.runOnUIThread(() -> {
+                refreshConfig(null, null);
+                syncFromServer();
+            });
+        }
         return bots;
     }
 
@@ -111,17 +147,17 @@ public class SvipeAttachMenu {
         return declined.contains(botId) ? "declined" : "missed";
     }
 
-    /** Whether Telegram itself already has this bot in the attachment menu. */
-    private static boolean inTelegramMenu(int currentAccount, long botId) {
+    /** Telegram's own entry for this bot, if Telegram picked it and the user has it in the menu. */
+    public static TLRPC.TL_attachMenuBot telegramBot(int currentAccount, long botId) {
         TLRPC.TL_attachMenuBots telegram = org.telegram.messenger.MediaDataController.getInstance(currentAccount).getAttachMenuBots();
         if (telegram != null && telegram.bots != null) {
             for (TLRPC.TL_attachMenuBot bot : telegram.bots) {
                 if (bot.bot_id == botId && !bot.inactive && bot.show_in_attach_menu) {
-                    return true;
+                    return bot;
                 }
             }
         }
-        return false;
+        return null;
     }
 
     /**
@@ -163,7 +199,7 @@ public class SvipeAttachMenu {
             whenDone.run(false, false);
             return;
         }
-        if (contains(bot.id) || inTelegramMenu(currentAccount, bot.id)) {
+        if (contains(bot.id) || telegramBot(currentAccount, bot.id) != null) {
             whenDone.run(false, true);
             return;
         }
@@ -181,63 +217,100 @@ public class SvipeAttachMenu {
                 whenDone.run(false, false);
                 return;
             }
-            AttachBotIntroTopView introTopView = new AttachBotIntroTopView(activity);
-            introTopView.setColor(Theme.getColor(Theme.key_chat_attachIcon));
-            introTopView.setBackgroundColor(Theme.getColor(Theme.key_dialogTopBackground));
-            introTopView.setUser(currentAccount, bot);
-
-            final boolean[] answered = new boolean[1];
-            new AlertDialog.Builder(activity)
-                .setTopView(introTopView)
-                .setMessage(AndroidUtilities.replaceTags(LocaleController.formatString(R.string.BotRequestAttachPermission, UserObject.getUserName(bot))))
-                .setPositiveButton(LocaleController.getString(R.string.BotAddToMenu), (di, w) -> {
-                    if (answered[0]) return;
-                    answered[0] = true;
-                    add(bot);
-                    whenDone.run(true, true);
-                })
-                .setNegativeButton(LocaleController.getString(R.string.Cancel), (di, w) -> {
-                    if (answered[0]) return;
-                    answered[0] = true;
-                    decline(bot.id);
-                    whenDone.run(true, false);
-                })
-                .setOnDismissListener(di -> {
-                    if (answered[0]) return;
-                    answered[0] = true;
-                    decline(bot.id);
-                    whenDone.run(true, false);
-                })
-                .show();
+            // The bot's settings decide whether the dialog asks to let it write to the user; a slow
+            // answer holds the dialog up for two seconds at most.
+            final boolean[] shown = new boolean[1];
+            final Runnable show = () -> {
+                if (shown[0]) return;
+                shown[0] = true;
+                showDialog(activity, bot, whenDone);
+            };
+            ArrayList<Long> ids = new ArrayList<>();
+            ids.add(bot.id);
+            refreshConfig(ids, show);
+            AndroidUtilities.runOnUIThread(show, 2000);
         });
     }
 
-    private void add(TLRPC.User user) {
+    private void showDialog(Activity activity, TLRPC.User bot, Utilities.Callback2<Boolean, Boolean> whenDone) {
+        AttachBotIntroTopView introTopView = new AttachBotIntroTopView(activity);
+        introTopView.setColor(Theme.getColor(Theme.key_chat_attachIcon));
+        introTopView.setBackgroundColor(Theme.getColor(Theme.key_dialogTopBackground));
+        introTopView.setUser(currentAccount, bot);
+
+        final boolean[] answered = new boolean[1];
+        final AtomicBoolean allowWrite = new AtomicBoolean(false);
+        AlertDialog.Builder builder = new AlertDialog.Builder(activity)
+            .setTopView(introTopView)
+            .setMessage(AndroidUtilities.replaceTags(LocaleController.formatString(R.string.BotRequestAttachPermission, UserObject.getUserName(bot))))
+            .setPositiveButton(LocaleController.getString(R.string.BotAddToMenu), (di, w) -> {
+                if (answered[0]) return;
+                answered[0] = true;
+                add(bot, allowWrite.get());
+                whenDone.run(true, true);
+            })
+            .setNegativeButton(LocaleController.getString(R.string.Cancel), (di, w) -> {
+                if (answered[0]) return;
+                answered[0] = true;
+                decline(bot.id, bot);
+                whenDone.run(true, false);
+            })
+            .setOnDismissListener(di -> {
+                if (answered[0]) return;
+                answered[0] = true;
+                decline(bot.id, bot);
+                whenDone.run(true, false);
+            });
+        // Telegram's request_write_access: the same checkbox its own dialog shows, on by default.
+        JSONObject config = configs.get(bot.id);
+        if (config != null && config.optBoolean("write_access")) {
+            allowWrite.set(true);
+            CheckBoxCell cell = new CheckBoxCell(activity, 5, null);
+            cell.setBackground(Theme.getSelectorDrawable(false));
+            cell.setMultiline(true);
+            cell.setText(AndroidUtilities.replaceTags(LocaleController.formatString(R.string.OpenUrlOption2, UserObject.getUserName(bot))), "", true, false);
+            cell.setPadding(LocaleController.isRTL ? AndroidUtilities.dp(16) : AndroidUtilities.dp(8), 0, LocaleController.isRTL ? AndroidUtilities.dp(8) : AndroidUtilities.dp(16), 0);
+            cell.setOnClickListener(v -> {
+                boolean allow = !cell.isChecked();
+                cell.setChecked(allow, true);
+                allowWrite.set(allow);
+            });
+            builder.setCustomViewOffset(6);
+            builder.setView(cell);
+        }
+        builder.show();
+    }
+
+    private void add(TLRPC.User user, boolean allowWrite) {
         Bot bot = new Bot();
         bot.bot_id = user.id;
         bot.short_name = UserObject.getFirstName(user);
+        bot.username = UserObject.getPublicUsername(user);
         bot.show_in_attach_menu = true;
         bot.url = menuUrl(user.id);
-        everyChat(bot);
+        applyConfig(bot, configs.get(user.id));
         bots.add(bot);
         declined.remove(user.id);
         save();
         changed();
+        pushState(user.id, "added", bot.username);
+        if (allowWrite) {
+            TL_bots.allowSendMessage req = new TL_bots.allowSendMessage();
+            req.bot = MessagesController.getInstance(currentAccount).getInputUser(user);
+            ConnectionsManager.getInstance(currentAccount).sendRequest(req, (res, err) -> {
+                if (res instanceof TLRPC.Updates) {
+                    MessagesController.getInstance(currentAccount).processUpdates((TLRPC.Updates) res, false);
+                }
+            });
+        }
     }
 
-    /** Every chat but the bot's own, where its mini app opens from the menu button anyway. */
-    private static void everyChat(Bot bot) {
-        bot.peer_types.add(new TLRPC.TL_attachMenuPeerTypePM());
-        bot.peer_types.add(new TLRPC.TL_attachMenuPeerTypeBotPM());
-        bot.peer_types.add(new TLRPC.TL_attachMenuPeerTypeChat());
-        bot.peer_types.add(new TLRPC.TL_attachMenuPeerTypeBroadcast());
-    }
-
-    private void decline(long botId) {
+    private void decline(long botId, TLRPC.User user) {
         if (!declined.contains(botId)) {
             declined.add(botId);
         }
         save();
+        pushState(botId, "declined", user != null ? UserObject.getPublicUsername(user) : null);
     }
 
     /** Long press in the menu, or ⋮ → Delete bot. A mini app is not asked again after this. */
@@ -247,7 +320,7 @@ public class SvipeAttachMenu {
             return;
         }
         bots.remove(bot);
-        decline(botId);
+        decline(botId, MessagesController.getInstance(currentAccount).getUser(botId));
         changed();
     }
 
@@ -260,6 +333,340 @@ public class SvipeAttachMenu {
         }
         return bot.url;
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // The bot's settings
+
+    /** The chat types the bot's button shows in, the side menu and write access, as the bot set them. */
+    private static void applyConfig(Bot bot, JSONObject config) {
+        bot.peer_types.clear();
+        JSONArray types = config != null ? config.optJSONArray("peer_types") : null;
+        if (types == null || types.length() == 0) {
+            for (String type : DEFAULT_PEER_TYPES) {
+                addPeerType(bot, type);
+            }
+        } else {
+            for (int i = 0; i < types.length(); i++) {
+                addPeerType(bot, types.optString(i));
+            }
+        }
+        bot.show_in_side_menu = config != null && config.optBoolean("side_menu");
+        bot.request_write_access = config != null && config.optBoolean("write_access");
+    }
+
+    private static void addPeerType(Bot bot, String type) {
+        switch (type) {
+            case "same_bot": bot.peer_types.add(new TLRPC.TL_attachMenuPeerTypeSameBotPM()); break;
+            case "bots": bot.peer_types.add(new TLRPC.TL_attachMenuPeerTypeBotPM()); break;
+            case "users": bot.peer_types.add(new TLRPC.TL_attachMenuPeerTypePM()); break;
+            case "groups": bot.peer_types.add(new TLRPC.TL_attachMenuPeerTypeChat()); break;
+            case "channels": bot.peer_types.add(new TLRPC.TL_attachMenuPeerTypeBroadcast()); break;
+        }
+    }
+
+    /**
+     * The settings of these bots (of the whole list when null), then {@code whenDone} on the UI thread,
+     * whatever the answer. The endpoint is public: no token needed.
+     */
+    private void refreshConfig(ArrayList<Long> ids, Runnable whenDone) {
+        if (ids == null) {
+            ids = new ArrayList<>();
+            for (Bot bot : bots) {
+                ids.add(bot.bot_id);
+            }
+        }
+        if (ids.isEmpty()) {
+            if (whenDone != null) whenDone.run();
+            return;
+        }
+        StringBuilder query = new StringBuilder();
+        for (Long id : ids) {
+            if (query.length() > 0) query.append(',');
+            query.append(id);
+        }
+        SvipeApi.get("/v1/attach/config?ids=" + query, null, (res, code, err) -> AndroidUtilities.runOnUIThread(() -> {
+            JSONObject map = res != null && code == 200 ? res.optJSONObject("bots") : null;
+            if (map != null) {
+                boolean changed = false;
+                Iterator<String> keys = map.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    long id;
+                    try {
+                        id = Long.parseLong(key);
+                    } catch (NumberFormatException e) {
+                        continue;
+                    }
+                    JSONObject config = map.optJSONObject(key);
+                    configs.put(id, config);
+                    Bot bot = find(id);
+                    if (bot != null) {
+                        applyConfig(bot, config);
+                        changed = true;
+                    }
+                }
+                if (changed) {
+                    save();
+                    changed();
+                }
+            }
+            if (whenDone != null) whenDone.run();
+        }));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The same menu on every device
+
+    /** The answer, for the account's other devices. */
+    private void pushState(long botId, String state, String username) {
+        SvipeAuth.ensureToken(currentAccount, token -> {
+            if (token == null) return;
+            try {
+                JSONObject body = new JSONObject().put("state", state);
+                if (!TextUtils.isEmpty(username)) {
+                    body.put("bot_username", username);
+                }
+                SvipeApi.put("/v1/attach/bots/" + botId, body, token, (res, code, err) -> {
+                    if (code < 200 || code >= 300) {
+                        FileLog.e("svipe attach menu: push " + botId + " " + code + " " + err);
+                    }
+                });
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+        });
+    }
+
+    /**
+     * The answers given on the account's other devices. A bot added elsewhere is added here without a
+     * new dialog (the person already agreed there); one removed elsewhere goes. Bots only this device
+     * knows are sent up.
+     */
+    private void syncFromServer() {
+        SvipeAuth.ensureToken(currentAccount, token -> {
+            if (token == null) return;
+            SvipeApi.get("/v1/attach/bots", token, (res, code, err) -> AndroidUtilities.runOnUIThread(() -> {
+                JSONArray list = res != null && code == 200 ? res.optJSONArray("bots") : null;
+                if (list == null) return;
+                ArrayList<Long> known = new ArrayList<>();
+                ArrayList<Long> fresh = new ArrayList<>();
+                boolean changed = false;
+                for (int i = 0; i < list.length(); i++) {
+                    JSONObject item = list.optJSONObject(i);
+                    if (item == null) continue;
+                    long id = item.optLong("bot_id");
+                    if (id <= 0) continue;
+                    known.add(id);
+                    Bot existing = find(id);
+                    if ("added".equals(item.optString("state"))) {
+                        if (existing == null) {
+                            Bot bot = new Bot();
+                            bot.bot_id = id;
+                            bot.username = item.isNull("bot_username") ? null : item.optString("bot_username", null);
+                            TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(id);
+                            bot.short_name = user != null ? UserObject.getFirstName(user) : (bot.username != null ? bot.username : "");
+                            bot.show_in_attach_menu = true;
+                            applyConfig(bot, configs.get(id));
+                            bots.add(bot);
+                            declined.remove(id);
+                            fresh.add(id);
+                            changed = true;
+                        }
+                    } else {
+                        if (existing != null) {
+                            bots.remove(existing);
+                            changed = true;
+                        }
+                        if (!declined.contains(id)) {
+                            declined.add(id);
+                            changed = true;
+                        }
+                    }
+                }
+                for (Bot bot : bots) {
+                    if (!known.contains(bot.bot_id)) {
+                        pushState(bot.bot_id, "added", bot.username);
+                    }
+                }
+                if (changed) {
+                    save();
+                    usersLoaded = false;
+                    loadUsers();
+                    resolveMissing(fresh);
+                    refreshConfig(fresh, null);
+                    changed();
+                }
+            }));
+        });
+    }
+
+    /** A bot added on another device may be unknown here: find it by its username, once. */
+    private void resolveMissing(ArrayList<Long> ids) {
+        for (Long id : ids) {
+            final Bot bot = find(id);
+            if (bot == null || TextUtils.isEmpty(bot.username) || MessagesController.getInstance(currentAccount).getUser(id) != null) {
+                continue;
+            }
+            MessagesController.getInstance(currentAccount).getUserNameResolver().resolve(bot.username, peerId -> {
+                if (peerId == null || peerId != bot.bot_id) {
+                    return;
+                }
+                TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(peerId);
+                if (user != null) {
+                    bot.short_name = UserObject.getFirstName(user);
+                    save();
+                    changed();
+                }
+            });
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Who the chat is with, and answerWebAppQuery
+
+    /**
+     * Receiver / chat for the mini app of a bot opened from this menu in {@code peerId}, signed by
+     * Svipe. {@code whenDone} gets the URL to load, with the launch param tgWebAppSvipeData added, or
+     * the URL as it was if the signature doesn't come in time. Always called once, on the UI thread.
+     */
+    public void signContext(long botId, long peerId, String url, Utilities.Callback<String> whenDone) {
+        final boolean[] done = new boolean[1];
+        final Utilities.Callback<String> finish = result -> {
+            if (done[0]) return;
+            done[0] = true;
+            whenDone.run(result);
+        };
+        if (url == null || url.indexOf('#') < 0) {
+            finish.run(url);
+            return;
+        }
+        AndroidUtilities.runOnUIThread(() -> finish.run(url), 2500);
+        final JSONObject body;
+        try {
+            body = contextBody(botId, peerId, url);
+        } catch (Exception e) {
+            FileLog.e(e);
+            finish.run(url);
+            return;
+        }
+        SvipeAuth.ensureToken(currentAccount, token -> {
+            if (token == null) {
+                AndroidUtilities.runOnUIThread(() -> finish.run(url));
+                return;
+            }
+            SvipeApi.post("/v1/attach/context", body, token, (res, code, err) -> AndroidUtilities.runOnUIThread(() -> {
+                String signed = res != null && code == 200 ? res.optString("svipe_init_data", "") : "";
+                if (TextUtils.isEmpty(signed)) {
+                    finish.run(url);
+                    return;
+                }
+                try {
+                    finish.run(url + "&tgWebAppSvipeData=" + URLEncoder.encode(signed, "UTF-8"));
+                } catch (Exception e) {
+                    finish.run(url);
+                }
+            }));
+        });
+    }
+
+    private JSONObject contextBody(long botId, long peerId, String url) throws Exception {
+        JSONObject body = new JSONObject().put("bot_id", botId);
+        // chat_type and chat_instance as Telegram signed them into this launch's initData: the bot
+        // matches them against ours, so our signature can't be carried to another chat.
+        String initData = SvipeInitData.extract(url);
+        if (initData != null) {
+            for (String pair : initData.split("&")) {
+                int eq = pair.indexOf('=');
+                if (eq <= 0) continue;
+                String key = pair.substring(0, eq);
+                if ("chat_type".equals(key) || "chat_instance".equals(key)) {
+                    body.put(key, URLDecoder.decode(pair.substring(eq + 1), "UTF-8"));
+                }
+            }
+        }
+        if (peerId > 0) {
+            TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(peerId);
+            if (user != null) {
+                JSONObject receiver = new JSONObject().put("id", user.id).put("first_name", user.first_name != null ? user.first_name : "");
+                if (!TextUtils.isEmpty(user.last_name)) receiver.put("last_name", user.last_name);
+                String username = UserObject.getPublicUsername(user);
+                if (!TextUtils.isEmpty(username)) receiver.put("username", username);
+                if (user.bot) receiver.put("is_bot", true);
+                body.put("receiver", receiver);
+            }
+        } else if (peerId < 0) {
+            TLRPC.Chat chat = MessagesController.getInstance(currentAccount).getChat(-peerId);
+            if (chat != null) {
+                // Ids as the Bot API writes them: -100… for channels and supergroups, -… for groups.
+                boolean channel = ChatObject.isChannel(chat);
+                JSONObject c = new JSONObject()
+                    .put("id", channel ? -(1000000000000L + chat.id) : -chat.id)
+                    .put("type", ChatObject.isChannelAndNotMegaGroup(chat) ? "channel" : channel ? "supergroup" : "group")
+                    .put("title", chat.title != null ? chat.title : "");
+                String username = ChatObject.getPublicUsername(chat);
+                if (!TextUtils.isEmpty(username)) c.put("username", username);
+                body.put("chat", c);
+            }
+        }
+        return body;
+    }
+
+    /**
+     * Sends a message the bot prepared (Bot API savePreparedInlineMessage) to {@code peerId}, as
+     * answerWebAppQuery sends one for Telegram's own attach bots. {@code whenDone} gets null when sent,
+     * or the error a mini app is told: MESSAGE_EXPIRED, or MESSAGE_SEND_FAILED when the bot didn't
+     * allow this kind of chat for the message.
+     */
+    public static void sendPrepared(int currentAccount, long botId, String id, long peerId, Utilities.Callback<String> whenDone) {
+        TLRPC.TL_messages_getPreparedInlineMessage req = new TLRPC.TL_messages_getPreparedInlineMessage();
+        req.bot = MessagesController.getInstance(currentAccount).getInputUser(botId);
+        req.id = id;
+        ConnectionsManager.getInstance(currentAccount).sendRequest(req, (res, err) -> AndroidUtilities.runOnUIThread(() -> {
+            if (!(res instanceof TLRPC.TL_messages_preparedInlineMessage)) {
+                whenDone.run("MESSAGE_EXPIRED");
+                return;
+            }
+            TLRPC.TL_messages_preparedInlineMessage message = (TLRPC.TL_messages_preparedInlineMessage) res;
+            MessagesController.getInstance(currentAccount).putUsers(message.users, false);
+            if (!allows(currentAccount, message.peer_types, botId, peerId)) {
+                whenDone.run("MESSAGE_SEND_FAILED");
+                return;
+            }
+            HashMap<String, String> params = new HashMap<>();
+            params.put("query_id", "" + message.query_id);
+            params.put("id", "" + message.result.id);
+            params.put("bot", "" + botId);
+            SendMessagesHelper.prepareSendingBotContextResult(LaunchActivity.getLastFragment(), AccountInstance.getInstance(currentAccount), message.result, params, peerId, null, null, null, null, true, 0, 0, null, 0);
+            whenDone.run(null);
+        }));
+    }
+
+    /** Whether the prepared message may go to this chat: the bot chose the kinds of chat it may. */
+    private static boolean allows(int currentAccount, ArrayList<TLRPC.InlineQueryPeerType> types, long botId, long peerId) {
+        if (types == null || types.isEmpty()) {
+            return true;
+        }
+        boolean user = false, bot = false, sameBot = false, group = false, megagroup = false, channel = false;
+        for (TLRPC.InlineQueryPeerType type : types) {
+            if (type instanceof TLRPC.TL_inlineQueryPeerTypePM) user = true;
+            else if (type instanceof TLRPC.TL_inlineQueryPeerTypeBotPM) bot = true;
+            else if (type instanceof TLRPC.TL_inlineQueryPeerTypeSameBotPM) sameBot = true;
+            else if (type instanceof TLRPC.TL_inlineQueryPeerTypeChat) group = true;
+            else if (type instanceof TLRPC.TL_inlineQueryPeerTypeMegagroup) megagroup = true;
+            else if (type instanceof TLRPC.TL_inlineQueryPeerTypeBroadcast) channel = true;
+        }
+        if (peerId > 0) {
+            if (peerId == botId) return sameBot;
+            TLRPC.User u = MessagesController.getInstance(currentAccount).getUser(peerId);
+            return u != null && u.bot ? bot : user;
+        }
+        TLRPC.Chat chat = MessagesController.getInstance(currentAccount).getChat(-peerId);
+        if (chat == null) return false;
+        if (ChatObject.isChannelAndNotMegaGroup(chat)) return channel;
+        return ChatObject.isChannel(chat) ? megagroup : group;
+    }
+
+    // ---------------------------------------------------------------------------------------------
 
     private void changed() {
         NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.attachMenuBotsDidLoad);
@@ -307,8 +714,13 @@ public class SvipeAttachMenu {
                 bot.bot_id = item.getLong("id");
                 bot.short_name = item.optString("name", "");
                 bot.url = item.has("url") ? item.getString("url") : null;
+                bot.username = item.has("username") ? item.getString("username") : null;
                 bot.show_in_attach_menu = true;
-                everyChat(bot);
+                JSONObject config = item.optJSONObject("config");
+                if (config != null) {
+                    configs.put(bot.bot_id, config);
+                }
+                applyConfig(bot, config);
                 bots.add(bot);
             }
             JSONArray no = new JSONArray(prefs().getString("declined", "[]"));
@@ -329,6 +741,13 @@ public class SvipeAttachMenu {
                 item.put("name", bot.short_name);
                 if (bot.url != null) {
                     item.put("url", bot.url);
+                }
+                if (bot.username != null) {
+                    item.put("username", bot.username);
+                }
+                JSONObject config = configs.get(bot.bot_id);
+                if (config != null) {
+                    item.put("config", config);
                 }
                 list.put(item);
             }

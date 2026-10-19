@@ -518,6 +518,8 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
         // App in this chat (initData carries chat_type and chat_instance); a bot with only a menu button
         // opens it as from its own chat, since the server refuses a menu button URL anywhere else
         // (BOT_WEBVIEW_DISABLED).
+        // Svipe: a message the bot prepared goes to this chat (web_app_send_to_chat), for any attach bot.
+        webViewContainer.setSvipeAttachPeer(peerId);
         final SvipeAttachMenu.Bot svipeBot = SvipeAttachMenu.get(currentAccount).find(botId);
         final TLRPC.User svipeBotUser = svipeBot != null ? MessagesController.getInstance(currentAccount).getUser(botId) : null;
         if (svipeBot != null && (svipeBotUser == null || svipeBotUser.bot_has_main_app || SvipeAttachMenu.get(currentAccount).urlFor(svipeBot) == null)) {
@@ -579,7 +581,12 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
             if (response instanceof TLRPC.TL_webViewResultUrl) {
                 TLRPC.TL_webViewResultUrl resultUrl = (TLRPC.TL_webViewResultUrl) response;
                 queryId = resultUrl.query_id;
-                webViewContainer.loadUrl(currentAccount, resultUrl.url, resultUrl.same_origin);
+                if (svipeBot != null) {
+                    // Svipe: who the chat is with, signed by Svipe (Telegram signs it only for its own bots).
+                    SvipeAttachMenu.get(currentAccount).signContext(botId, peerId, resultUrl.url, url -> webViewContainer.loadUrl(currentAccount, url, resultUrl.same_origin));
+                } else {
+                    webViewContainer.loadUrl(currentAccount, resultUrl.url, resultUrl.same_origin);
+                }
 
                 AndroidUtilities.runOnUIThread(pollRunnable);
             } else if (error != null && svipeBot != null) {
@@ -743,7 +750,7 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
             if (response instanceof TLRPC.TL_webViewResultUrl) {
                 TLRPC.TL_webViewResultUrl resultUrl = (TLRPC.TL_webViewResultUrl) response;
                 queryId = resultUrl.query_id;
-                webViewContainer.loadUrl(currentAccount, resultUrl.url, resultUrl.same_origin);
+                SvipeAttachMenu.get(currentAccount).signContext(botId, peerId, resultUrl.url, url -> webViewContainer.loadUrl(currentAccount, url, resultUrl.same_origin));
                 if (queryId != 0) {
                     AndroidUtilities.runOnUIThread(pollRunnable);
                 }
