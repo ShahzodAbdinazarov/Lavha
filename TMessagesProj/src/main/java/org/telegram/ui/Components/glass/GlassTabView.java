@@ -652,6 +652,27 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
         invalidate();
     }
 
+    // Svipe: a bot of Svipe's own attachment menu with an icon of its own (SvipeAttachMenu): drawn
+    // and tinted like the icons Telegram gives its attach bots.
+    public void setAttachBotIcon(TLRPC.User user, android.graphics.drawable.Drawable icon) {
+        if (user == null || icon == null) {
+            return;
+        }
+        tabAnimation = null;
+        tabAnimationBot = null;
+        lastIconAnimationRaw = 0;
+        lastBotIconId = 0;
+
+        textView.setText(ContactsController.formatName(user.first_name, user.last_name));
+        backupImageView.setImageDrawable(icon);
+        backupImageView.setRoundRadius(0);
+        backupImageView.setSize(dp(24), dp(24));
+        backupImageView.setLayoutParams(LayoutHelper.createFrame(24, 24, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 4, 0, 0));
+        needUpdateBackupViewColor = true;
+        updateColors();
+        invalidate();
+    }
+
     public void setAttachBotUser(TLRPC.User user, int currentAccount) {
         if (user == null) {
             return;

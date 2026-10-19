@@ -1273,12 +1273,17 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
             invalidate();
         }
 
-        // Svipe: a SvipeAttachMenu bot has no attach menu icon; it shows its avatar, like an inline bot.
+        // Svipe: a SvipeAttachMenu bot shows the icon it gave Svipe, or else its avatar, like an inline bot.
         public void setSvipeBot(TLRPC.User user, TLRPC.TL_attachMenuBot bot) {
             if (user == null || bot == null) {
                 return;
             }
-            glassTabView.setAttachBotUser(user, currentAccount);
+            final android.graphics.drawable.Drawable icon = SvipeAttachMenu.get(currentAccount).icon(bot.bot_id);
+            if (icon != null) {
+                glassTabView.setAttachBotIcon(user, icon);
+            } else {
+                glassTabView.setAttachBotUser(user, currentAccount);
+            }
             currentUser = user;
             attachMenuBot = bot;
             glassTabView.setSelected(false, false);

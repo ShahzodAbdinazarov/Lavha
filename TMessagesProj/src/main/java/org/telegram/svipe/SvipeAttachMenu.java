@@ -30,6 +30,7 @@ import org.telegram.ui.Cells.CheckBoxCell;
 import org.telegram.ui.Components.AttachBotIntroTopView;
 import org.telegram.ui.LaunchActivity;
 
+import java.io.File;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.util.ArrayList;
@@ -66,6 +67,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   - the bot's own settings (GET /v1/attach/config): the chat types the button shows in
  *     (peer_types) and whether the add dialog asks to let the bot write to the user. Telegram's side
  *     menu is not offered: a bot gets the attachment menu, not a place in the app's own menu;
+ *   - the bot's own menu icon (GET /v1/attach/icon/{bot_id}), one-colour SVG, tinted like Telegram's;
  *   - the same list on every device of the account (/v1/attach/bots);
  *   - who the chat is with: receiver / chat, signed by Svipe and passed to the mini app as the launch
  *     param tgWebAppSvipeData ({@link #signContext}), where Telegram signs them into initData;
@@ -91,6 +93,8 @@ public class SvipeAttachMenu {
     private final ArrayList<Bot> bots = new ArrayList<>();
     private final ArrayList<Long> declined = new ArrayList<>();
     private final HashMap<Long, JSONObject> configs = new HashMap<>();
+    private final HashMap<String, android.graphics.drawable.Drawable> icons = new HashMap<>();
+    private final java.util.HashSet<String> iconsLoading = new java.util.HashSet<>();
     private boolean usersLoaded;
     private boolean refreshed;
 
@@ -412,6 +416,61 @@ public class SvipeAttachMenu {
             }
             if (whenDone != null) whenDone.run();
         }));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The bot's icon
+
+    /**
+     * The icon the bot gave Svipe, as a drawable to tint like Telegram's attach bot icons; null when it
+     * has none (the menu shows its avatar) or while it is being fetched (the menu is redrawn after).
+     */
+    public android.graphics.drawable.Drawable icon(long botId) {
+        JSONObject config = configs.get(botId);
+        String version = config != null && !config.isNull("icon") ? config.optString("icon", "") : "";
+        if (TextUtils.isEmpty(version) || !version.matches("[0-9a-f]{1,32}")) {
+            return null;
+        }
+        final String key = botId + "_" + version;
+        android.graphics.drawable.Drawable cached = icons.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        final File file = new File(new File(ApplicationLoader.applicationContext.getFilesDir(), "svipe_attach_icons"), key + ".svg");
+        if (file.exists()) {
+            try {
+                byte[] bytes = new byte[(int) Math.min(file.length(), 64 * 1024)];
+                try (java.io.FileInputStream in = new java.io.FileInputStream(file)) {
+                    int read = 0;
+                    while (read < bytes.length) {
+                        int n = in.read(bytes, read, bytes.length - read);
+                        if (n < 0) break;
+                        read += n;
+                    }
+                }
+                String xml = new String(bytes, "UTF-8");
+                android.graphics.drawable.Drawable drawable = org.telegram.messenger.SvgHelper.getDrawable(xml);
+                if (drawable != null) {
+                    icons.put(key, drawable);
+                    return drawable;
+                }
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+            file.delete();
+        }
+        if (iconsLoading.add(key)) {
+            file.getParentFile().mkdirs();
+            SvipeApi.getFile(SvipeConfig.baseUrl() + "/v1/attach/icon/" + botId, file, (code, err) -> AndroidUtilities.runOnUIThread(() -> {
+                iconsLoading.remove(key);
+                if (code == 200 && file.exists()) {
+                    changed();
+                } else {
+                    file.delete();
+                }
+            }));
+        }
+        return null;
     }
 
     // ---------------------------------------------------------------------------------------------
