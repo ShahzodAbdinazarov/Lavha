@@ -611,7 +611,7 @@ public class SvipeAttachMenu {
      * Svipe. {@code whenDone} gets the URL to load, with the launch param tgWebAppSvipeData added, or
      * the URL as it was if the signature doesn't come in time. Always called once, on the UI thread.
      */
-    public void signContext(long botId, long peerId, String url, Utilities.Callback<String> whenDone) {
+    public void signContext(long botId, long peerId, String url, String startParam, Utilities.Callback<String> whenDone) {
         final boolean[] done = new boolean[1];
         final Utilities.Callback<String> finish = result -> {
             if (done[0]) return;
@@ -625,7 +625,7 @@ public class SvipeAttachMenu {
         AndroidUtilities.runOnUIThread(() -> finish.run(url), 2500);
         final JSONObject body;
         try {
-            body = contextBody(botId, peerId, url);
+            body = contextBody(botId, peerId, url, startParam);
         } catch (Exception e) {
             FileLog.e(e);
             finish.run(url);
@@ -651,8 +651,13 @@ public class SvipeAttachMenu {
         });
     }
 
-    private JSONObject contextBody(long botId, long peerId, String url) throws Exception {
+    private JSONObject contextBody(long botId, long peerId, String url, String startParam) throws Exception {
         JSONObject body = new JSONObject().put("bot_id", botId);
+        // A bot with only a menu button opens as from its own chat, and Telegram leaves the
+        // startattach value out of its initData: Svipe signs it instead.
+        if (!TextUtils.isEmpty(startParam) && startParam.matches("[A-Za-z0-9_-]{1,64}")) {
+            body.put("start_param", startParam);
+        }
         // chat_type and chat_instance as Telegram signed them into this launch's initData: the bot
         // matches them against ours, so our signature can't be carried to another chat.
         String initData = SvipeInitData.extract(url);

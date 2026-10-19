@@ -604,7 +604,7 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
                 queryId = resultUrl.query_id;
                 if (svipeBot != null) {
                     // Svipe: who the chat is with, signed by Svipe (Telegram signs it only for its own bots).
-                    SvipeAttachMenu.get(currentAccount).signContext(botId, peerId, resultUrl.url, url -> webViewContainer.loadUrl(currentAccount, url, resultUrl.same_origin));
+                    SvipeAttachMenu.get(currentAccount).signContext(botId, peerId, resultUrl.url, startCommand, url -> webViewContainer.loadUrl(currentAccount, url, resultUrl.same_origin));
                 } else {
                     webViewContainer.loadUrl(currentAccount, resultUrl.url, resultUrl.same_origin);
                 }
@@ -771,7 +771,7 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
             if (response instanceof TLRPC.TL_webViewResultUrl) {
                 TLRPC.TL_webViewResultUrl resultUrl = (TLRPC.TL_webViewResultUrl) response;
                 queryId = resultUrl.query_id;
-                SvipeAttachMenu.get(currentAccount).signContext(botId, peerId, resultUrl.url, url -> webViewContainer.loadUrl(currentAccount, url, resultUrl.same_origin));
+                SvipeAttachMenu.get(currentAccount).signContext(botId, peerId, resultUrl.url, startCommand, url -> webViewContainer.loadUrl(currentAccount, url, resultUrl.same_origin));
                 if (queryId != 0) {
                     AndroidUtilities.runOnUIThread(pollRunnable);
                 }
