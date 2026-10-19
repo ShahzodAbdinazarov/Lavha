@@ -449,8 +449,31 @@ public class SvipeAttachMenu {
                     }
                 }
                 String xml = new String(bytes, "UTF-8");
-                android.graphics.drawable.Drawable drawable = org.telegram.messenger.SvgHelper.getDrawable(xml);
-                if (drawable != null) {
+                // Drawn once into a bitmap: SvgHelper's drawable ignores colour filters, and the menu
+                // tints its icons with one.
+                org.telegram.messenger.SvgHelper.SvgDrawable svg = org.telegram.messenger.SvgHelper.getDrawable(xml);
+                if (svg != null) {
+                    final int size = AndroidUtilities.dp(24);
+                    android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888);
+                    svg.setAspectFill(false);
+                    svg.setBounds(0, 0, size, size);
+                    svg.draw(new android.graphics.Canvas(bitmap));
+                    // The icon is a mask the menu tints, but SvgHelper draws it translucent: its most
+                    // opaque pixel is made fully opaque, the rest in proportion.
+                    int[] pixels = new int[size * size];
+                    bitmap.getPixels(pixels, 0, size, 0, 0, size, size);
+                    int maxAlpha = 0;
+                    for (int pixel : pixels) {
+                        maxAlpha = Math.max(maxAlpha, pixel >>> 24);
+                    }
+                    if (maxAlpha > 0 && maxAlpha < 255) {
+                        for (int i = 0; i < pixels.length; i++) {
+                            int alpha = Math.min(255, (pixels[i] >>> 24) * 255 / maxAlpha);
+                            pixels[i] = (alpha << 24) | 0xFFFFFF;
+                        }
+                        bitmap.setPixels(pixels, 0, size, 0, 0, size, size);
+                    }
+                    android.graphics.drawable.Drawable drawable = new android.graphics.drawable.BitmapDrawable(ApplicationLoader.applicationContext.getResources(), bitmap);
                     icons.put(key, drawable);
                     return drawable;
                 }

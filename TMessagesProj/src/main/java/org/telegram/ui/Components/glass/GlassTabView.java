@@ -637,6 +637,7 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
         if (user == null || bot == null) {
             return;
         }
+        svipeResetIcon();
         tabAnimation = null;
         tabAnimationBot = bot;
         lastIconAnimationRaw = 0;
@@ -652,6 +653,15 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
         invalidate();
     }
 
+    // Svipe: back from a bot icon (setAttachBotIcon) to the attach bot tab's usual image view.
+    private void svipeResetIcon() {
+        if (backupImageView != null && backupImageView.getVisibility() != VISIBLE) {
+            imageView.setImageDrawable(null);
+            imageView.setVisibility(GONE);
+            backupImageView.setVisibility(VISIBLE);
+        }
+    }
+
     // Svipe: a bot of Svipe's own attachment menu with an icon of its own (SvipeAttachMenu): drawn
     // and tinted like the icons Telegram gives its attach bots.
     public void setAttachBotIcon(TLRPC.User user, android.graphics.drawable.Drawable icon) {
@@ -664,11 +674,13 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
         lastBotIconId = 0;
 
         textView.setText(ContactsController.formatName(user.first_name, user.last_name));
-        backupImageView.setImageDrawable(icon);
-        backupImageView.setRoundRadius(0);
-        backupImageView.setSize(dp(24), dp(24));
-        backupImageView.setLayoutParams(LayoutHelper.createFrame(24, 24, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 4, 0, 0));
-        needUpdateBackupViewColor = true;
+        // In the tab's own icon view, where the menu's icons are drawn and tinted: a 24dp icon in
+        // its 44dp frame.
+        backupImageView.clearImage();
+        backupImageView.setVisibility(GONE);
+        needUpdateBackupViewColor = false;
+        imageView.setImageDrawable(new android.graphics.drawable.InsetDrawable(icon, dp(10)));
+        imageView.setVisibility(VISIBLE);
         updateColors();
         invalidate();
     }
@@ -683,6 +695,7 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
         lastBotIconId = 0;
 
         textView.setText(ContactsController.formatName(user.first_name, user.last_name));
+        svipeResetIcon();
         if (avatarDrawable == null) {
             avatarDrawable = new AvatarDrawable();
         }
