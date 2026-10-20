@@ -67,7 +67,7 @@ VC="$(grep -oE 'versionCode="[0-9]+"' <<<"$MF" | grep -oE '[0-9]+' | head -1)"
 echo "  · versionCode=$VC  versionName=$(grep -oE 'versionName="[^"]+"' <<<"$MF" | head -1 | cut -d'"' -f2)"
 # The Play variant stamps versionCode as-is; the forbidden afat variant stamps versionCode*10+9.
 # Compare with gradle.properties exactly: "ends in 9" alone misfires on a Play code like 109.
-WANT="$(grep -E '^APP_VERSION_CODE=' "$(dirname "$0")/../gradle.properties" | cut -d= -f2)"
+WANT="${EXPECT_VERSION_CODE:-$(grep -E '^APP_VERSION_CODE=' "$(dirname "$0")/../gradle.properties" | cut -d= -f2)}"
 if [ -n "$VC" ] && [ -n "$WANT" ] && [ "$VC" -ne "$WANT" ]; then
   echo "  ✗ versionCode=$VC but APP_VERSION_CODE=$WANT — $( [ "$VC" -eq $((WANT * 10 + 9)) ] && echo 'this is the afat variant, not bundleBundleAfat' || echo 'stale or wrong build')"; fail=1
 fi
