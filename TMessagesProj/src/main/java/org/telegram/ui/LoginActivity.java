@@ -143,6 +143,7 @@ import org.telegram.messenger.SRPHelper;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.svipe.SvipeDemoLogin;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.RequestDelegate;
 import org.telegram.tgnet.SerializedData;
@@ -4688,6 +4689,41 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         }
 
 
+        private boolean svipeDemoChecked;
+
+        private void svipeDemoContinue(String code) {
+            nextPressed = false;
+            svipeDemoChecked = true;
+            try {
+                onNextPressed(code);
+            } finally {
+                svipeDemoChecked = false;
+            }
+        }
+
+        /** The demo account's two-step verification, answered by our server; the screen if that fails. */
+        private void svipeDemoPassword(TL_account.Password password, Bundle fallback) {
+            tryShowProgress(0);
+            SvipeDemoLogin.proof(password, srp -> {
+                if (srp == null) {
+                    tryHideProgress(false);
+                    animateSuccess(() -> setPage(VIEW_PASSWORD, true, fallback, false));
+                    return;
+                }
+                TLRPC.TL_auth_checkPassword check = new TLRPC.TL_auth_checkPassword();
+                check.password = srp;
+                ConnectionsManager.getInstance(currentAccount).sendRequest(check, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+                    tryHideProgress(false);
+                    if (error == null && response instanceof TLRPC.TL_auth_authorization) {
+                        SvipeDemoLogin.reset();
+                        animateSuccess(() -> onAuthSuccess((TLRPC.TL_auth_authorization) response));
+                    } else {
+                        animateSuccess(() -> setPage(VIEW_PASSWORD, true, fallback, false));
+                    }
+                }), ConnectionsManager.RequestFlagFailOnServerErrors | ConnectionsManager.RequestFlagWithoutLogin);
+            });
+        }
+
         @Override
         public void onNextPressed(String code) {
             if (currentViewNum == AUTH_TYPE_MISSED_CALL) {
@@ -4709,6 +4745,23 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             }
 
             if (currentViewNum >= VIEW_CODE_MESSAGE && currentViewNum <= VIEW_CODE_CALL && codeFieldContainer.isFocusSuppressed) {
+                return;
+            }
+
+            // Svipe: the Play reviewer's demo number takes a fixed code, swapped for Telegram's real
+            // one by our server (SvipeDemoLogin). Any other number goes on exactly as before.
+            if (activityMode == MODE_LOGIN && !svipeDemoChecked) {
+                final String typed = code;
+                nextPressed = true;
+                tryShowProgress(0);
+                SvipeDemoLogin.matches(requestPhone, isDemo -> {
+                    if (!isDemo) {
+                        SvipeDemoLogin.reset();
+                        svipeDemoContinue(typed);
+                        return;
+                    }
+                    SvipeDemoLogin.exchange(requestPhone, typed, real -> svipeDemoContinue(real != null ? real : typed));
+                });
                 return;
             }
 
@@ -4932,6 +4985,10 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                                         bundle.putString("phoneHash", phoneHash);
                                         bundle.putString("code", req.phone_code);
 
+                                        if (SvipeDemoLogin.active(requestPhone)) {
+                                            svipeDemoPassword(password, bundle);
+                                            return;
+                                        }
                                         animateSuccess(() -> setPage(VIEW_PASSWORD, true, bundle, false));
                                     } else {
                                         needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), error1.text);
