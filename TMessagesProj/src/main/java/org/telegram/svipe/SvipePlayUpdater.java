@@ -1,10 +1,15 @@
 package org.telegram.svipe;
 
 import android.app.Activity;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.Build;
+import android.os.SystemClock;
 
-import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MediaController;
@@ -24,7 +29,11 @@ import org.telegram.messenger.voip.VoIPService;
  *   <li>A downloaded update the user doesn't tap is installed once the app has been in the background
  *       for a while, silently, so the next open is the new version — but never while something is
  *       playing or a call is on: installing stops the app. "A while", because the app also stops for a
- *       moment behind the camera, a file picker or a browser tab, and the user comes back to it.</li>
+ *       moment behind the camera, a file picker or a browser tab, and the user comes back to it. Closing the
+ *       app (back out of it) installs at once: there is nothing to come back to. The wait
+ *       is an alarm, not a timer: Android freezes or kills a backgrounded app, and a timer in a frozen or
+ *       dead process never fires. The alarm wakes the app, which asks Play whether the download is still
+ *       there and installs it.</li>
  * </ul>
  *
  * The Play library lives only in the Play flavor of the app module, which hands an {@link Engine} to
@@ -42,6 +51,9 @@ public final class SvipePlayUpdater {
 
         /** Install a downloaded update (Play restarts the app if it is in the foreground). */
         void complete();
+
+        /** Installs a downloaded update if there is one; from the background, where Play answers nothing else. */
+        void completeIfDownloaded();
     }
 
     public interface Callback {
@@ -56,6 +68,8 @@ public final class SvipePlayUpdater {
 
     private static Engine engine;
     private static long lastCheck;
+    // This process has shown the app; a process the alarm started has played nothing.
+    private static boolean shown;
 
     private static int availableVc;
     private static long size;
@@ -82,7 +96,8 @@ public final class SvipePlayUpdater {
         if (engine == null) {
             return;
         }
-        AndroidUtilities.cancelRunOnUIThread(installInBackground); // back in the foreground
+        shown = true;
+        cancelAlarm(); // back in the foreground
         long now = System.currentTimeMillis();
         if (lastCheck != 0 && now - lastCheck < RECHECK_MS) {
             return;
@@ -156,33 +171,84 @@ public final class SvipePlayUpdater {
         if (engine == null || !downloaded) {
             return;
         }
-        AndroidUtilities.cancelRunOnUIThread(installInBackground);
-        AndroidUtilities.runOnUIThread(installInBackground, BACKGROUND_INSTALL_MS);
+        scheduleAlarm();
     }
 
-    private static final Runnable installInBackground = () -> {
-        if (engine == null || !downloaded || !ApplicationLoader.mainInterfaceStopped) {
+    /**
+     * From LaunchActivity.onDestroy when the user closed the app (back out of it): nothing to come back
+     * to, so a downloaded update goes in at once. Leaving for the camera or a browser doesn't destroy
+     * the activity; those wait for the alarm.
+     */
+    public static void onAppClosed() {
+        if (engine == null || !downloaded) {
             return;
         }
         if (!quiet()) {
-            AndroidUtilities.runOnUIThread(SvipePlayUpdater.installInBackground, BACKGROUND_INSTALL_MS);
+            scheduleAlarm();
             return;
         }
+        cancelAlarm();
         try {
             engine.complete();
         } catch (Throwable t) {
             FileLog.e(t);
         }
-    };
+    }
+
+    /** The alarm: install now, or try again later if something is playing. */
+    public static final class Alarm extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (engine == null || !ApplicationLoader.mainInterfaceStopped) {
+                return;
+            }
+            if (!quiet()) {
+                scheduleAlarm();
+                return;
+            }
+            try {
+                engine.completeIfDownloaded();
+            } catch (Throwable t) {
+                FileLog.e(t);
+            }
+        }
+    }
+
+    private static PendingIntent alarmIntent() {
+        Context context = ApplicationLoader.applicationContext;
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
+        return PendingIntent.getBroadcast(context, 0, new Intent(context, Alarm.class), flags);
+    }
+
+    private static void scheduleAlarm() {
+        try {
+            AlarmManager alarms = (AlarmManager) ApplicationLoader.applicationContext.getSystemService(Context.ALARM_SERVICE);
+            // Inexact on purpose: no exact-alarm permission, and a few minutes later is just as good.
+            alarms.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + BACKGROUND_INSTALL_MS, alarmIntent());
+        } catch (Throwable t) {
+            FileLog.e(t);
+        }
+    }
+
+    private static void cancelAlarm() {
+        try {
+            AlarmManager alarms = (AlarmManager) ApplicationLoader.applicationContext.getSystemService(Context.ALARM_SERVICE);
+            alarms.cancel(alarmIntent());
+        } catch (Throwable t) {
+            FileLog.e(t);
+        }
+    }
 
     /** Installing stops the app: not while music or a video plays, or a call is on. */
     private static boolean quiet() {
-        try {
-            MediaController media = MediaController.getInstance();
-            if (media.getPlayingMessageObject() != null && !media.isMessagePaused()) {
-                return false;
+        if (shown) {
+            try {
+                MediaController media = MediaController.getInstance();
+                if (media.getPlayingMessageObject() != null && !media.isMessagePaused()) {
+                    return false;
+                }
+            } catch (Throwable ignore) {
             }
-        } catch (Throwable ignore) {
         }
         return VoIPService.getSharedInstance() == null;
     }

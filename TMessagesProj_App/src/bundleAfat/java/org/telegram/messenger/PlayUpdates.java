@@ -76,6 +76,15 @@ final class PlayUpdates {
 
             @Override
             public void complete() {
+                // Play can report a download that is gone (a newer version was installed from the store
+                // meanwhile): it then refuses, and the banner goes back to offering the update.
+                manager.completeUpdate().addOnFailureListener(e -> AndroidUtilities.runOnUIThread(() -> SvipePlayUpdater.onStopped(false)));
+            }
+
+            @Override
+            public void completeIfDownloaded() {
+                // Not getAppUpdateInfo first: Play answers it only to an app in the foreground ("not
+                // important enough"). completeUpdate itself just fails when nothing is downloaded.
                 manager.completeUpdate();
             }
         });

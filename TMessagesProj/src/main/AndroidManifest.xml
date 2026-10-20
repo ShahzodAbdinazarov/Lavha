@@ -428,6 +428,10 @@
                 android:theme="@style/Theme.TMessages.TransparentWithAlerts"/>
 
         <receiver
+            android:name="org.telegram.svipe.SvipePlayUpdater$Alarm"
+            android:exported="false"/>
+
+        <receiver
             android:name=".AutoMessageHeardReceiver"
             android:exported="false">
             <intent-filter>

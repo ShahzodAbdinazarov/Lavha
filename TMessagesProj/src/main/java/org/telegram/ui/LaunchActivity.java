@@ -7000,6 +7000,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         isActive = false;
         activeInstanceCount--;
         unregisterReceiver(batteryReceiver);
+        if (isFinishing() && activeInstanceCount == 0) {
+            org.telegram.svipe.SvipePlayUpdater.onAppClosed();
+        }
 
         if (activeInstanceCount == 0) {
             onDestroyStaticResources();
