@@ -95,6 +95,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.telegram.svipe.SvipeMediaPicker;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.svipe.SvipeAttachMenu;
+import org.telegram.svipe.SvipeAttachOrder;
 import org.telegram.messenger.AnimationNotificationsLocker;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ChatObject;
@@ -2798,6 +2799,9 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
             if (view instanceof AttachButton) {
                 final Activity activity = lastFragment.getParentActivity();
                 int num = view.getTag() instanceof Integer ? (Integer) view.getTag() : -1;
+                if (baseFragment instanceof ChatActivity) {
+                    SvipeAttachOrder.get(currentAccount).opened(num, ((ChatActivity) baseFragment).getDialogId());
+                }
                 if (num == 1) {
                     if (!photosEnabled && !videosEnabled && checkCanRemoveRestrictionsByBoosts()) {
                         return;
@@ -6619,6 +6623,8 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
         private int attachBotsStartRow;
         private int attachBotsEndRow;
         private List<TLRPC.TL_attachMenuBot> attachMenuBots = new ArrayList<>();
+        // Svipe: which bot sits at which position, once the menu is sorted (SvipeAttachOrder).
+        private final android.util.SparseArray<TLRPC.TL_attachMenuBot> botAt = new android.util.SparseArray<>();
 
         private int documentButton;
         private int moneyButton;
@@ -6718,10 +6724,9 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                 case VIEW_TYPE_BOT_BUTTON:
                     AttachBotButton child = (AttachBotButton) holder.itemView;
                     child.glassTabView.onPreBind();
-                    if (position >= attachBotsStartRow && position < attachBotsEndRow) {
-                        position -= attachBotsStartRow;
-                        child.setTag(position);
-                        TLRPC.TL_attachMenuBot bot = attachMenuBots.get(position);
+                    if (botAt.get(position) != null) {
+                        TLRPC.TL_attachMenuBot bot = botAt.get(position);
+                        child.setTag(attachMenuBots.indexOf(bot));
                         if (SvipeAttachMenu.isSvipeBot(bot)) {
                             child.setSvipeBot(MessagesController.getInstance(currentAccount).getUser(bot.bot_id), bot);
                         } else {
@@ -6775,6 +6780,7 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
             attachBotsStartRow = -1;
             attachBotsEndRow = -1;
             moneyButton = -1;
+            botAt.clear();
 
             if (isPollAttach) {
                 galleryButton = buttonsCount++;
@@ -6875,8 +6881,63 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                         attachBotsEndRow = buttonsCount;
                     }
                 }
+                for (int i = 0; i < attachMenuBots.size() && attachBotsStartRow >= 0; i++) {
+                    botAt.put(attachBotsStartRow + i, attachMenuBots.get(i));
+                }
+                svipeSort();
             }
             super.notifyDataSetChanged();
+        }
+
+        /** Svipe: Gallery first, then the most recently used tabs and bots alike (SvipeAttachOrder). */
+        private void svipeSort() {
+            final int[] tabs = {1, LAYOUT_TYPE_DOCUMENTS, LAYOUT_TYPE_MONEY, LAYOUT_TYPE_LOCATION, LAYOUT_TYPE_RICH,
+                    LAYOUT_TYPE_POLL, LAYOUT_TYPE_CONTACTS, LAYOUT_TYPE_MUSIC, LAYOUT_TYPE_TODO, LAYOUT_TYPE_REPLIES};
+            final int[] positions = {galleryButton, documentButton, moneyButton, locationButton, richButton,
+                    pollButton, contactButton, musicButton, todoButton, quickRepliesButton};
+            ArrayList<Object> items = new ArrayList<>();
+            ArrayList<String> keys = new ArrayList<>();
+            for (int position = 0; position < buttonsCount; position++) {
+                TLRPC.TL_attachMenuBot bot = botAt.get(position);
+                if (bot != null) {
+                    items.add(bot);
+                    keys.add(SvipeAttachOrder.botKey(bot.bot_id));
+                    continue;
+                }
+                for (int i = 0; i < positions.length; i++) {
+                    if (positions[i] == position) {
+                        items.add(tabs[i]);
+                        keys.add(SvipeAttachOrder.tabKey(tabs[i]));
+                        break;
+                    }
+                }
+            }
+            if (items.size() != buttonsCount) {
+                return; // a button this does not know about: leave the menu as Telegram built it
+            }
+            List<Object> sorted = SvipeAttachOrder.get(currentAccount).sort(items, keys);
+            galleryButton = documentButton = moneyButton = locationButton = richButton = -1;
+            pollButton = contactButton = musicButton = todoButton = quickRepliesButton = -1;
+            botAt.clear();
+            for (int position = 0; position < sorted.size(); position++) {
+                Object item = sorted.get(position);
+                if (item instanceof TLRPC.TL_attachMenuBot) {
+                    botAt.put(position, (TLRPC.TL_attachMenuBot) item);
+                    continue;
+                }
+                switch ((Integer) item) {
+                    case 1: galleryButton = position; break;
+                    case LAYOUT_TYPE_DOCUMENTS: documentButton = position; break;
+                    case LAYOUT_TYPE_MONEY: moneyButton = position; break;
+                    case LAYOUT_TYPE_LOCATION: locationButton = position; break;
+                    case LAYOUT_TYPE_RICH: richButton = position; break;
+                    case LAYOUT_TYPE_POLL: pollButton = position; break;
+                    case LAYOUT_TYPE_CONTACTS: contactButton = position; break;
+                    case LAYOUT_TYPE_MUSIC: musicButton = position; break;
+                    case LAYOUT_TYPE_TODO: todoButton = position; break;
+                    case LAYOUT_TYPE_REPLIES: quickRepliesButton = position; break;
+                }
+            }
         }
 
         public int getButtonsCount() {
@@ -6886,7 +6947,7 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
         @Override
         public int getItemViewType(int position) {
             if (position < buttonsCount) {
-                if (position >= attachBotsStartRow && position < attachBotsEndRow) {
+                if (botAt.get(position) != null) {
                     return VIEW_TYPE_BOT_BUTTON;
                 }
                 return VIEW_TYPE_BUTTON;
