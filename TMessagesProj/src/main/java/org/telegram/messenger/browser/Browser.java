@@ -293,6 +293,8 @@ public class Browser {
             return;
         }
         final int currentAccount = UserConfig.selectedAccount;
+        // Svipe: svipe.uz/<bot>?business… and the like, tapped in a chat, are handled here like t.me.
+        uri = org.telegram.svipe.SvipeShareLink.botLinkAsTelegram(uri);
         boolean[] forceBrowser = new boolean[]{false};
         boolean internalUri = isInternalUri(uri, forceBrowser);
         String browserPackage = getBrowserPackageName(browser);

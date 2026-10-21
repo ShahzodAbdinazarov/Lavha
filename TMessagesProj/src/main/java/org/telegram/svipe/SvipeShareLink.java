@@ -68,6 +68,31 @@ public final class SvipeShareLink {
         return false;
     }
 
+    /** Query parameters that make svipe.uz/<name> a link to a bot feature only Svipe has. */
+    private static final String[] BOT_LINK_PARAMS = {"startattach", "attach", "choose", "business"};
+
+    /**
+     * {@code svipe.uz/<bot>?startattach}, {@code ?business=…}, {@code svipe.uz/<user>?attach=<bot>}: the
+     * links for what only Svipe does, which docs give on svipe.uz so that people without Svipe land on a
+     * page that explains it instead of a bot chat where nothing happens. In the app they are exactly
+     * their t.me form, so they go on as that; anything else is returned unchanged.
+     */
+    public static Uri botLinkAsTelegram(Uri uri) {
+        if (!isOurHost(uri) || uri.getQuery() == null) {
+            return uri;
+        }
+        final List<String> segments = uri.getPathSegments();
+        if (segments == null || segments.size() != 1 || !segments.get(0).matches("[A-Za-z0-9_]{4,32}")) {
+            return uri;
+        }
+        for (String param : BOT_LINK_PARAMS) {
+            if (uri.getQueryParameter(param) != null) {
+                return Uri.parse("https://t.me/" + segments.get(0) + "?" + uri.getEncodedQuery());
+            }
+        }
+        return uri;
+    }
+
     /** The share code in {@code https://svipe.uz/<code>}, or null when the path is a page of ours. */
     private static String codeOf(Uri uri) {
         final List<String> segments = uri.getPathSegments();

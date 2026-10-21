@@ -1926,6 +1926,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                     // A svipe.uz link belongs to US before it belongs to any Telegram parser: it is our
                     // own domain, and on a device with Svipe installed the video it names should play
                     // here rather than in a web page whose whole purpose is offering the app.
+                    data = org.telegram.svipe.SvipeShareLink.botLinkAsTelegram(data);
                     if (org.telegram.svipe.SvipeShareLink.handle(intentAccount[0], data)) {
                         return true;
                     }
