@@ -60,9 +60,42 @@ public final class SvipeSideMenu {
         declined.addAll(d);
     }
 
+    private boolean usersLoaded;
+
     /** The bots in the menu, in the order they were added. */
     public ArrayList<Long> getBots() {
+        loadUsers();
         return new ArrayList<>(bots);
+    }
+
+    /**
+     * After a restart the bots' users are only in the local database, and the menu draws nothing for a
+     * user it doesn't have: read them in once, so they are there by the time the menu is opened.
+     */
+    private void loadUsers() {
+        if (usersLoaded) {
+            return;
+        }
+        usersLoaded = true;
+        final ArrayList<Long> missing = new ArrayList<>();
+        for (long id : bots) {
+            if (MessagesController.getInstance(account).getUser(id) == null) {
+                missing.add(id);
+            }
+        }
+        if (missing.isEmpty()) {
+            return;
+        }
+        org.telegram.messenger.MessagesStorage storage = org.telegram.messenger.MessagesStorage.getInstance(account);
+        storage.getStorageQueue().postRunnable(() -> {
+            final ArrayList<TLRPC.User> users = new ArrayList<>();
+            try {
+                storage.getUsersInternal(missing, users);
+            } catch (Exception e) {
+                org.telegram.messenger.FileLog.e(e);
+            }
+            AndroidUtilities.runOnUIThread(() -> MessagesController.getInstance(account).putUsers(users, true));
+        });
     }
 
     public boolean contains(long botId) {
@@ -115,6 +148,7 @@ public final class SvipeSideMenu {
     /** The permission, with the bot's avatar on top as in Telegram's attach bot dialog. */
     private void ask(Activity activity, TLRPC.User bot, long replace, Utilities.Callback2<Boolean, Boolean> whenDone) {
         AttachBotIntroTopView top = new AttachBotIntroTopView(activity);
+        top.svipeSetIcon(R.drawable.ic_ab_other);
         top.setColor(Theme.getColor(Theme.key_chat_attachIcon));
         top.setBackgroundColor(Theme.getColor(Theme.key_dialogTopBackground));
         top.setUser(account, bot);

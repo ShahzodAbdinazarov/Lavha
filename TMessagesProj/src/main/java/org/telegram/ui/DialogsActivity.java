@@ -2839,6 +2839,8 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
     @Override
     public boolean onFragmentCreate() {
+        // Svipe: the side menu's bots, read in from the local database before the menu is opened.
+        org.telegram.svipe.SvipeSideMenu.get(currentAccount).getBots();
         super.onFragmentCreate();
 
         if (arguments != null) {

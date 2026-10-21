@@ -49,6 +49,12 @@ public class AttachBotIntroTopView extends View {
         paint.setStrokeCap(Paint.Cap.ROUND);
     }
 
+    // Svipe: the side menu asks with the same view and its own icon, the menu button (SvipeSideMenu).
+    public void svipeSetIcon(int resId) {
+        attachDrawable = ContextCompat.getDrawable(getContext(), resId).mutate().getConstantState().newDrawable();
+        invalidate();
+    }
+
     public void setAttachBot(TLRPC.TL_attachMenuBot bot) {
         TLRPC.TL_attachMenuBotIcon icon = MediaDataController.getStaticAttachMenuBotIcon(bot);
         if (icon != null) {
