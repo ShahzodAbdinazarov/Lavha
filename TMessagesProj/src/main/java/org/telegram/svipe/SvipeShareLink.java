@@ -69,7 +69,7 @@ public final class SvipeShareLink {
     }
 
     /** Query parameters that make svipe.uz/<name> a link to a bot feature only Svipe has. */
-    private static final String[] BOT_LINK_PARAMS = {"startattach", "attach", "choose", "business"};
+    private static final String[] BOT_LINK_PARAMS = {"startattach", "attach", "choose", "business", "sidemenu"};
 
     /**
      * {@code svipe.uz/<bot>?startattach}, {@code ?business=…}, {@code svipe.uz/<user>?attach=<bot>}: the

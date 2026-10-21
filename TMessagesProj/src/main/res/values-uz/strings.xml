@@ -394,4 +394,11 @@
     <string name="SvipeBusinessBotConnected">**%s** endi sizning biznes botingiz</string>
     <string name="SvipeBusinessBotPremium">Biznes botlar uchun Telegram Premium kerak.</string>
     <string name="SvipeBusinessBotPremiumOpen">Premium</string>
+    <string name="SvipeSideMenuRequest">**%s** yon menyuga qo\'shilishni so\'ramoqda. Shunda uni chatlar ro\'yxatidan bir bosishda ochasiz.</string>
+    <string name="SvipeSideMenuFullTitle">Yon menyu to\'lgan</string>
+    <string name="SvipeSideMenuFullText">Yon menyuda ko\'pi bilan %1$d ta bot turishi mumkin. **%2$s** qaysi birining o\'rniga qo\'yilsin, tanlang.</string>
+    <string name="SvipeSideMenuReplace">Almashtirish</string>
+    <string name="SvipeSideMenuRemoveTitle">Yon menyudan olib tashlash</string>
+    <string name="SvipeSideMenuRemoveText">**%s** yon menyudan olib tashlansinmi?</string>
+    <string name="SvipeSideMenuCant">Bu botni yon menyuga qo\'shib bo\'lmaydi.</string>
 </resources>

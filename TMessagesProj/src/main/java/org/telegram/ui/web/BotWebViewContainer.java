@@ -86,6 +86,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 import org.telegram.svipe.SvipeAttachMenu;
+import org.telegram.svipe.SvipeSideMenu;
 import org.telegram.svipe.SvipeBotContacts;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
@@ -2746,6 +2747,29 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                         notifyEvent(requestContext, "attach_menu_failed", obj("error", "declined".equals(SvipeAttachMenu.get(currentAccount).status(bot.id)) ? "USER_DECLINED" : "UNSUPPORTED"));
                     }
                 });
+                break;
+            }
+            // Svipe: the side menu, its own permission (SvipeSideMenu); the same shape as the attachment menu's.
+            case "web_app_add_to_side_menu": {
+                if (isRequestingPageOpen || botUser == null || System.currentTimeMillis() - lastClickMs > 10_000) {
+                    return;
+                }
+                final TLRPC.User bot = botUser;
+                SvipeSideMenu.get(currentAccount).request(bot, true, (shown, added) -> {
+                    if (added) {
+                        notifyEvent(requestContext, "side_menu_added", null);
+                    } else {
+                        String status = SvipeSideMenu.get(currentAccount).status(bot.id);
+                        notifyEvent(requestContext, "side_menu_failed", obj("error", "declined".equals(status) || shown ? "USER_DECLINED" : "UNSUPPORTED"));
+                    }
+                });
+                break;
+            }
+            case "web_app_check_side_menu": {
+                if (botUser == null) {
+                    return;
+                }
+                notifyEvent(requestContext, "side_menu_checked", obj("status", SvipeSideMenu.get(currentAccount).status(botUser.id)));
                 break;
             }
             case "web_app_check_attach_menu": {

@@ -11939,4 +11939,11 @@
     <string name="SvipeBusinessBotConnected">**%s** is now your business bot</string>
     <string name="SvipeBusinessBotPremium">Business bots need Telegram Premium.</string>
     <string name="SvipeBusinessBotPremiumOpen">Premium</string>
+    <string name="SvipeSideMenuRequest">**%s** requests to be added to your side menu, so you can open it from the chat list in one tap.</string>
+    <string name="SvipeSideMenuFullTitle">Side menu is full</string>
+    <string name="SvipeSideMenuFullText">You can keep up to %1$d bots in the side menu. Choose one to replace with **%2$s**.</string>
+    <string name="SvipeSideMenuReplace">Replace</string>
+    <string name="SvipeSideMenuRemoveTitle">Remove from side menu</string>
+    <string name="SvipeSideMenuRemoveText">Remove **%s** from the side menu?</string>
+    <string name="SvipeSideMenuCant">This bot can\'t be added to the side menu.</string>
 </resources>

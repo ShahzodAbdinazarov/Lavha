@@ -1990,6 +1990,8 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                         String attachMenuBotToOpen = null;
                         // Svipe: t.me/<bot>?business=<rights> — the bot asks to be the business chatbot.
                         String svipeBusiness = null;
+                        // Svipe: t.me/<bot>?sidemenu — the bot asks for a place in the side menu.
+                        String svipeSideMenu = null;
                         String attachMenuBotChoose = null;
                         Integer taskId = null;
                         byte[] optionId = null;
@@ -2292,6 +2294,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                                                 attachMenuBotChoose = data.getQueryParameter("choose");
                                                 attachMenuBotToOpen = data.getQueryParameter("attach");
                                                 svipeBusiness = data.getQueryParameter("business");
+                                                svipeSideMenu = data.getQueryParameter("sidemenu");
                                                 botCompact = TextUtils.equals(data.getQueryParameter("mode"), "compact");
                                                 botFullscreen = TextUtils.equals(data.getQueryParameter("mode"), "fullscreen");
                                                 openProfile = data.getBooleanQueryParameter("profile", false);
@@ -2382,6 +2385,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                                             attachMenuBotChoose = data.getQueryParameter("choose");
                                             attachMenuBotToOpen = data.getQueryParameter("attach");
                                                 svipeBusiness = data.getQueryParameter("business");
+                                                svipeSideMenu = data.getQueryParameter("sidemenu");
                                             messageId = Utilities.parseInt(data.getQueryParameter("post"));
                                             storyId = Utilities.parseInt(data.getQueryParameter("story"));
                                             giftCollectionId = Utilities.parseInt(data.getQueryParameter("collection"));
@@ -2892,6 +2896,17 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                                 }
                                 if (svipeBusiness != null && username != null) {
                                     org.telegram.svipe.SvipeBusinessBot.request(this, intentAccount[0], username, svipeBusiness);
+                                } else if (svipeSideMenu != null && username != null) {
+                                    final int sideAccount = intentAccount[0];
+                                    MessagesController.getInstance(sideAccount).getUserNameResolver().resolve(username, peerId -> {
+                                        TLRPC.User sideBot = peerId != null && peerId > 0 ? MessagesController.getInstance(sideAccount).getUser(peerId) : null;
+                                        org.telegram.svipe.SvipeSideMenu.get(sideAccount).request(sideBot, false, (shown, added) -> {
+                                            if (!added && !shown) {
+                                                BaseFragment last = getSafeLastFragment();
+                                                if (last != null) BulletinFactory.of(last).createErrorBulletin(LocaleController.getString(R.string.SvipeSideMenuCant)).show();
+                                            }
+                                        });
+                                    });
                                 } else
                                 runLinkRequest(intentAccount[0], username, group, sticker, emoji, botUser, botChat, botChannel, botChatAdminParams, message, contactToken, folderSlug, text, hasUrl, messageId, channelId, threadId, commentId, game, auth, lang, unsupportedUrl, code, login, wallPaper, inputInvoiceSlug, uniqueGiftSlug, theme, voicechat, videochat, livestream, 0, videoTimestamp, setAsAttachBot, attachMenuBotToOpen, attachMenuBotChoose, botAppMaybe, startApp, progress, forceNotInternalForApps, storyId, liveStory, storyAlbumId, giftCollectionId, auctionSlug, stargiftPreviewSlug, isBoost, chatLinkSlug, botCompact, botFullscreen, openedTelegram, openProfile, forceRequest, referrer, taskId, openDirect, optionId);
                             } else {

@@ -667,4 +667,11 @@
     <string name="SvipeBusinessBotConnected">**%s** теперь ваш бизнес-бот</string>
     <string name="SvipeBusinessBotPremium">Бизнес-ботам нужен Telegram Premium.</string>
     <string name="SvipeBusinessBotPremiumOpen">Premium</string>
+    <string name="SvipeSideMenuRequest">**%s** просит добавить его в боковое меню, чтобы открывать его из списка чатов одним нажатием.</string>
+    <string name="SvipeSideMenuFullTitle">Боковое меню заполнено</string>
+    <string name="SvipeSideMenuFullText">В боковом меню может быть не больше %1$d ботов. Выберите, кого заменить на **%2$s**.</string>
+    <string name="SvipeSideMenuReplace">Заменить</string>
+    <string name="SvipeSideMenuRemoveTitle">Убрать из бокового меню</string>
+    <string name="SvipeSideMenuRemoveText">Убрать **%s** из бокового меню?</string>
+    <string name="SvipeSideMenuCant">Этого бота нельзя добавить в боковое меню.</string>
 </resources>
