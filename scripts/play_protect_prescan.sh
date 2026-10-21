@@ -28,9 +28,29 @@ if [ -z "$serial" ]; then
   done
 fi
 if [ -z "$serial" ]; then
-  echo "· prescan skipped: no running emulator with the real Play Store (start one, e.g. qazo_test_play)"
-  exit 0
+  # Nothing running: boot the Play emulator ourselves, headless, and shut it down afterwards. A skipped
+  # prescan (1.3.12) means the first users get the prompt.
+  AVD="${SVIPE_PLAY_AVD:-qazo_test_play}"
+  EMU="$HOME/Library/Android/sdk/emulator/emulator"
+  echo "· prescan: booting $AVD headless"
+  before=$("$ADB" devices | awk 'NR>1 && /^emulator-/ {print $1}')
+  "$EMU" -avd "$AVD" -no-window -no-audio -no-boot-anim -no-snapshot-save >/dev/null 2>&1 &
+  started=1
+  for _ in $(seq 1 90); do
+    sleep 5
+    for s in $("$ADB" devices | awk 'NR>1 && $2=="device" && /^emulator-/ {print $1}'); do
+      echo "$before" | grep -qx "$s" && continue
+      [ "$("$ADB" -s "$s" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && serial=$s
+    done
+    [ -n "$serial" ] && break
+  done
+  if [ -z "$serial" ]; then
+    echo "· prescan skipped: $AVD did not boot in 7.5 minutes"
+    exit 0
+  fi
+  sleep 30   # let Play services settle before the install
 fi
+trap '[ "${started:-}" = 1 ] && "$ADB" -s "$serial" emu kill >/dev/null 2>&1' EXIT
 a() { "$ADB" -s "$serial" "$@"; }
 echo "· prescan on $serial"
 
