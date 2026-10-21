@@ -73,6 +73,11 @@ SIZE=$(stat -f %z "$APK")
 SHA=$(shasum -a 256 "$APK" | cut -d' ' -f1)
 echo "size=$SIZE sha256=$SHA"
 
+echo "== 2b. Play Protect prescan =="
+# Before anybody downloads it, so the first user is not the one Play Protect asks to send it for a
+# scan. Never blocks the release; see the script.
+"$ROOT/scripts/play_protect_prescan.sh" "$APK" || true
+
 echo "== 3. backup current release =="
 # The live apk is backed up under its outgoing version code plus an epoch suffix so a
 # repeat deploy of the same version never overwrites an earlier backup.
