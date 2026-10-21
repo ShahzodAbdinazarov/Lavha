@@ -6,6 +6,7 @@ import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.UserObject;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.tgnet.ConnectionsManager;
@@ -397,8 +398,8 @@ public class SvipeAuth {
                 MessagesController.getInstance(account).putChats(res.chats, false);
                 if (res.users != null) {
                     for (TLRPC.User u : res.users) {
-                        if (u != null && u.username != null
-                                && u.username.equalsIgnoreCase(username)) {
+                        // Any of its usernames: with more than one (@svipe_app), user.username is empty.
+                        if (UserObject.hasPublicUsername(u, username)) {
                             botId = u.id;
                             break;
                         }
