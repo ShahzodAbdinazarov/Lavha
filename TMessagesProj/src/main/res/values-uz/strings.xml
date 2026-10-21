@@ -401,4 +401,15 @@
     <string name="SvipeSideMenuRemoveTitle">Yon menyudan olib tashlash</string>
     <string name="SvipeSideMenuRemoveText">**%s** yon menyudan olib tashlansinmi?</string>
     <string name="SvipeSideMenuCant">Bu botni yon menyuga qo\'shib bo\'lmaydi.</string>
+    <string name="SvipeProfileTabRequest">**%s** profilingizga tab qo\'shishni so\'ramoqda. Profilingizni Svipe\'da ochganlar uni ko\'radi.</string>
+    <string name="SvipeProfileTabAdd">Profilga qo\'shish</string>
+    <string name="SvipeProfileTabFullTitle">Profil tablari to\'lgan</string>
+    <string name="SvipeProfileTabFullText">Profilingizda ko\'pi bilan %1$d ta bot tabi bo\'lishi mumkin. **%2$s** qaysi birining o\'rniga qo\'yilsin, tanlang.</string>
+    <string name="SvipeProfileTabAdded">**%s** tabi profilingizga qo\'shildi.</string>
+    <string name="SvipeProfileTabNotRegistered">Bu bot profilingizga tab qo\'sha olmaydi.</string>
+    <string name="SvipeProfileTabsTitle">Bot tablari</string>
+    <string name="SvipeProfileTabsInfo">Botlar sizning ruxsatingiz bilan profilingizga qo\'shgan tablar. Kim ko\'rishini tanlash uchun birini bosing.</string>
+    <string name="SvipeProfileTabEveryone">Hamma</string>
+    <string name="SvipeProfileTabOnlyMe">Faqat men</string>
+    <string name="SvipeProfileTabRemove">Profildan olib tashlash</string>
 </resources>

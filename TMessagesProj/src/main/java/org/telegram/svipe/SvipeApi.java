@@ -88,6 +88,10 @@ public class SvipeApi {
         request("PUT", path, body, bearer, cb);
     }
 
+    public static void patch(String path, JSONObject body, String bearer, JsonCallback cb) {
+        request("PATCH", path, body, bearer, cb);
+    }
+
     public static void delete(String path, String bearer, JsonCallback cb) {
         request("DELETE", path, null, bearer, cb);
     }

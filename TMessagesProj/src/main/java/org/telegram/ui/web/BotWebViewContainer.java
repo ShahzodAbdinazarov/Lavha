@@ -2765,6 +2765,30 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                 });
                 break;
             }
+            // Svipe: a tab on the person's own profile, its own permission (SvipeProfileTabs).
+            case "web_app_add_to_profile": {
+                if (isRequestingPageOpen || botUser == null || System.currentTimeMillis() - lastClickMs > 10_000) {
+                    return;
+                }
+                final TLRPC.User bot = botUser;
+                org.telegram.svipe.SvipeProfileTabs.request(currentAccount, bot, true, (shown, added) -> {
+                    if (added) {
+                        notifyEvent(requestContext, "profile_tab_added", null);
+                    } else {
+                        notifyEvent(requestContext, "profile_tab_failed", obj("error", shown ? "USER_DECLINED" : "UNSUPPORTED"));
+                    }
+                });
+                break;
+            }
+            case "web_app_check_profile_tab": {
+                if (botUser == null) {
+                    return;
+                }
+                final long statusBot = botUser.id;
+                org.telegram.svipe.SvipeProfileTabs.status(currentAccount, statusBot,
+                        status -> notifyEvent(requestContext, "profile_tab_checked", obj("status", status)));
+                break;
+            }
             case "web_app_check_side_menu": {
                 if (botUser == null) {
                     return;

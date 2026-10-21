@@ -196,6 +196,10 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
     public static final int TAB_OLD_PROFILES = 17; // Svipe: accounts that held this number before
     public static final int TAB_OLD_NUMBERS = 18;  // Svipe: numbers this account held before
     public static final int TAB_BOT_TAB = 19;      // Svipe: a bot's tab on a channel (svipe.uz/bots/profile-tabs)
+    // Svipe: bots' tabs on a person's own profile, up to three (SvipeProfileTabs)
+    public static final int TAB_USER_BOT_TAB_0 = 20;
+    public static final int TAB_USER_BOT_TAB_1 = 21;
+    public static final int TAB_USER_BOT_TAB_2 = 22;
     private static final int TAB_STORIES_ALBUM_PREFIX = 0x00010000;
     private static final int TAB_STORIES_ALBUM_MASK = 0x0000FFFF;
 
@@ -662,6 +666,10 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
     private org.telegram.svipe.SvipeOldIdentityAdapter oldProfilesAdapter, oldNumbersAdapter; // Svipe
     private org.telegram.svipe.SvipeBotTabAdapter botTabAdapter; // Svipe
     private String botTabShownTitle; // Svipe: the title the tab strip was built with
+    // Svipe: the bots' tabs on a person's profile (SvipeProfileTabs), one adapter per tab
+    private final org.telegram.svipe.SvipeBotTabAdapter[] userTabAdapters = new org.telegram.svipe.SvipeBotTabAdapter[3];
+    private final String[] userTabShownTitles = new String[3];
+    private boolean userTabLoadingMore;
     private int oldProfilesCount = 0, oldNumbersCount = 0; // Svipe: both tabs hide when empty
     private SharedPhotoVideoAdapter animationSupportingPhotoVideoAdapter;
     private SharedLinksAdapter linksAdapter;
@@ -2300,6 +2308,10 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         oldNumbersAdapter = new org.telegram.svipe.SvipeOldIdentityAdapter(context); // Svipe
         botTabAdapter = new org.telegram.svipe.SvipeBotTabAdapter(context); // Svipe
         loadBotTab(); // Svipe
+        for (int i = 0; i < userTabAdapters.length; i++) { // Svipe
+            userTabAdapters[i] = new org.telegram.svipe.SvipeBotTabAdapter(context);
+        }
+        loadUserBotTabs(); // Svipe
         documentsAdapter = new SharedDocumentsAdapter(context, 1);
         voiceAdapter = new SharedDocumentsAdapter(context, 2);
         audioAdapter = new SharedDocumentsAdapter(context, 4);
@@ -2855,6 +2867,9 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     if (mediaPage.listView.getAdapter() == botTabAdapter) { // Svipe: tiles, or full-width rows
                         return botTabAdapter.isList() ? mediaPage.layoutManager.getSpanCount() : 1;
                     }
+                    if (isUserBotTab(mediaPage.selectedType)) { // Svipe: the same for a person's bot tab
+                        return userTabAdapters[userTabIndex(mediaPage.selectedType)].isList() ? mediaPage.layoutManager.getSpanCount() : 1;
+                    }
                     if (mediaPage.listView.getAdapter() == photoVideoAdapter) {
                         if (photoVideoAdapter.getItemViewType(position) == 2) {
                             return columnsCount;
@@ -3273,6 +3288,15 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                         args.putLong("user_id", item.user.id);
                         profileActivity.presentFragment(new ProfileActivity(args));
                     }
+                } else if (isUserBotTab(mediaPage.selectedType)) { // Svipe: a card on a person's profile
+                    org.telegram.svipe.SvipeBotTabAdapter adapter = userTabAdapters[userTabIndex(mediaPage.selectedType)];
+                    org.telegram.svipe.SvipeBotTab.Card card = adapter.getCard(position);
+                    org.telegram.svipe.SvipeBotTab.State state = adapter.getState();
+                    if (card != null && state != null && profileActivity != null && profileActivity.getParentActivity() != null) {
+                        // The mini app it opens is told whose profile this is (svipeInitData, chat_type profile).
+                        org.telegram.svipe.SvipeProfileTabs.openingFromProfile(state.botId, state.ownerId);
+                        org.telegram.messenger.browser.Browser.openUrl(profileActivity.getParentActivity(), card.link);
+                    }
                 } else if (mediaPage.selectedType == TAB_BOT_TAB) { // Svipe: a card opens the bot's mini app
                     org.telegram.svipe.SvipeBotTab.Card card = botTabAdapter.getCard(position);
                     if (card != null && profileActivity != null && profileActivity.getParentActivity() != null) {
@@ -3577,6 +3601,10 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     }
                     if (mediaPage.selectedType == TAB_BOT_TAB) { // Svipe: report the tab
                         showBotTabReport();
+                        return true;
+                    }
+                    if (isUserBotTab(mediaPage.selectedType)) { // Svipe: the owner manages it, anyone else reports it
+                        showUserBotTabOptions(userTabIndex(mediaPage.selectedType));
                         return true;
                     }
                     if (mediaPage.selectedType == TAB_GROUPUSERS && view instanceof UserCell) {
@@ -4872,7 +4900,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             if (lastVisiblePosition + 1 >= profileActivity.getMessagesController().getSavedMessagesController().getLoadedCount()) {
                 profileActivity.getMessagesController().getSavedMessagesController().loadDialogs(false);
             }
-        } else if (mediaPage.selectedType != TAB_RECOMMENDED_CHANNELS && mediaPage.selectedType != TAB_SAVED_MESSAGES && mediaPage.selectedType != TAB_BOT_PREVIEWS && mediaPage.selectedType != TAB_GIFTS && mediaPage.selectedType != TAB_IMAGES && mediaPage.selectedType != TAB_OLD_PROFILES && mediaPage.selectedType != TAB_OLD_NUMBERS && mediaPage.selectedType != TAB_BOT_TAB) {
+        } else if (mediaPage.selectedType != TAB_RECOMMENDED_CHANNELS && mediaPage.selectedType != TAB_SAVED_MESSAGES && mediaPage.selectedType != TAB_BOT_PREVIEWS && mediaPage.selectedType != TAB_GIFTS && mediaPage.selectedType != TAB_IMAGES && mediaPage.selectedType != TAB_OLD_PROFILES && mediaPage.selectedType != TAB_OLD_NUMBERS && mediaPage.selectedType != TAB_BOT_TAB && !isUserBotTab(mediaPage.selectedType)) {
             final int threshold;
             if (mediaPage.selectedType == 0) {
                 threshold = 3;
@@ -4991,7 +5019,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         }
         return (
             type != TAB_PHOTOVIDEO &&
-            type != TAB_IMAGES && type != TAB_OLD_PROFILES && type != TAB_OLD_NUMBERS && type != TAB_BOT_TAB && // Svipe
+            type != TAB_IMAGES && type != TAB_OLD_PROFILES && type != TAB_OLD_NUMBERS && type != TAB_BOT_TAB && !isUserBotTab(type) && // Svipe
             !isAnyStoryPageType(type) &&
             type != TAB_VOICE &&
             type != TAB_GIF &&
@@ -6944,6 +6972,120 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         return state != null && !TextUtils.isEmpty(state.title) ? state.title : "";
     }
 
+    private static boolean isUserBotTab(int type) {
+        return type == TAB_USER_BOT_TAB_0 || type == TAB_USER_BOT_TAB_1 || type == TAB_USER_BOT_TAB_2;
+    }
+
+    private static int userTabIndex(int type) {
+        return type - TAB_USER_BOT_TAB_0;
+    }
+
+    private int userTabCount() {
+        int n = 0;
+        for (org.telegram.svipe.SvipeBotTabAdapter adapter : userTabAdapters) {
+            if (adapter != null && adapter.getState() != null) n++;
+        }
+        return n;
+    }
+
+    private void setUserTabs(java.util.ArrayList<org.telegram.svipe.SvipeBotTab.State> states) {
+        for (int i = 0; i < userTabAdapters.length; i++) {
+            org.telegram.svipe.SvipeBotTab.State state = states != null && i < states.size() ? states.get(i) : null;
+            if (userTabAdapters[i].getState() != state) {
+                userTabAdapters[i].setState(state);
+            }
+        }
+    }
+
+    /** Svipe: the bots' tabs on this person's profile (SvipeProfileTabs). */
+    public void loadUserBotTabs() {
+        if (profileActivity == null || dialog_id <= 0 || userTabAdapters[0] == null) {
+            return;
+        }
+        TLRPC.User user = profileActivity.getMessagesController().getUser(dialog_id);
+        if (user == null || user.bot) {
+            return;
+        }
+        final long ownerId = dialog_id;
+        java.util.ArrayList<org.telegram.svipe.SvipeBotTab.State> cached = org.telegram.svipe.SvipeProfileTabs.cached(ownerId);
+        if (cached != null && userTabCount() == 0) {
+            setUserTabs(cached);
+        }
+        org.telegram.svipe.SvipeProfileTabs.load(profileActivity.getCurrentAccount(), ownerId, states -> {
+            if (states == null || dialog_id != ownerId) {
+                return;
+            }
+            int before = userTabCount();
+            setUserTabs(states);
+            updateTabs(true);
+            if ((before == 0) != (userTabCount() == 0) && profileActivity instanceof ProfileActivity) {
+                // A profile with no media has no shared-media row at all; the tabs alone must bring it in.
+                ((ProfileActivity) profileActivity).updateListAnimated(false);
+            }
+        });
+        for (org.telegram.svipe.SvipeBotTabAdapter adapter : userTabAdapters) {
+            adapter.setOnNearEnd(() -> {
+                org.telegram.svipe.SvipeBotTab.State state = adapter.getState();
+                if (userTabLoadingMore || state == null) {
+                    return;
+                }
+                userTabLoadingMore = true;
+                org.telegram.svipe.SvipeProfileTabs.loadMore(profileActivity.getCurrentAccount(), state, () -> {
+                    userTabLoadingMore = false;
+                    adapter.notifyDataSetChanged();
+                });
+            });
+        }
+    }
+
+    public boolean hasUserBotTabs() {
+        return userTabCount() > 0;
+    }
+
+    /** On my own profile: who sees the tab, or take it off. On anyone else's: report it. */
+    private void showUserBotTabOptions(int index) {
+        org.telegram.svipe.SvipeBotTab.State state = userTabAdapters[index].getState();
+        if (state == null || profileActivity == null || profileActivity.getParentActivity() == null) {
+            return;
+        }
+        final int account = profileActivity.getCurrentAccount();
+        if (state.ownerId != profileActivity.getUserConfig().getClientUserId()) {
+            final String[] reasons = {"spam", "violence", "porn", "fake", "other"};
+            CharSequence[] labels = {
+                    getString(R.string.ReportChatSpam), getString(R.string.ReportChatViolence),
+                    getString(R.string.ReportChatPornography), getString(R.string.ReportChatFakeAccount),
+                    getString(R.string.ReportChatOther)
+            };
+            new AlertDialog.Builder(profileActivity.getParentActivity())
+                    .setTitle(getString(R.string.ReportChat))
+                    .setItems(labels, (d, which) -> {
+                        org.telegram.svipe.SvipeProfileTabs.report(account, state, reasons[which]);
+                        BulletinFactory.of(profileActivity).createSimpleBulletin(R.raw.chats_infotip, getString(R.string.ReportChatSent)).show();
+                    })
+                    .show();
+            return;
+        }
+        boolean everyone = true;
+        for (org.telegram.svipe.SvipeProfileTabs.Tab tab : org.telegram.svipe.SvipeProfileTabs.getMine()) {
+            if (tab.botId == state.botId) everyone = tab.everyone;
+        }
+        CharSequence[] items = {
+                (everyone ? "✓ " : "") + getString(R.string.SvipeProfileTabEveryone),
+                (!everyone ? "✓ " : "") + getString(R.string.SvipeProfileTabOnlyMe),
+                getString(R.string.SvipeProfileTabRemove)
+        };
+        new AlertDialog.Builder(profileActivity.getParentActivity())
+                .setTitle(state.title)
+                .setItems(items, (d, which) -> {
+                    if (which == 2) {
+                        org.telegram.svipe.SvipeProfileTabs.remove(account, state.botId, this::loadUserBotTabs);
+                    } else {
+                        org.telegram.svipe.SvipeProfileTabs.setEveryone(account, state.botId, which == 0, null);
+                    }
+                })
+                .show();
+    }
+
     public void loadBotTab() {
         if (botTabAdapter == null || !isBotTabChannel()) {
             return;
@@ -7148,6 +7290,13 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     || hasBotTab() && !TextUtils.equals(botTabShownTitle, botTabTitle())) { // Svipe
                 changed++;
             }
+            for (int i = 0; i < userTabAdapters.length; i++) { // Svipe: a person's bot tabs
+                boolean has = userTabAdapters[i] != null && userTabAdapters[i].getState() != null;
+                if (has != scrollSlidingTextTabStrip.hasTab(TAB_USER_BOT_TAB_0 + i)
+                        || has && !TextUtils.equals(userTabShownTitles[i], userTabAdapters[i].getState().title)) {
+                    changed++;
+                }
+            }
             if ((hasMedia[1] <= 0) == scrollSlidingTextTabStrip.hasTab(TAB_FILES)) {
                 changed++;
             }
@@ -7312,6 +7461,13 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                 if (hasBotTab()) { // Svipe: the channel's bot tab, named by the bot
                     botTabShownTitle = botTabTitle();
                     tabs.add(new Pair(TAB_BOT_TAB, botTabShownTitle));
+                }
+                for (int i = 0; i < userTabAdapters.length; i++) { // Svipe: a person's bot tabs
+                    org.telegram.svipe.SvipeBotTab.State state = userTabAdapters[i] != null ? userTabAdapters[i].getState() : null;
+                    if (state != null) {
+                        userTabShownTitles[i] = state.title;
+                        tabs.add(new Pair(TAB_USER_BOT_TAB_0 + i, state.title));
+                    }
                 }
             }
             if (scrollSlidingTextTabStrip.isReordering()) {
@@ -7563,6 +7719,16 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     recycleAdapter(currentAdapter);
                     mediaPages[a].listView.setAdapter(oldNumbersAdapter);
                 }
+            } else if (isUserBotTab(mediaPages[a].selectedType)) { // Svipe: a person's bot tab
+                org.telegram.svipe.SvipeBotTabAdapter adapter = userTabAdapters[userTabIndex(mediaPages[a].selectedType)];
+                if (currentAdapter != adapter) {
+                    recycleAdapter(currentAdapter);
+                    mediaPages[a].listView.setAdapter(adapter);
+                }
+                if (!adapter.isList()) {
+                    layoutParams.leftMargin = layoutParams.rightMargin = -dp(1);
+                    spanCount = mediaColumnsCount[0];
+                }
             } else if (mediaPages[a].selectedType == TAB_BOT_TAB) { // Svipe
                 if (currentAdapter != botTabAdapter) {
                     recycleAdapter(currentAdapter);
@@ -7793,7 +7959,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             } else if (mediaPages[a].selectedType == TAB_OLD_PROFILES
                     || mediaPages[a].selectedType == TAB_OLD_NUMBERS) { // Svipe
                 rebuildOldIdentity(true);
-            } else if (mediaPages[a].selectedType == TAB_BOT_TAB) { // Svipe: the cards are already loaded
+            } else if (mediaPages[a].selectedType == TAB_BOT_TAB || isUserBotTab(mediaPages[a].selectedType)) { // Svipe: the cards are already loaded
 
             } else {
                 int type = mediaPages[a].selectedType;

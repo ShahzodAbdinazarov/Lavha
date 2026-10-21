@@ -1992,6 +1992,8 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                         String svipeBusiness = null;
                         // Svipe: t.me/<bot>?sidemenu — the bot asks for a place in the side menu.
                         String svipeSideMenu = null;
+                        // Svipe: t.me/<bot>?profiletab — the bot asks for a tab on the person's profile.
+                        String svipeProfileTab = null;
                         String attachMenuBotChoose = null;
                         Integer taskId = null;
                         byte[] optionId = null;
@@ -2295,6 +2297,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                                                 attachMenuBotToOpen = data.getQueryParameter("attach");
                                                 svipeBusiness = data.getQueryParameter("business");
                                                 svipeSideMenu = data.getQueryParameter("sidemenu");
+                                                svipeProfileTab = data.getQueryParameter("profiletab");
                                                 botCompact = TextUtils.equals(data.getQueryParameter("mode"), "compact");
                                                 botFullscreen = TextUtils.equals(data.getQueryParameter("mode"), "fullscreen");
                                                 openProfile = data.getBooleanQueryParameter("profile", false);
@@ -2386,6 +2389,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                                             attachMenuBotToOpen = data.getQueryParameter("attach");
                                                 svipeBusiness = data.getQueryParameter("business");
                                                 svipeSideMenu = data.getQueryParameter("sidemenu");
+                                                svipeProfileTab = data.getQueryParameter("profiletab");
                                             messageId = Utilities.parseInt(data.getQueryParameter("post"));
                                             storyId = Utilities.parseInt(data.getQueryParameter("story"));
                                             giftCollectionId = Utilities.parseInt(data.getQueryParameter("collection"));
@@ -2896,6 +2900,12 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                                 }
                                 if (svipeBusiness != null && username != null) {
                                     org.telegram.svipe.SvipeBusinessBot.request(this, intentAccount[0], username, svipeBusiness);
+                                } else if (svipeProfileTab != null && username != null) {
+                                    final int tabAccount = intentAccount[0];
+                                    MessagesController.getInstance(tabAccount).getUserNameResolver().resolve(username, peerId -> {
+                                        TLRPC.User tabBot = peerId != null && peerId > 0 ? MessagesController.getInstance(tabAccount).getUser(peerId) : null;
+                                        org.telegram.svipe.SvipeProfileTabs.request(tabAccount, tabBot, false, (shown, added) -> {});
+                                    });
                                 } else if (svipeSideMenu != null && username != null) {
                                     final int sideAccount = intentAccount[0];
                                     MessagesController.getInstance(sideAccount).getUserNameResolver().resolve(username, peerId -> {

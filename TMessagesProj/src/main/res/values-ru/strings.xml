@@ -674,4 +674,15 @@
     <string name="SvipeSideMenuRemoveTitle">Убрать из бокового меню</string>
     <string name="SvipeSideMenuRemoveText">Убрать **%s** из бокового меню?</string>
     <string name="SvipeSideMenuCant">Этого бота нельзя добавить в боковое меню.</string>
+    <string name="SvipeProfileTabRequest">**%s** просит добавить вкладку в ваш профиль. Её увидят все, кто откроет ваш профиль в Svipe.</string>
+    <string name="SvipeProfileTabAdd">Добавить в профиль</string>
+    <string name="SvipeProfileTabFullTitle">Вкладки профиля заполнены</string>
+    <string name="SvipeProfileTabFullText">В профиле может быть не больше %1$d вкладок ботов. Выберите, какую заменить на **%2$s**.</string>
+    <string name="SvipeProfileTabAdded">Вкладка **%s** добавлена в ваш профиль.</string>
+    <string name="SvipeProfileTabNotRegistered">Этот бот не может добавить вкладку в ваш профиль.</string>
+    <string name="SvipeProfileTabsTitle">Вкладки ботов</string>
+    <string name="SvipeProfileTabsInfo">Вкладки, которые боты добавили в ваш профиль с вашего разрешения. Нажмите на вкладку, чтобы выбрать, кто её видит.</string>
+    <string name="SvipeProfileTabEveryone">Все</string>
+    <string name="SvipeProfileTabOnlyMe">Только я</string>
+    <string name="SvipeProfileTabRemove">Убрать из профиля</string>
 </resources>

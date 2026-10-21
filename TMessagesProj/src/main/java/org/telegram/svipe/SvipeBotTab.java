@@ -27,6 +27,9 @@ public class SvipeBotTab {
 
     public static class State {
         public long channelId;
+        // On a person's profile (SvipeProfileTabs): whose profile, and which bot's tab.
+        public long ownerId;
+        public long botId;
         public boolean active;
         public String botUsername;
         public String title;

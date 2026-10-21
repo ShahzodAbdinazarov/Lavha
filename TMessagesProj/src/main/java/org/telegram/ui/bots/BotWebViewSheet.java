@@ -1981,7 +1981,10 @@ public class BotWebViewSheet extends Dialog implements NotificationCenter.Notifi
         }
         if (url != null && !fromTab) {
             MediaDataController.getInstance(currentAccount).increaseWebappRating(requestProps.botId);
-            webViewContainer.loadUrl(currentAccount, url, sameOrigin);
+            // Svipe: opened from a card on someone's profile, the owner is signed in (SvipeProfileTabs).
+            final boolean svipeSameOrigin = sameOrigin;
+            org.telegram.svipe.SvipeProfileTabs.withProfileContext(currentAccount, requestProps.botId, url,
+                    signed -> webViewContainer.loadUrl(currentAccount, signed, svipeSameOrigin));
         }
         AndroidUtilities.runOnUIThread(pollRunnable, pollTimeout);
         if (swipeContainer != null) {

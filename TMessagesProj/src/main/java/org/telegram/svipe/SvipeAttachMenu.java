@@ -596,6 +596,11 @@ public class SvipeAttachMenu {
      * the URL as it was if the signature doesn't come in time. Always called once, on the UI thread.
      */
     public void signContext(long botId, long peerId, String url, String startParam, Utilities.Callback<String> whenDone) {
+        signContext(botId, peerId, url, startParam, null, whenDone);
+    }
+
+    /** {@code chatType}: signed as given instead of Telegram's, e.g. "profile" for a profile tab's card. */
+    public void signContext(long botId, long peerId, String url, String startParam, String chatType, Utilities.Callback<String> whenDone) {
         final boolean[] done = new boolean[1];
         final Utilities.Callback<String> finish = result -> {
             if (done[0]) return;
@@ -610,6 +615,10 @@ public class SvipeAttachMenu {
         final JSONObject body;
         try {
             body = contextBody(botId, peerId, url, startParam);
+            if (chatType != null) {
+                body.put("chat_type", chatType);
+                body.remove("chat_instance");
+            }
         } catch (Exception e) {
             FileLog.e(e);
             finish.run(url);

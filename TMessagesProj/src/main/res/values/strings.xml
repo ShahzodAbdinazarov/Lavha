@@ -11946,4 +11946,15 @@
     <string name="SvipeSideMenuRemoveTitle">Remove from side menu</string>
     <string name="SvipeSideMenuRemoveText">Remove **%s** from the side menu?</string>
     <string name="SvipeSideMenuCant">This bot can\'t be added to the side menu.</string>
+    <string name="SvipeProfileTabRequest">**%s** asks to add a tab to your profile. People who open your profile in Svipe will see it.</string>
+    <string name="SvipeProfileTabAdd">Add to Profile</string>
+    <string name="SvipeProfileTabFullTitle">Profile tabs are full</string>
+    <string name="SvipeProfileTabFullText">Your profile can have up to %1$d bot tabs. Choose one to replace with **%2$s**.</string>
+    <string name="SvipeProfileTabAdded">**%s** tab added to your profile.</string>
+    <string name="SvipeProfileTabNotRegistered">This bot can\'t add a tab to your profile.</string>
+    <string name="SvipeProfileTabsTitle">Bot tabs</string>
+    <string name="SvipeProfileTabsInfo">Tabs that bots added to your profile with your permission. Tap one to choose who sees it.</string>
+    <string name="SvipeProfileTabEveryone">Everyone</string>
+    <string name="SvipeProfileTabOnlyMe">Only me</string>
+    <string name="SvipeProfileTabRemove">Remove from profile</string>
 </resources>
