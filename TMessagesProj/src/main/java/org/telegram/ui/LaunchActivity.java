@@ -1987,6 +1987,8 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                         boolean hasUrl = false;
                         String setAsAttachBot = null;
                         String attachMenuBotToOpen = null;
+                        // Svipe: t.me/<bot>?business=<rights> — the bot asks to be the business chatbot.
+                        String svipeBusiness = null;
                         String attachMenuBotChoose = null;
                         Integer taskId = null;
                         byte[] optionId = null;
@@ -2288,6 +2290,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                                                 setAsAttachBot = data.getQueryParameter("startattach");
                                                 attachMenuBotChoose = data.getQueryParameter("choose");
                                                 attachMenuBotToOpen = data.getQueryParameter("attach");
+                                                svipeBusiness = data.getQueryParameter("business");
                                                 botCompact = TextUtils.equals(data.getQueryParameter("mode"), "compact");
                                                 botFullscreen = TextUtils.equals(data.getQueryParameter("mode"), "fullscreen");
                                                 openProfile = data.getBooleanQueryParameter("profile", false);
@@ -2377,6 +2380,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                                             setAsAttachBot = data.getQueryParameter("startattach");
                                             attachMenuBotChoose = data.getQueryParameter("choose");
                                             attachMenuBotToOpen = data.getQueryParameter("attach");
+                                                svipeBusiness = data.getQueryParameter("business");
                                             messageId = Utilities.parseInt(data.getQueryParameter("post"));
                                             storyId = Utilities.parseInt(data.getQueryParameter("story"));
                                             giftCollectionId = Utilities.parseInt(data.getQueryParameter("collection"));
@@ -2885,6 +2889,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
                                 if (message != null && message.startsWith("@")) {
                                     message = " " + message;
                                 }
+                                if (svipeBusiness != null && username != null) {
+                                    org.telegram.svipe.SvipeBusinessBot.request(this, intentAccount[0], username, svipeBusiness);
+                                } else
                                 runLinkRequest(intentAccount[0], username, group, sticker, emoji, botUser, botChat, botChannel, botChatAdminParams, message, contactToken, folderSlug, text, hasUrl, messageId, channelId, threadId, commentId, game, auth, lang, unsupportedUrl, code, login, wallPaper, inputInvoiceSlug, uniqueGiftSlug, theme, voicechat, videochat, livestream, 0, videoTimestamp, setAsAttachBot, attachMenuBotToOpen, attachMenuBotChoose, botAppMaybe, startApp, progress, forceNotInternalForApps, storyId, liveStory, storyAlbumId, giftCollectionId, auctionSlug, stargiftPreviewSlug, isBoost, chatLinkSlug, botCompact, botFullscreen, openedTelegram, openProfile, forceRequest, referrer, taskId, openDirect, optionId);
                             } else {
                                 try (Cursor cursor = getContentResolver().query(intent.getData(), null, null, null, null)) {

@@ -11932,4 +11932,11 @@
     <string name="SvipeBotContactsDenied">**%s** has no access to your contacts.</string>
     <string name="SvipeBotContactsDeniedSettings">Change in bot settings &gt;</string>
     <string name="SvipeBotProfilePermissionContacts">Contacts</string>
+    <string name="SvipeBusinessBotRequestTitle">**%s** wants to be your business bot</string>
+    <string name="SvipeBusinessBotRequestText">It will work in your private chats with the rights below. You can change them or disconnect it at any time in Telegram Business → Chatbots.</string>
+    <string name="SvipeBusinessBotReplaces">It will replace **%s**, your current business bot.</string>
+    <string name="SvipeBusinessBotConnect">Connect</string>
+    <string name="SvipeBusinessBotConnected">**%s** is now your business bot</string>
+    <string name="SvipeBusinessBotPremium">Business bots need Telegram Premium.</string>
+    <string name="SvipeBusinessBotPremiumOpen">Premium</string>
 </resources>

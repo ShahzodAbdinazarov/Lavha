@@ -660,4 +660,11 @@
     <string name="SvipeBotContactsDenied">У **%s** нет доступа к вашим контактам.</string>
     <string name="SvipeBotContactsDeniedSettings">Изменить в настройках бота &gt;</string>
     <string name="SvipeBotProfilePermissionContacts">Контакты</string>
+    <string name="SvipeBusinessBotRequestTitle">**%s** хочет стать вашим бизнес-ботом</string>
+    <string name="SvipeBusinessBotRequestText">Он будет работать в ваших личных чатах с правами ниже. Изменить их или отключить бота можно в любое время в разделе Telegram для бизнеса → Чат-боты.</string>
+    <string name="SvipeBusinessBotReplaces">Он заменит вашего текущего бизнес-бота **%s**.</string>
+    <string name="SvipeBusinessBotConnect">Подключить</string>
+    <string name="SvipeBusinessBotConnected">**%s** теперь ваш бизнес-бот</string>
+    <string name="SvipeBusinessBotPremium">Бизнес-ботам нужен Telegram Premium.</string>
+    <string name="SvipeBusinessBotPremiumOpen">Premium</string>
 </resources>

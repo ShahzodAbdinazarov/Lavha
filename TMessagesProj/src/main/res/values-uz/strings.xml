@@ -387,4 +387,11 @@
     <string name="SvipeBotContactsDenied">**%s** kontaktlaringizni ko\'ra olmaydi.</string>
     <string name="SvipeBotContactsDeniedSettings">Bot sozlamalarida o\'zgartiring &gt;</string>
     <string name="SvipeBotProfilePermissionContacts">Kontaktlar</string>
+    <string name="SvipeBusinessBotRequestTitle">**%s** sizning biznes botingiz bo\'lishni so\'ramoqda</string>
+    <string name="SvipeBusinessBotRequestText">U shaxsiy chatlaringizda quyidagi huquqlar bilan ishlaydi. Ularni o\'zgartirish yoki botni uzish uchun Telegram Business → Chatbotlar bo\'limini oching.</string>
+    <string name="SvipeBusinessBotReplaces">U hozirgi biznes botingiz **%s** o\'rnini egallaydi.</string>
+    <string name="SvipeBusinessBotConnect">Ulash</string>
+    <string name="SvipeBusinessBotConnected">**%s** endi sizning biznes botingiz</string>
+    <string name="SvipeBusinessBotPremium">Biznes botlar uchun Telegram Premium kerak.</string>
+    <string name="SvipeBusinessBotPremiumOpen">Premium</string>
 </resources>
