@@ -4553,6 +4553,10 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             @Override
             public boolean showOptions(int page, View view) {
                 if (profileActivity == null) return false;
+                if (isUserBotTab(page)) { // Svipe: long press on a bot's tab: manage it (mine) or report it
+                    showUserBotTabOptions(userTabIndex(page));
+                    return true;
+                }
                 final boolean isChannel = isBroadcastChannelProfile();
                 if (getTab(page, isChannel) == null) {
                     return false;
@@ -7462,12 +7466,13 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     botTabShownTitle = botTabTitle();
                     tabs.add(new Pair(TAB_BOT_TAB, botTabShownTitle));
                 }
-                for (int i = 0; i < userTabAdapters.length; i++) { // Svipe: a person's bot tabs
-                    org.telegram.svipe.SvipeBotTab.State state = userTabAdapters[i] != null ? userTabAdapters[i].getState() : null;
-                    if (state != null) {
-                        userTabShownTitles[i] = state.title;
-                        tabs.add(new Pair(TAB_USER_BOT_TAB_0 + i, state.title));
-                    }
+            }
+            // Svipe: a person's bot tabs, also on my own profile (the stories view), where I manage them
+            for (int i = 0; i < userTabAdapters.length; i++) {
+                org.telegram.svipe.SvipeBotTab.State state = userTabAdapters[i] != null ? userTabAdapters[i].getState() : null;
+                if (state != null) {
+                    userTabShownTitles[i] = state.title;
+                    tabs.add(new Pair(TAB_USER_BOT_TAB_0 + i, state.title));
                 }
             }
             if (scrollSlidingTextTabStrip.isReordering()) {
