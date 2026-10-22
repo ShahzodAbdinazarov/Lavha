@@ -61,10 +61,14 @@ a shell settings put global package_verifier_user_consent 1
 a shell settings put global upload_apk_enable 1
 a shell pm trim-caches 4G >/dev/null 2>&1 || true
 
+# A fresh install each time, as a new user's is; the previous release would only take up the space the
+# update needs (a 6 GB emulator ran out at 1.3.14).
+a uninstall uz.svipe.app.web >/dev/null 2>&1 || true
 a logcat -c >/dev/null 2>&1 || true
-out=$(a install -r "$APK" 2>&1 | tr -d '\r')
+out=$(a install "$APK" 2>&1 | tr -d '\r')
 echo "  install: $(echo "$out" | grep -E "Success|Failure" | head -1)"
 sleep 15
 echo "  verifier:"
 a logcat -d 2>/dev/null | grep -iE "PackageVerifier|VerifyApps|uploadApk|Play Protect|harmful" | grep -iE "uz.svipe|upload|verdict|result|scan" | tail -8 | sed 's/^/    /'
+a uninstall uz.svipe.app.web >/dev/null 2>&1 || true
 exit 0
