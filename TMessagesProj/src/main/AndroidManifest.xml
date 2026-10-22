@@ -284,21 +284,44 @@
                 <!-- The dev host we used before dev.svipe.uz. Kept because links carrying it are
                      already out there and a build in the field still points at it. -->
                 <data android:host="lavha-dev.abdinazarov.uz" android:scheme="https" />
-                <!-- Only the paths the app answers: share codes (always 8 base62 characters) and
-                     svipe.uz/<bot>?… links (bot usernames end in "bot"). Every other page of ours, the
-                     docs at /bots/… above all, opens in the browser without passing through the app. -->
-                <data android:pathPattern="/........" />
-                <!-- Android 12+: by suffix. Older versions only have pathPattern, whose ".*" stops at
-                     the first "b" ("hisob_app_bot"), so it is spelled out for up to three earlier b's. -->
-                <data android:pathSuffix="bot" />
-                <data android:pathSuffix="Bot" />
-                <data android:pathSuffix="BOT" />
-                <data android:pathPattern="/.*bot" />
-                <data android:pathPattern="/.*b.*bot" />
-                <data android:pathPattern="/.*b.*b.*bot" />
-                <data android:pathPattern="/.*b.*b.*b.*bot" />
-                <data android:pathPattern="/.*Bot" />
-                <data android:pathPattern="/.*BOT" />
+                <!-- Everything on our hosts opens in the app except the few pages that are web pages
+                     (Android 15+: excluded here; older versions bounce them to a browser in
+                     SvipeShareLink.handle). A username never holds "/" or ".", so the prefixes and
+                     suffixes can't catch a link the app answers. -->
+                <uri-relative-filter-group android:allow="false"><data android:path="/" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/android" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/desktop" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/mac" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/windows" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/privacy" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/terms" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/delete" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/bots" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/admin" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/docs" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/redoc" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/health" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/topics" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/trending" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:path="/channels" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathPrefix="/bots/" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathPrefix="/admin/" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathPrefix="/dl/" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathPrefix="/js/" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathPrefix="/static/" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathPrefix="/blob/" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathPrefix="/api/" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathPrefix="/v1/" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathPrefix="/topics/" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathPrefix="/.well-known/" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathSuffix=".xml" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathSuffix=".json" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathSuffix=".txt" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathSuffix=".png" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathSuffix=".ico" /></uri-relative-filter-group>
+                <uri-relative-filter-group android:allow="false"><data android:pathSuffix=".apk" /></uri-relative-filter-group>
+                <!-- Groups are tried in order and the first that matches decides: anything else is ours. -->
+                <uri-relative-filter-group android:allow="true"><data android:pathPattern=".*" /></uri-relative-filter-group>
             </intent-filter>
             <intent-filter android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:priority="1">
                 <action android:name="android.intent.action.VIEW"/>

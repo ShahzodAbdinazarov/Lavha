@@ -53,7 +53,7 @@ public final class SvipeShareLink {
     private static final java.util.Set<String> RESERVED = new java.util.HashSet<>(java.util.Arrays.asList(
             "api", "admin", "health", "dl", "privacy", "terms", "delete", "webapp", "docs", "redoc",
             "openapi.json", "favicon.ico", "robots.txt", "static", "assets", "og.png", "v1", "r", "s",
-            "android"));
+            "android", "bots", "desktop", "mac", "windows", "topics", "trending", "channels", "sitemap.xml"));
 
     public static boolean isOurHost(Uri uri) {
         if (uri == null || uri.getHost() == null) {
@@ -78,10 +78,21 @@ public final class SvipeShareLink {
      * their t.me form, so they go on as that; anything else is returned unchanged.
      */
     public static Uri botLinkAsTelegram(Uri uri) {
-        if (!isOurHost(uri) || uri.getQuery() == null) {
+        if (!isOurHost(uri)) {
             return uri;
         }
         final List<String> segments = uri.getPathSegments();
+        // The web pages of a channel and of its posts (app/seo): in the app, the channel and the post.
+        if (segments != null && segments.size() == 1 && segments.get(0).matches("@[A-Za-z0-9_]{4,32}")) {
+            return Uri.parse("https://t.me/" + segments.get(0).substring(1));
+        }
+        if (segments != null && segments.size() == 3 && "v".equals(segments.get(0))
+                && segments.get(1).matches("[A-Za-z0-9_]{4,32}") && segments.get(2).matches("[0-9]{1,12}")) {
+            return Uri.parse("https://t.me/" + segments.get(1) + "/" + segments.get(2));
+        }
+        if (uri.getQuery() == null) {
+            return uri;
+        }
         if (segments == null || segments.size() != 1 || !segments.get(0).matches("[A-Za-z0-9_]{4,32}")) {
             return uri;
         }
