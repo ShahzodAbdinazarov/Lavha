@@ -317,6 +317,9 @@ public final class SvipeProfileTabs {
                     return;
                 }
                 ArrayList<Tab> tabs = parseTabs(res);
+                AndroidUtilities.runOnUIThread(() -> {
+                    for (Tab tab : tabs) SvipeAttachMenu.get(account).presignProfile(tab.botId, ownerId);
+                });
                 ArrayList<SvipeBotTab.State> states = new ArrayList<>();
                 if (tabs.isEmpty()) {
                     profileCache.put(ownerId, states);

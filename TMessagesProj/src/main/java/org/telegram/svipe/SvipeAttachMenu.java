@@ -669,6 +669,34 @@ public class SvipeAttachMenu {
         }
     }
 
+    /**
+     * Cards of {@code botId}'s tab are shown on {@code ownerId}'s profile: a "profile" signature has no
+     * chat_instance from Telegram, so it can be asked for now and is ready when a card is tapped.
+     */
+    public void presignProfile(long botId, long ownerId) {
+        final String key = "profile:" + presignKey(botId, ownerId);
+        Object[] ready = presigned.get(key);
+        if (ready != null && System.currentTimeMillis() - (Long) ready[2] < PRESIGN_TTL_MS / 2) {
+            return;
+        }
+        final JSONObject body;
+        try {
+            body = contextBody(botId, ownerId, "", null);
+            body.put("chat_type", "profile");
+        } catch (Exception e) {
+            return;
+        }
+        SvipeAuth.ensureToken(currentAccount, token -> {
+            if (token == null) return;
+            SvipeApi.postUrgent("/v1/attach/context", body, token, (res, code, err) -> AndroidUtilities.runOnUIThread(() -> {
+                String signed = res != null && code == 200 ? res.optString("svipe_init_data", "") : "";
+                if (!TextUtils.isEmpty(signed)) {
+                    presigned.put(key, new Object[]{signed, "profile", System.currentTimeMillis()});
+                }
+            }));
+        });
+    }
+
     /** {@code chatType}: signed as given instead of Telegram's, e.g. "profile" for a profile tab's card. */
     public void signContext(long botId, long peerId, String url, String startParam, String chatType, Utilities.Callback<String> whenDone) {
         final boolean[] done = new boolean[1];
@@ -689,6 +717,12 @@ public class SvipeAttachMenu {
             if (chatType != null) {
                 body.put("chat_type", chatType);
                 body.remove("chat_instance");
+                // Signed ahead when the profile's tabs were shown (presignProfile).
+                Object[] ready = TextUtils.isEmpty(startParam) ? presigned.remove(chatType + ":" + presignKey(botId, peerId)) : null;
+                if (ready != null && System.currentTimeMillis() - (Long) ready[2] < PRESIGN_TTL_MS) {
+                    finish.run(url + "&tgWebAppSvipeData=" + URLEncoder.encode((String) ready[0], "UTF-8"));
+                    return;
+                }
             } else if (TextUtils.isEmpty(startParam)) {
                 // Signed ahead with this very chat_instance: nothing to wait for (presign).
                 final String key = presignKey(botId, peerId);
