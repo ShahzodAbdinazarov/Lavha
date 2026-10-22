@@ -284,6 +284,21 @@
                 <!-- The dev host we used before dev.svipe.uz. Kept because links carrying it are
                      already out there and a build in the field still points at it. -->
                 <data android:host="lavha-dev.abdinazarov.uz" android:scheme="https" />
+                <!-- Only the paths the app answers: share codes (always 8 base62 characters) and
+                     svipe.uz/<bot>?… links (bot usernames end in "bot"). Every other page of ours, the
+                     docs at /bots/… above all, opens in the browser without passing through the app. -->
+                <data android:pathPattern="/........" />
+                <!-- Android 12+: by suffix. Older versions only have pathPattern, whose ".*" stops at
+                     the first "b" ("hisob_app_bot"), so it is spelled out for up to three earlier b's. -->
+                <data android:pathSuffix="bot" />
+                <data android:pathSuffix="Bot" />
+                <data android:pathSuffix="BOT" />
+                <data android:pathPattern="/.*bot" />
+                <data android:pathPattern="/.*b.*bot" />
+                <data android:pathPattern="/.*b.*b.*bot" />
+                <data android:pathPattern="/.*b.*b.*b.*bot" />
+                <data android:pathPattern="/.*Bot" />
+                <data android:pathPattern="/.*BOT" />
             </intent-filter>
             <intent-filter android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:priority="1">
                 <action android:name="android.intent.action.VIEW"/>
