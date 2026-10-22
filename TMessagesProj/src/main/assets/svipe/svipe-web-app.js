@@ -852,4 +852,9 @@
     WebView.postEvent('web_app_send_to_chat', false, { id: String(preparedMessageId || '') });
     return Telegram.WebApp;
   };
+
+  // The app sends this when it has finished downloading a new version of the page's files.
+  WebView.onEvent('svipe_cache_updated', function (eventType, eventData) {
+    emit('svipeCacheUpdated', { version: String((eventData && eventData.version) || '') });
+  });
 })();
