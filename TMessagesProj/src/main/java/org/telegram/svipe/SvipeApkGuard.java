@@ -19,6 +19,7 @@ import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.NotificationCenter;
+import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.TLRPC;
 
 import java.io.File;
@@ -87,6 +88,8 @@ public final class SvipeApkGuard {
     private static final String KEY_VERDICTS = "verdicts";
     private static final String KEY_REPORTED = "reported";
     private static final String KEY_EVIDENCE = "evidence";
+    private static final String KEY_SOURCES = "sources";
+    private static final String KEY_MODERATOR = "moderator";
 
     /** Verdicts kept on disk. Small rows; this is a couple of hundred documents at most. */
     private static final int MAX_CACHED = 400;
@@ -120,6 +123,15 @@ public final class SvipeApkGuard {
     private static final LinkedHashMap<Long, int[]> evidence = new LinkedHashMap<>();
     /** doc_ids the server told us it already has a hash for, plus the ones we reported ourselves. */
     private static final LinkedHashSet<Long> reported = new LinkedHashSet<>();
+    /**
+     * doc_id -> who called it malicious, when that was not a scanner: "lure" (the message is dressed up
+     * as pictures), "campaign" (the same words carried known malware), "owner" (marked by hand). These
+     * are the verdicts that can be taken back, so they are re-asked like the others, and the warning
+     * says which of them it was instead of claiming an antivirus database.
+     */
+    private static final LinkedHashMap<Long, String> sources = new LinkedHashMap<>();
+    /** doc_id -> {caption, sender}: what the server's lure rules read before any download. */
+    private static final java.util.HashMap<Long, String[]> contexts = new java.util.HashMap<>();
     /** doc_ids waiting to be asked about, with the little we know about them before a download. */
     private static final LinkedHashMap<Long, TLRPC.Document> pending = new LinkedHashMap<>();
     /**
@@ -202,7 +214,7 @@ public final class SvipeApkGuard {
             cached = verdicts.get(doc.id);
         }
         if (cached == null) {
-            enqueue(messageObject.currentAccount, doc);
+            enqueue(messageObject.currentAccount, doc, messageObject);
             return UNKNOWN;
         }
         // A cached answer is not a final one. Most files are `unknown` the first time anybody sees
@@ -215,8 +227,8 @@ public final class SvipeApkGuard {
         // immediately (no wait, no flicker) and the answer, if it changed, arrives moments later
         // through svipeApkVerdictUpdated. `malicious` is not re-asked — nothing it could change to
         // would make the file safe to open.
-        if (cached != MALICIOUS && refreshed.add(doc.id)) {
-            enqueue(messageObject.currentAccount, doc);
+        if ((cached != MALICIOUS || isRevocable(doc.id)) && refreshed.add(doc.id)) {
+            enqueue(messageObject.currentAccount, doc, messageObject);
         }
         return cached;
     }
@@ -236,7 +248,26 @@ public final class SvipeApkGuard {
      * Lookups
      * ------------------------------------------------------------------ */
 
-    private static void enqueue(int account, TLRPC.Document doc) {
+    private static boolean isRevocable(long docId) {
+        synchronized (verdicts) {
+            return sources.containsKey(docId);
+        }
+    }
+
+    private static void enqueue(int account, TLRPC.Document doc, MessageObject messageObject) {
+        if (messageObject != null && messageObject.messageOwner != null) {
+            String sender = null;
+            final long from = messageObject.getFromChatId();
+            if (from > 0) {
+                final TLRPC.User user = org.telegram.messenger.MessagesController.getInstance(account).getUser(from);
+                if (user != null && org.telegram.messenger.UserObject.isDeleted(user)) {
+                    sender = "deleted";
+                }
+            }
+            synchronized (contexts) {
+                contexts.put(doc.id, new String[]{messageObject.messageOwner.message, sender});
+            }
+        }
         synchronized (pending) {
             if (pending.containsKey(doc.id)) {
                 return;
@@ -305,6 +336,18 @@ public final class SvipeApkGuard {
                 if (!TextUtils.isEmpty(name)) {
                     o.put("file_name", name);
                 }
+                final String[] ctx;
+                synchronized (contexts) {
+                    ctx = contexts.remove(d.id);
+                }
+                if (ctx != null) {
+                    if (!TextUtils.isEmpty(ctx[0])) {
+                        o.put("caption", ctx[0].length() > 4000 ? ctx[0].substring(0, 4000) : ctx[0]);
+                    }
+                    if (ctx[1] != null) {
+                        o.put("sender", ctx[1]);
+                    }
+                }
                 items.put(o);
             }
             body.put("items", items);
@@ -330,6 +373,9 @@ public final class SvipeApkGuard {
             if (res == null) {
                 return;
             }
+            if (res.has("moderator")) {
+                prefs().edit().putBoolean(KEY_MODERATOR + account, res.optBoolean("moderator")).apply();
+            }
             final JSONArray arr = res.optJSONArray("verdicts");
             if (arr == null) {
                 return;
@@ -344,6 +390,7 @@ public final class SvipeApkGuard {
                 if (docId == 0) {
                     continue;
                 }
+                changed |= noteSource(docId, o.optString("verdict", "unknown"), o.optString("source", ""));
                 changed |= put(docId, parseVerdict(o.optString("verdict", "unknown")));
                 noteEvidence(docId, o);
                 if (o.optBoolean("hashed")) {
@@ -449,8 +496,22 @@ public final class SvipeApkGuard {
     /** "Flagged by 13 of 76 antivirus engines", or the honest fallback when no scan produced counts. */
     private static String evidenceLine(long docId) {
         final int[] ev;
+        final String source;
         synchronized (verdicts) {
             ev = evidence.get(docId);
+            source = sources.get(docId);
+        }
+        if ("lure".equals(source)) {
+            return org.telegram.messenger.LocaleController.getString(
+                    org.telegram.messenger.R.string.SvipeApkBlockedLure);
+        }
+        if ("campaign".equals(source)) {
+            return org.telegram.messenger.LocaleController.getString(
+                    org.telegram.messenger.R.string.SvipeApkBlockedCampaign);
+        }
+        if ("owner".equals(source)) {
+            return org.telegram.messenger.LocaleController.getString(
+                    org.telegram.messenger.R.string.SvipeApkBlockedOwner);
         }
         if (ev == null || ev[0] <= 0 || ev[1] <= 0) {
             return org.telegram.messenger.LocaleController.getString(
@@ -458,6 +519,69 @@ public final class SvipeApkGuard {
         }
         return org.telegram.messenger.LocaleController.formatString(
                 org.telegram.messenger.R.string.SvipeApkBlockedEngines, ev[0], ev[1]);
+    }
+
+    /** Remembers a revocable source for a malicious verdict; true when that changes the warning's text. */
+    private static boolean noteSource(long docId, String verdict, String source) {
+        final boolean revocable = "malicious".equals(verdict)
+                && ("lure".equals(source) || "campaign".equals(source) || "owner".equals(source));
+        synchronized (verdicts) {
+            final String old = revocable ? sources.put(docId, source) : sources.remove(docId);
+            while (sources.size() > MAX_CACHED) {
+                sources.remove(sources.keySet().iterator().next());
+            }
+            return !TextUtils.equals(old, revocable ? source : null);
+        }
+    }
+
+    /** True on the owner's accounts: the message menu offers "Mark as virus" on APKs. */
+    public static boolean isModerator(int account) {
+        return prefs().getBoolean(KEY_MODERATOR + account, false);
+    }
+
+    /** True when this message's file currently carries the owner's own mark. */
+    public static boolean isMarkedByOwner(MessageObject messageObject) {
+        if (!isApkMessage(messageObject)) {
+            return false;
+        }
+        synchronized (verdicts) {
+            return "owner".equals(sources.get(messageObject.getDocument().id));
+        }
+    }
+
+    /** The owner marks (or unmarks) this APK as malware for everybody. {@code done} gets the outcome. */
+    public static void mark(int account, MessageObject messageObject, boolean malicious, Utilities.Callback<Boolean> done) {
+        if (!isApkMessage(messageObject)) {
+            done.run(false);
+            return;
+        }
+        final long docId = messageObject.getDocument().id;
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                AndroidUtilities.runOnUIThread(() -> done.run(false));
+                return;
+            }
+            final JSONObject body = new JSONObject();
+            try {
+                body.put("doc_id", docId).put("malicious", malicious);
+            } catch (Exception ignore) {
+            }
+            SvipeApi.post("/v1/apk/mark", body, token, (res, code, err) -> {
+                final boolean ok = res != null && code == 200;
+                if (ok) {
+                    final String verdict = res.optString("verdict", "unknown");
+                    noteSource(docId, verdict, res.optString("source", ""));
+                    put(docId, parseVerdict(verdict));
+                    persist();
+                }
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (ok) {
+                        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.svipeApkVerdictUpdated);
+                    }
+                    done.run(ok);
+                });
+            });
+        });
     }
 
     private static void noteEvidence(long docId, JSONObject o) {
@@ -943,6 +1067,17 @@ public final class SvipeApkGuard {
                         }
                     }
                 }
+                final String rawSources = p.getString(KEY_SOURCES, null);
+                if (rawSources != null) {
+                    final JSONObject o = new JSONObject(rawSources);
+                    final java.util.Iterator<String> it = o.keys();
+                    synchronized (verdicts) {
+                        while (it.hasNext()) {
+                            final String k = it.next();
+                            sources.put(Long.parseLong(k), o.optString(k));
+                        }
+                    }
+                }
                 final String rawReported = p.getString(KEY_REPORTED, null);
                 if (rawReported != null) {
                     final JSONArray arr = new JSONArray(rawReported);
@@ -979,8 +1114,15 @@ public final class SvipeApkGuard {
                             new JSONArray().put(e.getValue()[0]).put(e.getValue()[1]));
                 }
             }
+            final JSONObject src = new JSONObject();
+            synchronized (verdicts) {
+                for (Map.Entry<Long, String> e : sources.entrySet()) {
+                    src.put(String.valueOf(e.getKey()), e.getValue());
+                }
+            }
             prefs().edit().putString(KEY_VERDICTS, o.toString())
                     .putString(KEY_EVIDENCE, ev.toString())
+                    .putString(KEY_SOURCES, src.toString())
                     .putString(KEY_REPORTED, arr.toString()).apply();
         } catch (Exception ignore) {
         }

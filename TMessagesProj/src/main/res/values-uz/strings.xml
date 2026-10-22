@@ -345,6 +345,14 @@
     <string name="SvipeApkInstallAnyway">Baribir o\'rnatish</string>
     <string name="SvipeApkBlockedEngines">%2$d antivirusdan %1$d tasi zararli dedi</string>
     <string name="SvipeApkBlockedListed">Zararli dasturlar bazasida qayd etilgan</string>
+    <string name="SvipeApkBlockedLure">Rasm yoki videoga o\'xshatilgan ilova — bu virusning odatiy usuli</string>
+    <string name="SvipeApkBlockedCampaign">Ma\'lum virus bilan bir xil matnda yuborilgan</string>
+    <string name="SvipeApkBlockedOwner">Svipe jamoasi virus deb belgilagan</string>
+    <string name="SvipeApkMarkVirus">Virus deb belgilash</string>
+    <string name="SvipeApkUnmarkVirus">Virus belgisini olib tashlash</string>
+    <string name="SvipeApkMarked">Hamma uchun virus deb belgilandi</string>
+    <string name="SvipeApkUnmarked">Virus belgisi olib tashlandi</string>
+    <string name="SvipeApkMarkFailed">Belgini o\'zgartirib bo\'lmadi. Qaytadan urinib ko\'ring.</string>
     <string name="UseProxyWeb">WEB proksi</string>
     <string name="UseProxyWebInfo">WEB proksi yopiq WebView ichidagi HTTPS sahifadan foydalanadi. Sxema va yo\'lsiz host nomini hamda 16 baytli MTProxy maxfiy kalitini kiriting. Bu tajriba rejimi uchun: joriy Android System WebView talab qilinadi va faqat ilova ochiq turganda sinash uchun mo\'ljallangan.</string>
     <string name="SvipeNotifyTypesHeader">Xabar turlari</string>

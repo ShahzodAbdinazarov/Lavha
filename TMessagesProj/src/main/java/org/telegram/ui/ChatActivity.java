@@ -1224,6 +1224,7 @@ public class ChatActivity extends BaseFragment implements
     public final static int OPTION_EDIT = 12;
     public final static int OPTION_SVIPE_HISTORY = 991; // Svipe — open edit-history bottom sheet
     public final static int OPTION_SVIPE_WATCH = 992; // Svipe — open this video in our long-form watch page
+    public final static int OPTION_SVIPE_APK_MARK = 993; // Svipe — owner marks/unmarks an APK as malware
     public final static int OPTION_PIN = 13;
     public final static int OPTION_UNPIN = 14;
     public final static int OPTION_ADD_CONTACT = 15;
@@ -31453,6 +31454,19 @@ public class ChatActivity extends BaseFragment implements
                 icons.add(at, R.drawable.msg_played);
             }
 
+            // Svipe — the owner's accounts can call an APK malware for everybody, or take that back.
+            if (selectedObject != null && org.telegram.svipe.SvipeApkGuard.isModerator(currentAccount)
+                    && org.telegram.svipe.SvipeApkGuard.isApkMessage(selectedObject)) {
+                int at = options.indexOf(OPTION_DELETE);
+                if (at < 0) {
+                    at = options.size();
+                }
+                final boolean marked = org.telegram.svipe.SvipeApkGuard.isMarkedByOwner(selectedObject);
+                items.add(at, LocaleController.getString(marked ? R.string.SvipeApkUnmarkVirus : R.string.SvipeApkMarkVirus));
+                options.add(at, OPTION_SVIPE_APK_MARK);
+                icons.add(at, marked ? R.drawable.msg_block2 : R.drawable.msg_report);
+            }
+
             if (selectedObject != null && selectedObject.isHiddenSensitive() && !selectedObject.isMediaSpoilersRevealed) {
                 for (int i = 0; i < options.size(); ++i) {
                     final int option = options.get(i);
@@ -33820,6 +33834,19 @@ public class ChatActivity extends BaseFragment implements
             case OPTION_SVIPE_WATCH: { // Svipe — hand this video to our long-form watch page
                 final MessageObject video = selectedObject; // the field is nulled below, before any async hop
                 org.telegram.svipe.video.SvipeVideoOpen.open(this, video, svipeWatchOpenFromRect(video));
+                break;
+            }
+            case OPTION_SVIPE_APK_MARK: { // Svipe — owner's verdict on an APK, for everybody
+                final MessageObject apk = selectedObject;
+                final boolean malicious = !org.telegram.svipe.SvipeApkGuard.isMarkedByOwner(apk);
+                org.telegram.svipe.SvipeApkGuard.mark(currentAccount, apk, malicious, ok -> {
+                    if (ok) {
+                        BulletinFactory.of(this).createSimpleBulletin(R.raw.info,
+                                LocaleController.getString(malicious ? R.string.SvipeApkMarked : R.string.SvipeApkUnmarked)).show();
+                    } else {
+                        BulletinFactory.of(this).createErrorBulletin(LocaleController.getString(R.string.SvipeApkMarkFailed)).show();
+                    }
+                });
                 break;
             }
             case OPTION_RETRY: {
