@@ -692,6 +692,7 @@ public class SvipeAttachMenu {
                 String signed = res != null && code == 200 ? res.optString("svipe_init_data", "") : "";
                 if (!TextUtils.isEmpty(signed)) {
                     presigned.put(key, new Object[]{signed, "profile", System.currentTimeMillis()});
+                    FileLog.d("svipe presign " + key);
                 }
             }));
         });
@@ -720,6 +721,7 @@ public class SvipeAttachMenu {
                 // Signed ahead when the profile's tabs were shown (presignProfile).
                 Object[] ready = TextUtils.isEmpty(startParam) ? presigned.remove(chatType + ":" + presignKey(botId, peerId)) : null;
                 if (ready != null && System.currentTimeMillis() - (Long) ready[2] < PRESIGN_TTL_MS) {
+                    FileLog.d("svipe presigned used " + chatType);
                     finish.run(url + "&tgWebAppSvipeData=" + URLEncoder.encode((String) ready[0], "UTF-8"));
                     return;
                 }
