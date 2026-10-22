@@ -599,6 +599,14 @@ public class SvipeAttachMenu {
         signContext(botId, peerId, url, startParam, null, whenDone);
     }
 
+    /**
+     * Called as the mini app is requested from Telegram: gets our token (and the connection to our server)
+     * ready meanwhile, so signing after Telegram answers is one short request instead of a whole chain.
+     */
+    public void prewarm() {
+        SvipeAuth.ensureToken(currentAccount, token -> {});
+    }
+
     /** {@code chatType}: signed as given instead of Telegram's, e.g. "profile" for a profile tab's card. */
     public void signContext(long botId, long peerId, String url, String startParam, String chatType, Utilities.Callback<String> whenDone) {
         final boolean[] done = new boolean[1];
@@ -611,7 +619,8 @@ public class SvipeAttachMenu {
             finish.run(url);
             return;
         }
-        AndroidUtilities.runOnUIThread(() -> finish.run(url), 2500);
+        // Long enough for a slow mobile network once the token and connection are warm (prewarm).
+        AndroidUtilities.runOnUIThread(() -> finish.run(url), 4000);
         final JSONObject body;
         try {
             body = contextBody(botId, peerId, url, startParam);
@@ -629,7 +638,7 @@ public class SvipeAttachMenu {
                 AndroidUtilities.runOnUIThread(() -> finish.run(url));
                 return;
             }
-            SvipeApi.post("/v1/attach/context", body, token, (res, code, err) -> AndroidUtilities.runOnUIThread(() -> {
+            SvipeApi.postUrgent("/v1/attach/context", body, token, (res, code, err) -> AndroidUtilities.runOnUIThread(() -> {
                 String signed = res != null && code == 200 ? res.optString("svipe_init_data", "") : "";
                 if (TextUtils.isEmpty(signed)) {
                     finish.run(url);

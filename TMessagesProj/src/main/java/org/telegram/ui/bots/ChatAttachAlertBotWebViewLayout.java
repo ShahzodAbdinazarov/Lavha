@@ -598,6 +598,9 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
             req.flags |= 4;
         }
 
+        if (svipeBot != null) {
+            SvipeAttachMenu.get(currentAccount).prewarm(); // Svipe: in parallel with Telegram's answer
+        }
         ConnectionsManager.getInstance(currentAccount).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
             if (response instanceof TLRPC.TL_webViewResultUrl) {
                 TLRPC.TL_webViewResultUrl resultUrl = (TLRPC.TL_webViewResultUrl) response;
@@ -767,6 +770,7 @@ public class ChatAttachAlertBotWebViewLayout extends ChatAttachAlert.AttachAlert
             req.theme_params.data = theme_params.toString();
             req.flags |= 1;
         }
+        SvipeAttachMenu.get(currentAccount).prewarm(); // Svipe: in parallel with Telegram's answer
         ConnectionsManager.getInstance(currentAccount).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
             if (response instanceof TLRPC.TL_webViewResultUrl) {
                 TLRPC.TL_webViewResultUrl resultUrl = (TLRPC.TL_webViewResultUrl) response;

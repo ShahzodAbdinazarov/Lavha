@@ -308,7 +308,21 @@ public class SvipeApi {
     }
 
     private static void request(String method, String path, JSONObject body, String bearer, JsonCallback cb) {
-        submit(() -> {
+        request(NET, method, path, body, bearer, cb);
+    }
+
+    // A call the user is waiting on with the screen open (signing a mini app's launch). NET's four threads
+    // are shared with feed prefetch and telemetry, and a request queued behind them made the mini app
+    // load late, or without its signature when the wait ran out.
+    private static final java.util.concurrent.ExecutorService URGENT = java.util.concurrent.Executors.newFixedThreadPool(2);
+
+    public static void postUrgent(String path, JSONObject body, String bearer, JsonCallback cb) {
+        request(URGENT, "POST", path, body, bearer, cb);
+    }
+
+    private static void request(java.util.concurrent.ExecutorService pool, String method, String path, JSONObject body,
+                                String bearer, JsonCallback cb) {
+        Runnable work = () -> {
             HttpURLConnection conn = null;
             // Every call to our own backend is timed and logged. Without this the cold start can only
             // be measured in brackets — "somewhere between the webview result and the first resolve"
@@ -366,7 +380,13 @@ public class SvipeApi {
                     try { conn.disconnect(); } catch (Exception ignore) {}
                 }
             }
-        });
+        };
+        try {
+            pool.execute(work);
+        } catch (Throwable t) {
+            FileLog.e(t);
+            Utilities.globalQueue.postRunnable(work);
+        }
     }
 
     private static String readStream(InputStream is) throws Exception {
