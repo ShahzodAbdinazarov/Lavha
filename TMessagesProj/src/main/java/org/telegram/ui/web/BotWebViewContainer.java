@@ -1084,7 +1084,23 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
             checkCreateWebView();
             if (webView != null) {
                 webView.onResume();
-                webView.loadUrl(url);
+                if (bot) {
+                    // Svipe: a bot that keeps its files on the device may want the manifest checked first;
+                    // a newer version found while the page is open is announced to it (SvipeMiniAppCache).
+                    final MyWebView view = webView;
+                    org.telegram.svipe.SvipeMiniAppCache.beforeLoad(url, () -> {
+                        if (webView == view && TextUtils.equals(mUrl, url)) view.loadUrl(url);
+                    }, version -> {
+                        JSONObject data = new JSONObject();
+                        try {
+                            data.put("version", version);
+                        } catch (Exception ignore) {
+                        }
+                        notifyEvent("svipe_cache_updated", data);
+                    });
+                } else {
+                    webView.loadUrl(url);
+                }
             }
             updateKeyboardFocusable();
         });
@@ -4283,6 +4299,13 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                 @Override
                 public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                     d("shouldInterceptRequest " + (request == null ? null : request.getUrl()));
+                    if (bot && request != null) { // Svipe: our helper and the bot's own kept files, from disk
+                        WebResourceResponse kept = org.telegram.svipe.SvipeMiniAppCache.intercept(request.getUrl(), request.getMethod());
+                        if (kept != null) {
+                            firstRequest = false;
+                            return kept;
+                        }
+                    }
                     if (request != null && isTonsite(request.getUrl())) {
                         d("proxying ton");
                         firstRequest = false;

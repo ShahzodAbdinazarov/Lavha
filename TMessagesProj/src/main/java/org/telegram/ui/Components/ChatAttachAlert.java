@@ -6877,6 +6877,7 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                             }
                         }
 
+                        SvipeAttachMenu.get(currentAccount).presign(chatActivity.getDialogId()); // Svipe: signed before the tap
                         buttonsCount += attachMenuBots.size();
                         attachBotsEndRow = buttonsCount;
                     }

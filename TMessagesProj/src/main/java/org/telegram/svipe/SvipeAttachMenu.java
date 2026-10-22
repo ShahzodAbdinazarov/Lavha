@@ -607,6 +607,68 @@ public class SvipeAttachMenu {
         SvipeAuth.ensureToken(currentAccount, token -> {});
     }
 
+    // Signed ahead (presign): Telegram's chat_instance is the same every time a bot is opened in a chat, so
+    // after the first launch the signature can be asked for when the attachment menu opens, and is ready
+    // by the time the person taps the bot. bot:peer -> {chat_type, chat_instance}; and -> {signed, chat_instance, at}.
+    private static final long PRESIGN_TTL_MS = 10 * 60 * 1000;
+    private final java.util.HashMap<String, String[]> chatInstances = new java.util.HashMap<>();
+    private final java.util.HashMap<String, Object[]> presigned = new java.util.HashMap<>();
+
+    private static String presignKey(long botId, long peerId) {
+        return botId + ":" + peerId;
+    }
+
+    private String[] instanceOf(String key) {
+        String[] known = chatInstances.get(key);
+        if (known == null) {
+            String saved = ApplicationLoader.applicationContext.getSharedPreferences("svipe_attach_presign" + currentAccount, android.content.Context.MODE_PRIVATE).getString(key, null);
+            int bar = saved != null ? saved.indexOf('|') : -1;
+            if (bar > 0) {
+                known = new String[]{saved.substring(0, bar), saved.substring(bar + 1)};
+                chatInstances.put(key, known);
+            }
+        }
+        return known;
+    }
+
+    private void rememberInstance(String key, String chatType, String chatInstance) {
+        if (TextUtils.isEmpty(chatType) || TextUtils.isEmpty(chatInstance)) return;
+        String[] known = instanceOf(key);
+        if (known != null && known[0].equals(chatType) && known[1].equals(chatInstance)) return;
+        chatInstances.put(key, new String[]{chatType, chatInstance});
+        ApplicationLoader.applicationContext.getSharedPreferences("svipe_attach_presign" + currentAccount, android.content.Context.MODE_PRIVATE)
+                .edit().putString(key, chatType + "|" + chatInstance).apply();
+    }
+
+    /** The attachment menu opened in {@code peerId}: sign ahead for each of our bots opened here before. */
+    public void presign(long peerId) {
+        for (TLRPC.TL_attachMenuBot bot : getBots()) {
+            final String key = presignKey(bot.bot_id, peerId);
+            final String[] known = instanceOf(key);
+            Object[] ready = presigned.get(key);
+            if (known == null || ready != null && System.currentTimeMillis() - (Long) ready[2] < PRESIGN_TTL_MS / 2) {
+                continue;
+            }
+            final JSONObject body;
+            try {
+                body = contextBody(bot.bot_id, peerId, "", null);
+                body.put("chat_type", known[0]);
+                body.put("chat_instance", known[1]);
+            } catch (Exception e) {
+                continue;
+            }
+            SvipeAuth.ensureToken(currentAccount, token -> {
+                if (token == null) return;
+                SvipeApi.postUrgent("/v1/attach/context", body, token, (res, code, err) -> AndroidUtilities.runOnUIThread(() -> {
+                    String signed = res != null && code == 200 ? res.optString("svipe_init_data", "") : "";
+                    if (!TextUtils.isEmpty(signed)) {
+                        presigned.put(key, new Object[]{signed, known[1], System.currentTimeMillis()});
+                    }
+                }));
+            });
+        }
+    }
+
     /** {@code chatType}: signed as given instead of Telegram's, e.g. "profile" for a profile tab's card. */
     public void signContext(long botId, long peerId, String url, String startParam, String chatType, Utilities.Callback<String> whenDone) {
         final boolean[] done = new boolean[1];
@@ -627,6 +689,16 @@ public class SvipeAttachMenu {
             if (chatType != null) {
                 body.put("chat_type", chatType);
                 body.remove("chat_instance");
+            } else if (TextUtils.isEmpty(startParam)) {
+                // Signed ahead with this very chat_instance: nothing to wait for (presign).
+                final String key = presignKey(botId, peerId);
+                rememberInstance(key, body.optString("chat_type", null), body.optString("chat_instance", null));
+                Object[] ready = presigned.remove(key);
+                if (ready != null && TextUtils.equals((String) ready[1], body.optString("chat_instance", null))
+                        && System.currentTimeMillis() - (Long) ready[2] < PRESIGN_TTL_MS) {
+                    finish.run(url + "&tgWebAppSvipeData=" + URLEncoder.encode((String) ready[0], "UTF-8"));
+                    return;
+                }
             }
         } catch (Exception e) {
             FileLog.e(e);
