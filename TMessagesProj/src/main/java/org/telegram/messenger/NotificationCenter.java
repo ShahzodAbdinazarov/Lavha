@@ -410,6 +410,7 @@ public class NotificationCenter {
     // drawn as an ordinary file may now have to be drawn as a warning — or hidden outright. Global:
     // the same file can be on screen in more than one chat at once.
     public static final int svipeApkVerdictUpdated = totalEvents++;
+    public static final int svipeSttEngineChanged = totalEvents++;
 
     public static boolean alreadyLogged;
 

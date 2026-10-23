@@ -3076,8 +3076,16 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         return false;
     }
 
+    // Svipe: a long press on the transcribe button swaps its engine (S/A), so the message menu
+    // must not open from that same press.
+    private boolean transcribeOwnsLongPress;
+
     private boolean checkTranscribeButtonMotionEvent(MotionEvent event) {
-        return useTranscribeButton && (!isPlayingRound || getVideoTranscriptionProgress() > 0 || wasTranscriptionOpen) && transcribeButton != null && transcribeButton.onTouch(event.getAction(), getEventX(event), getEventY(event));
+        final boolean handled = useTranscribeButton && (!isPlayingRound || getVideoTranscriptionProgress() > 0 || wasTranscriptionOpen) && transcribeButton != null && transcribeButton.onTouch(event.getAction(), getEventX(event), getEventY(event));
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            transcribeOwnsLongPress = handled && org.telegram.svipe.SvipeStt.available(currentAccount);
+        }
+        return handled;
     }
 
     private boolean checkLinkPreviewMotionEvent(MotionEvent event) {
@@ -5125,7 +5133,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             }
         }
         updateRadialProgressBackground();
-        if (!disallowLongPress && result && event.getAction() == MotionEvent.ACTION_DOWN) {
+        if (!disallowLongPress && result && event.getAction() == MotionEvent.ACTION_DOWN && !transcribeOwnsLongPress) {
             startCheckLongPress();
         }
 
@@ -12665,7 +12673,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             (
                 UserConfig.getInstance(currentAccount).isPremium()
                 ||
-                org.telegram.svipe.SvipeStt.enabled(currentAccount)
+                org.telegram.svipe.SvipeStt.available(currentAccount)
                 ||
                 TranscribeButton.isFreeTranscribeInChat(currentMessageObject)
                 ||

@@ -28,6 +28,7 @@ import androidx.core.math.MathUtils;
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.DialogObject;
@@ -87,7 +88,26 @@ public class TranscribeButton {
         this.pressBounds = new Rect(this.bounds);
         this.pressBounds.inset(dp(8), dp(8));
 
-        outIconDrawable = new RLottieDrawable(R.raw.transcribe_out, dp(26), dp(26));
+        createIcons(org.telegram.svipe.SvipeStt.active(currentAccount()));
+
+        this.isOpen = false;
+        this.shouldBeOpen = false;
+        premium = parent.getMessageObject() != null && UserConfig.getInstance(parent.getMessageObject().currentAccount).isPremium();
+
+        loadingFloat = new AnimatedFloat(parent, 250, CubicBezierInterpolator.EASE_OUT_QUINT);
+        animatedDrawLock = new AnimatedFloat(parent, 250, CubicBezierInterpolator.EASE_OUT_QUINT);
+    }
+
+    // Svipe: "→S" while our engine answers the button, Telegram's "→A" otherwise (SvipeStt).
+    private boolean svipeIcon;
+
+    private int currentAccount() {
+        return parent != null && parent.getMessageObject() != null ? parent.getMessageObject().currentAccount : UserConfig.selectedAccount;
+    }
+
+    private void createIcons(boolean svipeIcon) {
+        this.svipeIcon = svipeIcon;
+        outIconDrawable = new RLottieDrawable(svipeIcon ? R.raw.svipe_transcribe_out_s : R.raw.transcribe_out, dp(26), dp(26));
         outIconDrawable.setCurrentFrame(0);
         outIconDrawable.setCallback(parent);
         outIconDrawable.setOnFinishCallback(() -> {
@@ -98,7 +118,7 @@ public class TranscribeButton {
         }, 19);
         outIconDrawable.setAllowDecodeSingleFrame(true);
 
-        inIconDrawable = new RLottieDrawable(R.raw.transcribe_in, dp(26), dp(26));
+        inIconDrawable = new RLottieDrawable(svipeIcon ? R.raw.svipe_transcribe_in_s : R.raw.transcribe_in, dp(26), dp(26));
         inIconDrawable.setCurrentFrame(0);
         inIconDrawable.setCallback(parent);
         inIconDrawable.setMasterParent(parent);
@@ -109,14 +129,36 @@ public class TranscribeButton {
             outIconDrawable.setCurrentFrame(0);
         }, 19);
         inIconDrawable.setAllowDecodeSingleFrame(true);
+    }
 
-        this.isOpen = false;
-        this.shouldBeOpen = false;
-        premium = parent.getMessageObject() != null && (UserConfig.getInstance(parent.getMessageObject().currentAccount).isPremium()
-                || org.telegram.svipe.SvipeStt.enabled(parent.getMessageObject().currentAccount));
+    private void applyIconColor() {
+        inIconDrawable.beginApplyLayerColors();
+        inIconDrawable.setLayerColor("Artboard Outlines", this.iconColor);
+        inIconDrawable.commitApplyLayerColors();
+        inIconDrawable.setAllowDecodeSingleFrame(true);
+        inIconDrawable.updateCurrentFrame(0, false);
+        inIconDrawable.setAlpha(inIconDrawableAlpha = (int) (Color.alpha(color)));
+        outIconDrawable.beginApplyLayerColors();
+        outIconDrawable.setLayerColor("Artboard Outlines", this.iconColor);
+        outIconDrawable.commitApplyLayerColors();
+        outIconDrawable.setAllowDecodeSingleFrame(true);
+        outIconDrawable.updateCurrentFrame(0, false);
+        outIconDrawable.setAlpha(outIconDrawableAlpha = (int) (Color.alpha(color)));
+    }
 
-        loadingFloat = new AnimatedFloat(parent, 250, CubicBezierInterpolator.EASE_OUT_QUINT);
-        animatedDrawLock = new AnimatedFloat(parent, 250, CubicBezierInterpolator.EASE_OUT_QUINT);
+    /** The engine was switched since these icons were made: remake them in the other letter. */
+    private void checkEngineIcon() {
+        final boolean want = org.telegram.svipe.SvipeStt.active(currentAccount());
+        if (want != svipeIcon) {
+            createIcons(want);
+            if (color != 0) {
+                applyIconColor();
+            }
+        }
+    }
+
+    private boolean premium() {
+        return premium || org.telegram.svipe.SvipeStt.active(currentAccount());
     }
 
     public void setLock(boolean drawLock, boolean animated) {
@@ -179,8 +221,34 @@ public class TranscribeButton {
 
     private boolean pressed = false;
     private long pressId = 0;
+    // Svipe: a long press swaps the engine (S ⇄ A) for the whole app.
+    private boolean longPressed;
+    private final Runnable longPress = () -> {
+        if (!pressed || parent == null || !org.telegram.svipe.SvipeStt.available(currentAccount())) {
+            return;
+        }
+        longPressed = true;
+        pressed = false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && selectorDrawable instanceof RippleDrawable) {
+            selectorDrawable.setState(StateSet.NOTHING);
+        }
+        try {
+            parent.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS, android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
+        } catch (Exception ignore) {}
+        final boolean telegram = org.telegram.svipe.SvipeStt.toggleEngine();
+        checkEngineIcon();
+        parent.invalidate();
+        BulletinFactory.global().createSimpleBulletin(R.raw.transcribe,
+                LocaleController.getString(telegram ? R.string.SvipeSttEngineTelegram : R.string.SvipeSttEngineSvipe)).show();
+    };
+
     public boolean onTouch(int action, float x, float y) {
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            AndroidUtilities.cancelRunOnUIThread(longPress);
+            if (longPressed) {
+                longPressed = false;
+                return true;
+            }
             if (pressed && action == MotionEvent.ACTION_UP) {
                 onTap();
                 return true;
@@ -189,10 +257,15 @@ public class TranscribeButton {
             return false;
         }
         if (!pressBounds.contains((int) x, (int) y)) {
+            // The finger slid off the button: that is no longer a press of it, long or short.
+            AndroidUtilities.cancelRunOnUIThread(longPress);
             return false;
         }
         if (action == MotionEvent.ACTION_DOWN) {
             pressed = true;
+            longPressed = false;
+            AndroidUtilities.cancelRunOnUIThread(longPress);
+            AndroidUtilities.runOnUIThread(longPress, android.view.ViewConfiguration.getLongPressTimeout());
         }
         if (pressed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && selectorDrawable instanceof RippleDrawable) {
             selectorDrawable.setHotspot(x, y);
@@ -210,7 +283,7 @@ public class TranscribeButton {
         boolean processClick, toOpen = !shouldBeOpen;
         if (!shouldBeOpen) {
             processClick = !loading;
-            if ((premium || canTranscribeTrial(parent.getMessageObject())) && parent.getMessageObject().isSent()) {
+            if ((premium() || canTranscribeTrial(parent.getMessageObject())) && parent.getMessageObject().isSent()) {
                 setLoading(true, true);
             }
         } else {
@@ -224,7 +297,7 @@ public class TranscribeButton {
         }
         pressed = false;
         if (processClick) {
-            if (!premium && toOpen) {
+            if (!premium() && toOpen) {
                 if (canTranscribeTrial(parent.getMessageObject()) || parent.getMessageObject() != null && parent.getMessageObject().messageOwner != null && !TextUtils.isEmpty(parent.getMessageObject().messageOwner.voiceTranscription)) {
                     transcribePressed(parent.getMessageObject(), toOpen, parent.getDelegate());
                 } else {
@@ -250,7 +323,7 @@ public class TranscribeButton {
     }
 
     public void setColor(int color, int grayColor, boolean isOut, float bgBack) {
-        boolean disabled = !premium;
+        boolean disabled = !premium();
 //        if (disabled) {
 //            color = ColorUtils.blendARGB(color, grayColor, isOut ? .6f : .8f);
 //            color = ColorUtils.setAlphaComponent(color, (int) (Color.alpha(color) * .6f));
@@ -270,18 +343,7 @@ public class TranscribeButton {
             selectorDrawable.setCallback(parent);
         }
         if (newColor) {
-            inIconDrawable.beginApplyLayerColors();
-            inIconDrawable.setLayerColor("Artboard Outlines", this.iconColor);
-            inIconDrawable.commitApplyLayerColors();
-            inIconDrawable.setAllowDecodeSingleFrame(true);
-            inIconDrawable.updateCurrentFrame(0, false);
-            inIconDrawable.setAlpha(inIconDrawableAlpha = (int) (Color.alpha(color)));
-            outIconDrawable.beginApplyLayerColors();
-            outIconDrawable.setLayerColor("Artboard Outlines", this.iconColor);
-            outIconDrawable.commitApplyLayerColors();
-            outIconDrawable.setAllowDecodeSingleFrame(true);
-            outIconDrawable.updateCurrentFrame(0, false);
-            outIconDrawable.setAlpha(outIconDrawableAlpha = (int) (Color.alpha(color)));
+            applyIconColor();
         }
         if (strokePaint == null) {
             strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -379,6 +441,7 @@ public class TranscribeButton {
             parent.invalidate();
         }
 
+        checkEngineIcon();
         canvas.save();
         canvas.translate(bounds.centerX() + dp(2 - 15), bounds.centerY() + dp(-1 - 12));
         canvas.saveLayerAlpha(0, 0, dp(26), dp(26), 0xFF, Canvas.ALL_SAVE_FLAG);
@@ -685,7 +748,7 @@ public class TranscribeButton {
                     NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null, (Boolean) true, (Boolean) true);
                 });
             } else {
-                if (org.telegram.svipe.SvipeStt.enabled(account)) {
+                if (org.telegram.svipe.SvipeStt.active(account)) {
                     // Svipe: our own speech to text, for everyone. Telegram's request is the fallback,
                     // and only for Premium, which is the only account it would answer for anyway.
                     if (transcribeOperationsByDialogPosition == null) {
@@ -697,7 +760,16 @@ public class TranscribeButton {
                             transcribeViaTelegram(messageObject, peer, dialogId, messageId, start, minDuration, delegate);
                             return;
                         }
-                        final String finalText = text == null ? "" : text;
+                        if (text == null) {
+                            // Nothing stored, so the next tap tries again instead of showing an empty text.
+                            if (transcribeOperationsByDialogPosition != null) {
+                                transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
+                            }
+                            NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject);
+                            BulletinFactory.global().createErrorBulletin(LocaleController.getString(R.string.SvipeSttFailed)).show();
+                            return;
+                        }
+                        final String finalText = text;
                         TranscribeButton.openVideoTranscription(messageObject);
                         messageObject.messageOwner.voiceTranscriptionOpen = true;
                         messageObject.messageOwner.voiceTranscriptionFinal = true;
@@ -896,7 +968,7 @@ public class TranscribeButton {
         }
         ConnectionsManager cc = ConnectionsManager.getInstance(messageObject.currentAccount);
         MessagesController mc = MessagesController.getInstance(messageObject.currentAccount);
-        if (UserConfig.getInstance(messageObject.currentAccount).isPremium() || org.telegram.svipe.SvipeStt.enabled(messageObject.currentAccount)) {
+        if (UserConfig.getInstance(messageObject.currentAccount).isPremium() || org.telegram.svipe.SvipeStt.active(messageObject.currentAccount)) {
             return false;
         }
         return mc.transcribeAudioTrialCooldownUntil != 0 && cc.getCurrentTime() <= mc.transcribeAudioTrialCooldownUntil && mc.transcribeAudioTrialCurrentNumber <= 0;

@@ -626,6 +626,9 @@
     <string name="SvipeApkMarked">Отмечено как вирус для всех</string>
     <string name="SvipeApkUnmarked">Отметка вируса снята</string>
     <string name="SvipeApkMarkFailed">Не удалось изменить отметку. Попробуйте ещё раз.</string>
+    <string name="SvipeSttEngineSvipe">Расшифровка от Svipe, бесплатно для всех. Чтобы переключить, нажмите и удерживайте кнопку.</string>
+    <string name="SvipeSttEngineTelegram">Расшифровка от Telegram. Чтобы вернуть, нажмите и удерживайте кнопку.</string>
+    <string name="SvipeSttFailed">Не удалось расшифровать сообщение. Попробуйте ещё раз.</string>
     <string name="UseProxyWeb">WEB-прокси</string>
     <string name="UseProxyWebInfo">WEB-прокси использует HTTPS-страницу внутри приватного WebView. Введите имя хоста без схемы и пути и 16-байтный секрет MTProxy. Это экспериментальная функция: требуется актуальный Android System WebView, и она рассчитана на проверку при открытом приложении.</string>
     <string name="SvipeNotifyTypesHeader">Типы сообщений</string>

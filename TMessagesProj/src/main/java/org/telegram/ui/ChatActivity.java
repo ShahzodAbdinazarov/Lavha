@@ -3046,6 +3046,8 @@ public class ChatActivity extends BaseFragment implements
             // as a warning, or replaced outright. Global because the same file can be on screen in
             // more than one chat at once.
             .addGlobal(NotificationCenter.svipeApkVerdictUpdated)
+            // Svipe: the transcribe button's engine (S/A) was switched somewhere in the app.
+            .addGlobal(NotificationCenter.svipeSttEngineChanged)
             .addGlobal(NotificationCenter.emojiLoaded)
             .addGlobal(NotificationCenter.invalidateMotionBackground)
             .addGlobal(NotificationCenter.didSetNewWallpapper)
@@ -22727,6 +22729,10 @@ public class ChatActivity extends BaseFragment implements
                 } else {
                     removeSelfFromStack();
                 }
+            }
+        } else if (id == NotificationCenter.svipeSttEngineChanged) {
+            if (chatAdapter != null) {
+                chatAdapter.notifyDataSetChanged();
             }
         } else if (id == NotificationCenter.svipeApkVerdictUpdated) {
             // Svipe: verdicts for APKs in this chat changed. Re-derive the affected messages and

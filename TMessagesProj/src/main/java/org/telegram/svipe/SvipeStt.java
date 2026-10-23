@@ -9,6 +9,7 @@ import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.TLRPC;
 
@@ -25,11 +26,17 @@ import java.io.File;
  * about the same voice note before.
  *
  * <p>While the server says no (no key, or unreachable), nothing changes: the button is Telegram's.
+ *
+ * <p>The button carries the engine on its face: "→S" for ours, "→A" for Telegram's. A long press
+ * swaps them, for the whole app at once ({@link #toggleEngine}); a person with Premium who prefers
+ * Telegram's can have it back.
  */
 public final class SvipeStt {
 
     private static final String PREFS = "svipe_stt";
     private static final String KEY_ENABLED = "enabled";
+    /** Device-wide, not per account: one switch, the whole app follows. */
+    private static final String KEY_ENGINE_TELEGRAM = "engine_telegram";
     /** How long to wait for a voice note that is not on the phone yet. */
     private static final long DOWNLOAD_WAIT_MS = 60_000;
     private static final long DOWNLOAD_POLL_MS = 300;
@@ -43,8 +50,26 @@ public final class SvipeStt {
         return ApplicationLoader.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
+    /** Our engine is the one the button uses right now: the server has it and nobody switched to "A". */
+    public static boolean active(int account) {
+        return available(account) && !prefs().getBoolean(KEY_ENGINE_TELEGRAM, false);
+    }
+
+    /** Whether the person picked Telegram's engine with a long press. */
+    public static boolean telegramEngine() {
+        return prefs().getBoolean(KEY_ENGINE_TELEGRAM, false);
+    }
+
+    /** Swap S and A for the whole app; every chat on screen redraws its buttons. Returns the new state. */
+    public static boolean toggleEngine() {
+        final boolean telegram = !telegramEngine();
+        prefs().edit().putBoolean(KEY_ENGINE_TELEGRAM, telegram).apply();
+        NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.svipeSttEngineChanged);
+        return telegram;
+    }
+
     /** Last answer from the server; asks again once per run, in the background. */
-    public static boolean enabled(int account) {
+    public static boolean available(int account) {
         if (!statusAsked) {
             statusAsked = true;
             refresh(account);
