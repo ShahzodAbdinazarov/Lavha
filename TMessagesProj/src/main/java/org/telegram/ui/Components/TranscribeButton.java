@@ -112,7 +112,8 @@ public class TranscribeButton {
 
         this.isOpen = false;
         this.shouldBeOpen = false;
-        premium = parent.getMessageObject() != null && UserConfig.getInstance(parent.getMessageObject().currentAccount).isPremium();
+        premium = parent.getMessageObject() != null && (UserConfig.getInstance(parent.getMessageObject().currentAccount).isPremium()
+                || org.telegram.svipe.SvipeStt.enabled(parent.getMessageObject().currentAccount));
 
         loadingFloat = new AnimatedFloat(parent, 250, CubicBezierInterpolator.EASE_OUT_QUINT);
         animatedDrawLock = new AnimatedFloat(parent, 250, CubicBezierInterpolator.EASE_OUT_QUINT);
@@ -684,6 +685,45 @@ public class TranscribeButton {
                     NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null, (Boolean) true, (Boolean) true);
                 });
             } else {
+                if (org.telegram.svipe.SvipeStt.enabled(account)) {
+                    // Svipe: our own speech to text, for everyone. Telegram's request is the fallback,
+                    // and only for Premium, which is the only account it would answer for anyway.
+                    if (transcribeOperationsByDialogPosition == null) {
+                        transcribeOperationsByDialogPosition = new HashMap<>();
+                    }
+                    transcribeOperationsByDialogPosition.put((Integer) reqInfoHash(messageObject), messageObject);
+                    org.telegram.svipe.SvipeStt.transcribe(messageObject, text -> {
+                        if (text == null && UserConfig.getInstance(account).isPremium()) {
+                            transcribeViaTelegram(messageObject, peer, dialogId, messageId, start, minDuration, delegate);
+                            return;
+                        }
+                        final String finalText = text == null ? "" : text;
+                        TranscribeButton.openVideoTranscription(messageObject);
+                        messageObject.messageOwner.voiceTranscriptionOpen = true;
+                        messageObject.messageOwner.voiceTranscriptionFinal = true;
+                        final long duration = SystemClock.elapsedRealtime() - start;
+                        AndroidUtilities.runOnUIThread(() -> finishTranscription(messageObject, 0, finalText), Math.max(0, minDuration - duration));
+                    });
+                    return;
+                }
+                transcribeViaTelegram(messageObject, peer, dialogId, messageId, start, minDuration, delegate);
+            }
+        } else {
+            if (transcribeOperationsByDialogPosition != null) {
+                transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
+            }
+            messageObject.messageOwner.voiceTranscriptionOpen = false;
+            MessagesStorage.getInstance(account).updateMessageVoiceTranscriptionOpen(dialogId, messageId, messageObject.messageOwner);
+            AndroidUtilities.runOnUIThread(() -> {
+                NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null, (Boolean) false, null);
+            });
+        }
+    }
+
+    private static void transcribeViaTelegram(MessageObject messageObject, TLRPC.InputPeer peer, long dialogId, int messageId, long start, long minDuration, ChatMessageCell.ChatMessageCellDelegate delegate) {
+        final int account = messageObject.currentAccount;
+        {
+            {
                 if (BuildVars.LOGS_ENABLED) {
                     FileLog.d("sending Transcription request, msg_id=" + messageId + " dialog_id=" + dialogId);
                 }
@@ -762,15 +802,6 @@ public class TranscribeButton {
                     }
                 }, flags);
             }
-        } else {
-            if (transcribeOperationsByDialogPosition != null) {
-                transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
-            }
-            messageObject.messageOwner.voiceTranscriptionOpen = false;
-            MessagesStorage.getInstance(account).updateMessageVoiceTranscriptionOpen(dialogId, messageId, messageObject.messageOwner);
-            AndroidUtilities.runOnUIThread(() -> {
-                NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null, (Boolean) false, null);
-            });
         }
     }
 
@@ -865,7 +896,7 @@ public class TranscribeButton {
         }
         ConnectionsManager cc = ConnectionsManager.getInstance(messageObject.currentAccount);
         MessagesController mc = MessagesController.getInstance(messageObject.currentAccount);
-        if (UserConfig.getInstance(messageObject.currentAccount).isPremium()) {
+        if (UserConfig.getInstance(messageObject.currentAccount).isPremium() || org.telegram.svipe.SvipeStt.enabled(messageObject.currentAccount)) {
             return false;
         }
         return mc.transcribeAudioTrialCooldownUntil != 0 && cc.getCurrentTime() <= mc.transcribeAudioTrialCooldownUntil && mc.transcribeAudioTrialCurrentNumber <= 0;
