@@ -28,7 +28,7 @@ import java.io.File;
  * <p>While the server says no (no key, or unreachable), nothing changes: the button is Telegram's.
  *
  * <p>The button carries the engine on its face: "→S" for ours, "→A" for Telegram's. A long press
- * swaps them, for the whole app at once ({@link #toggleEngine}); a person with Premium who prefers
+ * opens a choice between them, for the whole app at once ({@link #setEngine}); a person with Premium who prefers
  * Telegram's can have it back.
  */
 public final class SvipeStt {
@@ -60,12 +60,10 @@ public final class SvipeStt {
         return prefs().getBoolean(KEY_ENGINE_TELEGRAM, false);
     }
 
-    /** Swap S and A for the whole app; every chat on screen redraws its buttons. Returns the new state. */
-    public static boolean toggleEngine() {
-        final boolean telegram = !telegramEngine();
+    /** Picks S or A for the whole app; every chat on screen redraws its buttons. */
+    public static void setEngine(boolean telegram) {
         prefs().edit().putBoolean(KEY_ENGINE_TELEGRAM, telegram).apply();
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.svipeSttEngineChanged);
-        return telegram;
     }
 
     /** Last answer from the server; asks again once per run, in the background. */

@@ -356,6 +356,11 @@
     <string name="SvipeSttEngineSvipe">Ovozni matnga Svipe o\'giradi, hamma uchun bepul. Almashtirish uchun tugmani bosib turing.</string>
     <string name="SvipeSttEngineTelegram">Ovozni matnga Telegram o\'giradi. Qaytarish uchun tugmani bosib turing.</string>
     <string name="SvipeSttFailed">Xabarni matnga o\'girib bo\'lmadi. Qaytadan urinib ko\'ring.</string>
+    <string name="SvipeSttPickTitle">Ovozni matnga o\'girish</string>
+    <string name="SvipeSttPickSvipe">Svipe</string>
+    <string name="SvipeSttPickSvipeInfo">Hamma uchun bepul</string>
+    <string name="SvipeSttPickTelegram">Telegram</string>
+    <string name="SvipeSttPickTelegramInfo">Telegram Premium kerak</string>
     <string name="UseProxyWeb">WEB proksi</string>
     <string name="UseProxyWebInfo">WEB proksi yopiq WebView ichidagi HTTPS sahifadan foydalanadi. Sxema va yo\'lsiz host nomini hamda 16 baytli MTProxy maxfiy kalitini kiriting. Bu tajriba rejimi uchun: joriy Android System WebView talab qilinadi va faqat ilova ochiq turganda sinash uchun mo\'ljallangan.</string>
     <string name="SvipeNotifyTypesHeader">Xabar turlari</string>

@@ -235,12 +235,41 @@ public class TranscribeButton {
         try {
             parent.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS, android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
         } catch (Exception ignore) {}
-        final boolean telegram = org.telegram.svipe.SvipeStt.toggleEngine();
+        showEnginePicker();
+    };
+
+    /** Svipe: the two engines side by side, the current one checked; the pick holds for the whole app. */
+    private void showEnginePicker() {
+        final org.telegram.ui.ActionBar.BaseFragment fragment = org.telegram.ui.LaunchActivity.getLastFragment();
+        if (fragment == null || fragment.getParentActivity() == null) {
+            return;
+        }
+        final boolean telegram = org.telegram.svipe.SvipeStt.telegramEngine();
+        final ItemOptions options = ItemOptions.makeOptions(fragment, parent)
+                .addText(LocaleController.getString(R.string.SvipeSttPickTitle), 13)
+                .add(LocaleController.getString(R.string.SvipeSttPickSvipe), LocaleController.getString(R.string.SvipeSttPickSvipeInfo), () -> pickEngine(false));
+        if (!telegram) {
+            options.putCheck();
+        }
+        options.add(LocaleController.getString(R.string.SvipeSttPickTelegram), LocaleController.getString(R.string.SvipeSttPickTelegramInfo), () -> pickEngine(true));
+        if (telegram) {
+            options.putCheck();
+        }
+        options.setDimAlpha(0).show();
+    }
+
+    private void pickEngine(boolean telegram) {
+        if (org.telegram.svipe.SvipeStt.telegramEngine() == telegram) {
+            return;
+        }
+        org.telegram.svipe.SvipeStt.setEngine(telegram);
         checkEngineIcon();
-        parent.invalidate();
+        if (parent != null) {
+            parent.invalidate();
+        }
         BulletinFactory.global().createSimpleBulletin(R.raw.transcribe,
                 LocaleController.getString(telegram ? R.string.SvipeSttEngineTelegram : R.string.SvipeSttEngineSvipe)).show();
-    };
+    }
 
     public boolean onTouch(int action, float x, float y) {
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
