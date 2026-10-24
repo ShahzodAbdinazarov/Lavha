@@ -834,8 +834,10 @@ public class TranscribeButton {
                         // Id 0 marks the text as ours; Telegram's always carry their transcription id.
                         messageObject.messageOwner.voiceTranscriptionId = 0;
                         org.telegram.svipe.SvipeStt.keep(messageObject, true, 0, text);
+                        // The machine text is what is kept; on screen, my fix or the approved one wins.
+                        final String shownText = org.telegram.svipe.SvipeStt.shown(messageObject, finalText);
                         final long duration = SystemClock.elapsedRealtime() - start;
-                        AndroidUtilities.runOnUIThread(() -> finishTranscription(messageObject, 0, finalText), Math.max(0, minDuration - duration));
+                        AndroidUtilities.runOnUIThread(() -> finishTranscription(messageObject, 0, shownText), Math.max(0, minDuration - duration));
                     });
                     return;
                 }
@@ -880,7 +882,11 @@ public class TranscribeButton {
         final TLRPC.Message owner = messageObject.messageOwner;
         final boolean ours = org.telegram.svipe.SvipeStt.active(messageObject.currentAccount);
         final boolean storedOurs = !ours;
-        org.telegram.svipe.SvipeStt.keep(messageObject, storedOurs, owner.voiceTranscriptionId, owner.voiceTranscription);
+        if (!storedOurs || org.telegram.svipe.SvipeStt.kept(messageObject, true) == null) {
+            // Ours on screen may be a person's fix layered over the machine text; the machine text
+            // was kept when it came, so it is not overwritten with what is shown.
+            org.telegram.svipe.SvipeStt.keep(messageObject, storedOurs, owner.voiceTranscriptionId, owner.voiceTranscription);
+        }
         final org.telegram.svipe.SvipeStt.Kept kept = ours && org.telegram.svipe.SvipeStt.oursIsStale(messageObject)
                 ? null : org.telegram.svipe.SvipeStt.kept(messageObject, ours);
         if (kept == null) {
@@ -889,11 +895,12 @@ public class TranscribeButton {
             owner.voiceTranscriptionId = 0;
             return false;
         }
+        final String text = ours ? org.telegram.svipe.SvipeStt.shown(messageObject, kept.text) : kept.text;
         owner.voiceTranscriptionId = kept.id;
-        owner.voiceTranscription = kept.text;
+        owner.voiceTranscription = text;
         owner.voiceTranscriptionOpen = true;
         TranscribeButton.openVideoTranscription(messageObject);
-        finishTranscription(messageObject, kept.id, kept.text);
+        finishTranscription(messageObject, kept.id, text);
         return true;
     }
 

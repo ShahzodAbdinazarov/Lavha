@@ -206,6 +206,94 @@ public class SvipeApi {
     }
 
     /**
+     * POST multipart/form-data to one of OUR paths: text fields plus one file, streamed from disk.
+     *
+     * <p>For calls where a file has to travel together with words about it — a corrected transcript
+     * and the voice note it belongs to, so the server can check the two against each other. The
+     * whole envelope is measured up front and sent with a fixed length, like {@link #postFile}.
+     */
+    public static void postMultipart(String path, java.util.Map<String, String> fields, String fileField,
+                                     java.io.File file, String fileName, String contentType, String bearer,
+                                     JsonCallback cb) {
+        submit(() -> {
+            HttpURLConnection conn = null;
+            try {
+                final String boundary = "----svipe" + Long.toHexString(System.nanoTime()) + Long.toHexString(Double.doubleToLongBits(Math.random()));
+                final StringBuilder head = new StringBuilder();
+                if (fields != null) {
+                    for (java.util.Map.Entry<String, String> f : fields.entrySet()) {
+                        head.append("--").append(boundary).append("\r\n")
+                                .append("Content-Disposition: form-data; name=\"").append(f.getKey()).append("\"\r\n")
+                                .append("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
+                                .append(f.getValue() == null ? "" : f.getValue()).append("\r\n");
+                    }
+                }
+                if (file != null) {
+                    head.append("--").append(boundary).append("\r\n")
+                            .append("Content-Disposition: form-data; name=\"").append(fileField)
+                            .append("\"; filename=\"").append(fileName).append("\"\r\n")
+                            .append("Content-Type: ").append(contentType).append("\r\n\r\n");
+                }
+                final byte[] headBytes = head.toString().getBytes("UTF-8");
+                final byte[] tailBytes = ((file != null ? "\r\n" : "") + "--" + boundary + "--\r\n").getBytes("UTF-8");
+                final long total = headBytes.length + (file != null ? file.length() : 0) + tailBytes.length;
+
+                conn = (HttpURLConnection) new URL(SvipeConfig.baseUrl() + path).openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(120000);
+                conn.setDoOutput(true);
+                conn.setFixedLengthStreamingMode(total);
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+                conn.setRequestProperty(CLIENT_LEVEL_HEADER, String.valueOf(CLIENT_LEVEL));
+                conn.setRequestProperty(CLIENT_VERSION_HEADER, clientVersion());
+                if (bearer != null) {
+                    conn.setRequestProperty("Authorization", "Bearer " + bearer);
+                }
+                java.io.OutputStream out = conn.getOutputStream();
+                try {
+                    out.write(headBytes);
+                    if (file != null) {
+                        java.io.FileInputStream in = new java.io.FileInputStream(file);
+                        try {
+                            byte[] buf = new byte[64 * 1024];
+                            int n;
+                            while ((n = in.read(buf)) != -1) {
+                                out.write(buf, 0, n);
+                            }
+                        } finally {
+                            try { in.close(); } catch (Exception ignore) {}
+                        }
+                    }
+                    out.write(tailBytes);
+                    out.flush();
+                } finally {
+                    try { out.close(); } catch (Exception ignore) {}
+                }
+                final int code = conn.getResponseCode();
+                final String resp = readStream(
+                        (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream());
+                JSONObject json = null;
+                if (resp != null && resp.startsWith("{")) {
+                    try { json = new JSONObject(resp); } catch (Exception ignore) {}
+                }
+                final JSONObject fjson = json;
+                FileLog.d("svipe-net: POST " + path + " (multipart " + total + "B) -> " + code);
+                AndroidUtilities.runOnUIThread(() -> cb.run(fjson, code, null));
+            } catch (Exception e) {
+                FileLog.e(e);
+                final String err = e.getMessage();
+                AndroidUtilities.runOnUIThread(() -> cb.run(null, 0, err));
+            } finally {
+                if (conn != null) {
+                    try { conn.disconnect(); } catch (Exception ignore) {}
+                }
+            }
+        });
+    }
+
+    /**
      * GET an ABSOLUTE, already-signed URL straight to a file — the presigned download side of the
      * avatar archive. Writes to a sibling {@code .tmp} and renames on success, so a interrupted
      * transfer can never leave a half-written image where the UI would try to render it.

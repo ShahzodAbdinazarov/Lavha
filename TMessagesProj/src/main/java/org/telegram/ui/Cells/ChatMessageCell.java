@@ -3076,6 +3076,38 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         return false;
     }
 
+    // Svipe: a tap on a transcript of ours offers to fix it (SvipeSttEditor). Only a tap: the long
+    // press still opens the message menu, because a DOWN taken here starts the usual long-press check.
+    private boolean svipeTranscriptPressed;
+
+    private boolean checkSvipeTranscriptMotionEvent(MotionEvent event) {
+        final int action = event.getAction();
+        if (action == MotionEvent.ACTION_CANCEL) {
+            svipeTranscriptPressed = false;
+            return false;
+        }
+        if (action != MotionEvent.ACTION_DOWN && !svipeTranscriptPressed) {
+            return false;
+        }
+        final float x = getEventX(event), y = getEventY(event);
+        final boolean inside = captionLayout != null && x >= captionX && y >= captionY
+                && x <= captionX + captionLayout.textWidth && y <= captionY + captionLayout.textHeight(transitionParams);
+        if (action == MotionEvent.ACTION_DOWN) {
+            svipeTranscriptPressed = inside && org.telegram.svipe.SvipeStt.editable(currentMessageObject);
+            return svipeTranscriptPressed;
+        }
+        if (!inside) {
+            svipeTranscriptPressed = false;
+            return false;
+        }
+        if (action == MotionEvent.ACTION_UP) {
+            svipeTranscriptPressed = false;
+            playSoundEffect(SoundEffectConstants.CLICK);
+            org.telegram.svipe.SvipeSttEditor.showOptions(this);
+        }
+        return true;
+    }
+
     // Svipe: a long press on the transcribe button swaps its engine (S/A), so the message menu
     // must not open from that same press.
     private boolean transcribeOwnsLongPress;
@@ -5011,6 +5043,9 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         }
         if (!result) {
             result = checkCaptionMotionEvent(event);
+        }
+        if (!result) {
+            result = checkSvipeTranscriptMotionEvent(event);
         }
         if (!result) {
             result = checkExplanationMotionEvent(event);
@@ -12124,6 +12159,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
 
     @Override
     protected boolean onLongPress() {
+        svipeTranscriptPressed = false;
         if (isRoundVideo && isPlayingRound && MediaController.getInstance().isPlayingMessage(currentMessageObject)) {
             float touchRadius = (lastTouchX - photoImage.getCenterX()) * (lastTouchX - photoImage.getCenterX()) + (lastTouchY - photoImage.getCenterY()) * (lastTouchY - photoImage.getCenterY());
             float r1 = (photoImage.getImageWidth() / 2f) * (photoImage.getImageWidth() / 2f);

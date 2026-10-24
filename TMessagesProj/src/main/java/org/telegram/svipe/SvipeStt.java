@@ -13,6 +13,8 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.TLRPC;
 
+import org.json.JSONObject;
+
 import java.io.File;
 
 /**
@@ -95,8 +97,12 @@ public final class SvipeStt {
     }
 
     /**
-     * The text of {@code messageObject}, or {@code null} when it could not be had — the caller then
-     * falls back to Telegram. {@code done} runs on the UI thread.
+     * The machine's text of {@code messageObject}, or {@code null} when it could not be had — the
+     * caller then falls back to Telegram. {@code done} runs on the UI thread.
+     *
+     * <p>The answer also carries this person's own correction ({@code mine}) and the one most people
+     * approved ({@code best}); those are put aside as layers ({@link #shown}), and the machine text
+     * stays the one handed back, so it is still what gets kept as ours.
      */
     public static void transcribe(MessageObject messageObject, Utilities.Callback<String> done) {
         final TLRPC.Document doc = messageObject == null ? null : messageObject.getDocument();
@@ -104,11 +110,53 @@ public final class SvipeStt {
             done.run(null);
             return;
         }
-        final int account = messageObject.currentAccount;
         final long docId = doc.id;
         final int duration = (int) Math.round(messageObject.getDuration());
-        final String mime = messageObject.isRoundVideo() ? "video/mp4" : "audio/ogg";
+        final String mime = mime(messageObject);
+        withAudio(messageObject, (audio, token) -> {
+            if (audio == null || token == null) {
+                done.run(null);
+                return;
+            }
+            SvipeApi.postFile("/v1/stt?doc_id=" + docId + "&duration=" + duration, audio, mime, token,
+                    (res, code, err) -> {
+                        String text = null;
+                        if (res != null && code == 200) {
+                            text = res.optString("text", "");
+                            final String generation = res.optString("generation", "");
+                            if (!TextUtils.isEmpty(generation)) {
+                                prefs().edit().putString(KEY_GENERATION, generation).apply();
+                            }
+                            setLayers(messageObject, str(res, "mine"), str(res, "best"));
+                        } else {
+                            FileLog.d("svipe-stt: doc " + docId + " -> " + code);
+                            if (code == 503) {
+                                // The server lost its provider; stop routing here until it says so.
+                                prefs().edit().putBoolean(KEY_ENABLED, false).apply();
+                                statusAsked = false;
+                            }
+                        }
+                        done.run(text);
+                    });
+        });
+    }
 
+    private static String mime(MessageObject messageObject) {
+        return messageObject.isRoundVideo() ? "video/mp4" : "audio/ogg";
+    }
+
+    /** A JSON string field, with JSON {@code null} (and absence) as {@code null}, not "null". */
+    private static String str(JSONObject o, String key) {
+        return o == null || o.isNull(key) ? null : o.optString(key, null);
+    }
+
+    /**
+     * The voice note on disk (downloading it first if it is not there yet) and a token, on the UI
+     * thread; either is {@code null} when it could not be had.
+     */
+    private static void withAudio(MessageObject messageObject, Utilities.Callback2<File, String> done) {
+        final TLRPC.Document doc = messageObject.getDocument();
+        final int account = messageObject.currentAccount;
         File file = localFile(messageObject);
         if (file == null) {
             FileLoader.getInstance(account).loadFile(doc, messageObject, FileLoader.PRIORITY_HIGH, 0);
@@ -125,36 +173,209 @@ public final class SvipeStt {
                 f = localFile(messageObject);
             }
             if (f == null) {
-                FileLog.d("svipe-stt: doc " + docId + " never arrived");
-                AndroidUtilities.runOnUIThread(() -> done.run(null));
+                FileLog.d("svipe-stt: doc " + (doc == null ? 0 : doc.id) + " never arrived");
+                AndroidUtilities.runOnUIThread(() -> done.run(null, null));
                 return;
             }
             final File audio = f;
-            SvipeAuth.ensureToken(account, token -> {
-                if (token == null) {
-                    AndroidUtilities.runOnUIThread(() -> done.run(null));
+            SvipeAuth.ensureToken(account, token -> AndroidUtilities.runOnUIThread(() -> done.run(audio, token)));
+        });
+    }
+
+    // ---- Crowd corrections ------------------------------------------------------------------
+    //
+    // Anyone can fix a transcript of ours. Each person always sees their own fix; everyone else
+    // sees the fix most people approved; with neither, the machine's text. The machine text stays
+    // the kept "ours" text (generation logic untouched) and the two fixes are layered on top of it
+    // for display only, next to it in the same store, so they survive restarts and S ⇄ A swaps.
+
+    /** Most a correction may be; the server refuses more. */
+    public static final int EDIT_MAX = 4000;
+
+    /** What a person can fix: a text of ours, finished, open, untranslated, while ours is the engine. */
+    public static boolean editable(MessageObject messageObject) {
+        if (messageObject == null || messageObject.messageOwner == null || messageObject.getDocument() == null
+                || !messageObject.isSent() || !(messageObject.isVoice() || messageObject.isRoundVideo())) {
+            return false;
+        }
+        final TLRPC.Message owner = messageObject.messageOwner;
+        return owner.voiceTranscription != null && owner.voiceTranscriptionFinal && owner.voiceTranscriptionId == 0
+                && messageObject.isVoiceTranscriptionOpen() && !messageObject.translated
+                && active(messageObject.currentAccount);
+    }
+
+    /** The text to show for a message of ours: my fix, else the approved one, else the machine's. */
+    public static String shown(MessageObject messageObject, String machine) {
+        final String mine = layer(messageObject, "_M");
+        if (!TextUtils.isEmpty(mine)) {
+            return mine;
+        }
+        final String best = layer(messageObject, "_B");
+        if (!TextUtils.isEmpty(best)) {
+            return best;
+        }
+        return machine;
+    }
+
+    /** The machine's own text, as kept; the message's text when nothing was kept. */
+    public static String machine(MessageObject messageObject) {
+        final Kept k = kept(messageObject, true);
+        if (k != null) {
+            return k.text;
+        }
+        return messageObject.messageOwner == null ? null : messageObject.messageOwner.voiceTranscription;
+    }
+
+    public static String mine(MessageObject messageObject) {
+        return layer(messageObject, "_M");
+    }
+
+    public static void setLayers(MessageObject messageObject, String mine, String best) {
+        if (messageObject == null) {
+            return;
+        }
+        final SharedPreferences.Editor e = texts().edit();
+        putLayer(e, messageObject, "_M", mine);
+        putLayer(e, messageObject, "_B", best);
+        e.apply();
+    }
+
+    public static void setMine(MessageObject messageObject, String mine) {
+        final SharedPreferences.Editor e = texts().edit();
+        putLayer(e, messageObject, "_M", mine);
+        e.apply();
+    }
+
+    public static void setBest(MessageObject messageObject, String best) {
+        final SharedPreferences.Editor e = texts().edit();
+        putLayer(e, messageObject, "_B", best);
+        e.apply();
+    }
+
+    private static void putLayer(SharedPreferences.Editor e, MessageObject messageObject, String suffix, String text) {
+        final String key = textKey(messageObject, true) + suffix;
+        if (TextUtils.isEmpty(text)) {
+            e.remove(key);
+        } else {
+            e.putString(key, text);
+        }
+    }
+
+    private static String layer(MessageObject messageObject, String suffix) {
+        return messageObject == null ? null : texts().getString(textKey(messageObject, true) + suffix, null);
+    }
+
+    /**
+     * Puts the text a message of ours should show on screen (and in its stored copy) right now,
+     * after one of its layers changed.
+     */
+    public static void applyShown(MessageObject messageObject) {
+        if (messageObject == null || messageObject.messageOwner == null || messageObject.messageOwner.voiceTranscriptionId != 0) {
+            return;
+        }
+        final String text = shown(messageObject, machine(messageObject));
+        if (text == null || text.equals(messageObject.messageOwner.voiceTranscription)) {
+            return;
+        }
+        messageObject.messageOwner.voiceTranscription = text;
+        org.telegram.ui.Components.TranscribeButton.finishTranscription(messageObject, 0, text);
+    }
+
+    /** How many other people's versions the server last told us about, per voice note; -1 unknown. */
+    private static final java.util.HashMap<Long, Integer> variantCounts = new java.util.HashMap<>();
+
+    public static int variantCount(MessageObject messageObject) {
+        final TLRPC.Document doc = messageObject.getDocument();
+        final Integer n = doc == null ? null : variantCounts.get(doc.id);
+        return n == null ? -1 : n;
+    }
+
+    /**
+     * Sends my fix ({@code text}; empty takes it back) with the voice note it belongs to. {@code done}
+     * gets the server's verdict — "ok", "suspect" — or {@code null} when it did not go through.
+     */
+    public static void saveEdit(MessageObject messageObject, String text, Utilities.Callback<String> done) {
+        final TLRPC.Document doc = messageObject.getDocument();
+        if (doc == null) {
+            done.run(null);
+            return;
+        }
+        final long docId = doc.id;
+        final int duration = (int) Math.round(messageObject.getDuration());
+        final String mime = mime(messageObject);
+        withAudio(messageObject, (audio, token) -> {
+            if (audio == null || token == null) {
+                done.run(null);
+                return;
+            }
+            final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
+            fields.put("text", text == null ? "" : text);
+            SvipeApi.postMultipart("/v1/stt/edit?doc_id=" + docId + "&duration=" + duration, fields, "audio", audio,
+                    messageObject.isRoundVideo() ? "round.mp4" : "voice.ogg", mime, token, (res, code, err) -> {
+                        if (res == null || code != 200) {
+                            FileLog.d("svipe-stt: edit doc " + docId + " -> " + code);
+                            done.run(null);
+                            return;
+                        }
+                        done.run(res.optString("status", "ok"));
+                    });
+        });
+    }
+
+    /** My vote on someone's version: 1, -1, or 0 to take it back. {@code done} gets whether it went. */
+    public static void vote(int account, long editId, int value, Utilities.Callback<Boolean> done) {
+        SvipeAuth.ensureToken(account, token -> {
+            if (token == null) {
+                AndroidUtilities.runOnUIThread(() -> done.run(false));
+                return;
+            }
+            final JSONObject body = new JSONObject();
+            try {
+                body.put("edit_id", editId);
+                body.put("value", value);
+            } catch (Exception ignore) {}
+            SvipeApi.post("/v1/stt/vote", body, token, (res, code, err) -> done.run(code == 200));
+        });
+    }
+
+    /**
+     * Every version of this voice note's text, as the server has them; {@code null} when it could not
+     * be had. Also refreshes my fix and the approved one, and redraws the message if they moved.
+     */
+    public static void variants(MessageObject messageObject, Utilities.Callback<JSONObject> done) {
+        final TLRPC.Document doc = messageObject.getDocument();
+        if (doc == null) {
+            done.run(null);
+            return;
+        }
+        final long docId = doc.id;
+        SvipeAuth.ensureToken(messageObject.currentAccount, token -> {
+            if (token == null) {
+                AndroidUtilities.runOnUIThread(() -> done.run(null));
+                return;
+            }
+            SvipeApi.get("/v1/stt/variants?doc_id=" + docId, token, (res, code, err) -> {
+                if (res == null || code != 200) {
+                    FileLog.d("svipe-stt: variants doc " + docId + " -> " + code);
+                    done.run(null);
                     return;
                 }
-                SvipeApi.postFile("/v1/stt?doc_id=" + docId + "&duration=" + duration, audio, mime, token,
-                        (res, code, err) -> {
-                            String text = null;
-                            if (res != null && code == 200) {
-                                text = res.optString("text", "");
-                                final String generation = res.optString("generation", "");
-                                if (!TextUtils.isEmpty(generation)) {
-                                    prefs().edit().putString(KEY_GENERATION, generation).apply();
-                                }
-                            } else {
-                                FileLog.d("svipe-stt: doc " + docId + " -> " + code);
-                                if (code == 503) {
-                                    // The server lost its provider; stop routing here until it says so.
-                                    prefs().edit().putBoolean(KEY_ENABLED, false).apply();
-                                    statusAsked = false;
-                                }
-                            }
-                            final String result = text;
-                            AndroidUtilities.runOnUIThread(() -> done.run(result));
-                        });
+                final org.json.JSONArray list = res.optJSONArray("variants");
+                int others = 0;
+                if (list != null) {
+                    for (int i = 0; i < list.length(); i++) {
+                        final JSONObject v = list.optJSONObject(i);
+                        if (v != null && !v.optBoolean("mine", false)) {
+                            others++;
+                        }
+                    }
+                }
+                variantCounts.put(docId, others);
+                final JSONObject mine = res.optJSONObject("mine");
+                final JSONObject best = res.optJSONObject("best");
+                setLayers(messageObject, mine == null ? null : str(mine, "text"), best == null ? null : str(best, "text"));
+                applyShown(messageObject);
+                done.run(res);
             });
         });
     }
