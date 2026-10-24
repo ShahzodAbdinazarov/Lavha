@@ -37,6 +37,8 @@ public final class SvipeStt {
     private static final String KEY_ENABLED = "enabled";
     /** Device-wide, not per account: one switch, the whole app follows. */
     private static final String KEY_ENGINE_TELEGRAM = "engine_telegram";
+    /** The server's engine setup; a kept text of ours made under another one is asked for again. */
+    private static final String KEY_GENERATION = "generation";
     /** How long to wait for a voice note that is not on the phone yet. */
     private static final long DOWNLOAD_WAIT_MS = 60_000;
     private static final long DOWNLOAD_POLL_MS = 300;
@@ -86,7 +88,8 @@ public final class SvipeStt {
                     statusAsked = false;
                     return;
                 }
-                prefs().edit().putBoolean(KEY_ENABLED, res.optBoolean("enabled", false)).apply();
+                prefs().edit().putBoolean(KEY_ENABLED, res.optBoolean("enabled", false))
+                        .putString(KEY_GENERATION, res.optString("generation", "")).apply();
             });
         });
     }
@@ -137,6 +140,10 @@ public final class SvipeStt {
                             String text = null;
                             if (res != null && code == 200) {
                                 text = res.optString("text", "");
+                                final String generation = res.optString("generation", "");
+                                if (!TextUtils.isEmpty(generation)) {
+                                    prefs().edit().putString(KEY_GENERATION, generation).apply();
+                                }
                             } else {
                                 FileLog.d("svipe-stt: doc " + docId + " -> " + code);
                                 if (code == 503) {
@@ -156,11 +163,28 @@ public final class SvipeStt {
     public static final class Kept {
         public final long id;
         public final String text;
+        /** For ours: the server's engine setup when it was made; empty for Telegram's. */
+        final String generation;
 
-        Kept(long id, String text) {
+        Kept(long id, String generation, String text) {
             this.id = id;
+            this.generation = generation;
             this.text = text;
         }
+    }
+
+    private static String generation() {
+        return prefs().getString(KEY_GENERATION, "");
+    }
+
+    /** Our text for this message was made by an older engine setup (or we never kept it): ask again. */
+    public static boolean oursIsStale(MessageObject messageObject) {
+        final String now = generation();
+        if (TextUtils.isEmpty(now)) {
+            return false;
+        }
+        final Kept k = kept(messageObject, true);
+        return k == null || !now.equals(k.generation);
     }
 
     private static final String TEXTS = "svipe_stt_texts";
@@ -188,17 +212,18 @@ public final class SvipeStt {
         if (p.getAll().size() >= TEXTS_MAX) {
             e.clear();
         }
-        e.putString(textKey(messageObject, ours), id + "\n" + text).apply();
+        e.putString(textKey(messageObject, ours), id + "\n" + (ours ? generation() : "") + "\n" + text).apply();
     }
 
     public static Kept kept(MessageObject messageObject, boolean ours) {
         final String v = texts().getString(textKey(messageObject, ours), null);
-        final int nl = v == null ? -1 : v.indexOf('\n');
-        if (nl < 0) {
+        final int a = v == null ? -1 : v.indexOf('\n');
+        final int b = a < 0 ? -1 : v.indexOf('\n', a + 1);
+        if (b < 0) {
             return null;
         }
         try {
-            return new Kept(Long.parseLong(v.substring(0, nl)), v.substring(nl + 1));
+            return new Kept(Long.parseLong(v.substring(0, a)), v.substring(a + 1, b), v.substring(b + 1));
         } catch (NumberFormatException e) {
             return null;
         }

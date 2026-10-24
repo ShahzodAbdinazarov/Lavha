@@ -471,6 +471,15 @@ public class TranscribeButton {
         }
 
         checkEngineIcon();
+        // Svipe: an icon animation that stopped before its last frame (its finish callback never ran)
+        // froze the button halfway between "→A/→S" and "^". Settle on the state it was heading to.
+        if (!isOpen && shouldBeOpen && !outIconDrawable.isRunning()) {
+            isOpen = true;
+            inIconDrawable.setCurrentFrame(0);
+        } else if (isOpen && !shouldBeOpen && !inIconDrawable.isRunning()) {
+            isOpen = false;
+            outIconDrawable.setCurrentFrame(0);
+        }
         canvas.save();
         canvas.translate(bounds.centerX() + dp(2 - 15), bounds.centerY() + dp(-1 - 12));
         canvas.saveLayerAlpha(0, 0, dp(26), dp(26), 0xFF, Canvas.ALL_SAVE_FLAG);
@@ -772,6 +781,12 @@ public class TranscribeButton {
             if (swapEngineText(messageObject)) {
                 return;
             }
+            if (org.telegram.svipe.SvipeStt.active(account) && messageObject.messageOwner.voiceTranscription != null
+                    && messageObject.messageOwner.voiceTranscriptionId == 0 && org.telegram.svipe.SvipeStt.oursIsStale(messageObject)) {
+                // Svipe: our text here was made by an older engine; the server makes it again (once).
+                messageObject.messageOwner.voiceTranscription = null;
+                messageObject.messageOwner.voiceTranscriptionFinal = false;
+            }
             if (messageObject.messageOwner.voiceTranscription != null && messageObject.messageOwner.voiceTranscriptionFinal) {
                 TranscribeButton.openVideoTranscription(messageObject);
                 messageObject.messageOwner.voiceTranscriptionOpen = true;
@@ -855,7 +870,8 @@ public class TranscribeButton {
         final boolean ours = org.telegram.svipe.SvipeStt.active(messageObject.currentAccount);
         final boolean storedOurs = !ours;
         org.telegram.svipe.SvipeStt.keep(messageObject, storedOurs, owner.voiceTranscriptionId, owner.voiceTranscription);
-        final org.telegram.svipe.SvipeStt.Kept kept = org.telegram.svipe.SvipeStt.kept(messageObject, ours);
+        final org.telegram.svipe.SvipeStt.Kept kept = ours && org.telegram.svipe.SvipeStt.oursIsStale(messageObject)
+                ? null : org.telegram.svipe.SvipeStt.kept(messageObject, ours);
         if (kept == null) {
             owner.voiceTranscription = null;
             owner.voiceTranscriptionFinal = false;
