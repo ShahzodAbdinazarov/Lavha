@@ -154,6 +154,58 @@ public final class SvipeStt {
         });
     }
 
+    /** A text one engine made for one message, with Telegram's transcription id (0 for ours). */
+    public static final class Kept {
+        public final long id;
+        public final String text;
+
+        Kept(long id, String text) {
+            this.id = id;
+            this.text = text;
+        }
+    }
+
+    private static final String TEXTS = "svipe_stt_texts";
+    /** Past this many kept texts the store starts over; each engine can make its text again. */
+    private static final int TEXTS_MAX = 2000;
+
+    private static SharedPreferences texts() {
+        return ApplicationLoader.applicationContext.getSharedPreferences(TEXTS, Context.MODE_PRIVATE);
+    }
+
+    private static String textKey(MessageObject messageObject, boolean ours) {
+        return messageObject.currentAccount + "_" + messageObject.getDialogId() + "_" + messageObject.getId() + (ours ? "_S" : "_A");
+    }
+
+    /**
+     * Keeps both engines' texts side by side: the message itself holds only one, and switching S ⇄ A
+     * must show each engine's own text, not the one made last.
+     */
+    public static void keep(MessageObject messageObject, boolean ours, long id, String text) {
+        if (messageObject == null || text == null) {
+            return;
+        }
+        final SharedPreferences p = texts();
+        final SharedPreferences.Editor e = p.edit();
+        if (p.getAll().size() >= TEXTS_MAX) {
+            e.clear();
+        }
+        e.putString(textKey(messageObject, ours), id + "\n" + text).apply();
+    }
+
+    public static Kept kept(MessageObject messageObject, boolean ours) {
+        final String v = texts().getString(textKey(messageObject, ours), null);
+        final int nl = v == null ? -1 : v.indexOf('\n');
+        if (nl < 0) {
+            return null;
+        }
+        try {
+            return new Kept(Long.parseLong(v.substring(0, nl)), v.substring(nl + 1));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     private static File localFile(MessageObject messageObject) {
         final TLRPC.Message owner = messageObject.messageOwner;
         if (owner != null && !TextUtils.isEmpty(owner.attachPath)) {

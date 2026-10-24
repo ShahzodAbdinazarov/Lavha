@@ -740,6 +740,9 @@ public class TranscribeButton {
         long dialogId = DialogObject.getPeerDialogId(peer);
         int messageId = messageObject.messageOwner.id;
         if (open) {
+            if (swapEngineText(messageObject)) {
+                return;
+            }
             if (messageObject.messageOwner.voiceTranscription != null && messageObject.messageOwner.voiceTranscriptionFinal) {
                 TranscribeButton.openVideoTranscription(messageObject);
                 messageObject.messageOwner.voiceTranscriptionOpen = true;
@@ -773,6 +776,9 @@ public class TranscribeButton {
                         TranscribeButton.openVideoTranscription(messageObject);
                         messageObject.messageOwner.voiceTranscriptionOpen = true;
                         messageObject.messageOwner.voiceTranscriptionFinal = true;
+                        // Id 0 marks the text as ours; Telegram's always carry their transcription id.
+                        messageObject.messageOwner.voiceTranscriptionId = 0;
+                        org.telegram.svipe.SvipeStt.keep(messageObject, true, 0, text);
                         final long duration = SystemClock.elapsedRealtime() - start;
                         AndroidUtilities.runOnUIThread(() -> finishTranscription(messageObject, 0, finalText), Math.max(0, minDuration - duration));
                     });
@@ -781,6 +787,11 @@ public class TranscribeButton {
                 transcribeViaTelegram(messageObject, peer, dialogId, messageId, start, minDuration, delegate);
             }
         } else {
+            if (otherEngineText(messageObject)) {
+                // Svipe: the open text is the other engine's; a tap shows this engine's instead of closing.
+                transcribePressed(messageObject, true, delegate);
+                return;
+            }
             if (transcribeOperationsByDialogPosition != null) {
                 transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
             }
@@ -790,6 +801,44 @@ public class TranscribeButton {
                 NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject, null, null, (Boolean) false, null);
             });
         }
+    }
+
+    /**
+     * Svipe: the message keeps one text, but each engine has its own. When the stored text was made
+     * by the other engine than the button's, put it aside and show this engine's: from what was kept
+     * before, or by asking this engine (returns false, and the caller transcribes as for a new one).
+     */
+    /** Svipe: the stored text was made by the engine the button is not set to (id 0 is ours). */
+    private static boolean otherEngineText(MessageObject messageObject) {
+        final TLRPC.Message owner = messageObject.messageOwner;
+        final int account = messageObject.currentAccount;
+        if (owner == null || owner.voiceTranscription == null || !owner.voiceTranscriptionFinal || !org.telegram.svipe.SvipeStt.available(account)) {
+            return false;
+        }
+        return (owner.voiceTranscriptionId == 0) != org.telegram.svipe.SvipeStt.active(account);
+    }
+
+    private static boolean swapEngineText(MessageObject messageObject) {
+        if (!otherEngineText(messageObject)) {
+            return false;
+        }
+        final TLRPC.Message owner = messageObject.messageOwner;
+        final boolean ours = org.telegram.svipe.SvipeStt.active(messageObject.currentAccount);
+        final boolean storedOurs = !ours;
+        org.telegram.svipe.SvipeStt.keep(messageObject, storedOurs, owner.voiceTranscriptionId, owner.voiceTranscription);
+        final org.telegram.svipe.SvipeStt.Kept kept = org.telegram.svipe.SvipeStt.kept(messageObject, ours);
+        if (kept == null) {
+            owner.voiceTranscription = null;
+            owner.voiceTranscriptionFinal = false;
+            owner.voiceTranscriptionId = 0;
+            return false;
+        }
+        owner.voiceTranscriptionId = kept.id;
+        owner.voiceTranscription = kept.text;
+        owner.voiceTranscriptionOpen = true;
+        TranscribeButton.openVideoTranscription(messageObject);
+        finishTranscription(messageObject, kept.id, kept.text);
+        return true;
     }
 
     private static void transcribeViaTelegram(MessageObject messageObject, TLRPC.InputPeer peer, long dialogId, int messageId, long start, long minDuration, ChatMessageCell.ChatMessageCellDelegate delegate) {
@@ -894,6 +943,9 @@ public class TranscribeButton {
                 transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
             }
             messageObject.messageOwner.voiceTranscriptionFinal = true;
+            if (transcription_id != 0) {
+                org.telegram.svipe.SvipeStt.keep(messageObject, false, transcription_id, text);
+            }
             MessagesStorage.getInstance(messageObject.currentAccount).updateMessageVoiceTranscription(messageObject.getDialogId(), messageObject.getId(), text, messageObject.messageOwner);
             AndroidUtilities.runOnUIThread(() -> {
                 NotificationCenter.getInstance(finalMessageObject.currentAccount).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, finalMessageObject, (Long) transcription_id, (String) text, (Boolean) true, (Boolean) true);
