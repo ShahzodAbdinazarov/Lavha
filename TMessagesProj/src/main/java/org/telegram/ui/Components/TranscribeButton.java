@@ -100,6 +100,7 @@ public class TranscribeButton {
 
     // Svipe: "→S" while our engine answers the button, Telegram's "→A" otherwise (SvipeStt).
     private boolean svipeIcon;
+    private long iconAnimationStart;
 
     private int currentAccount() {
         return parent != null && parent.getMessageObject() != null ? parent.getMessageObject().currentAccount : UserConfig.selectedAccount;
@@ -197,11 +198,13 @@ public class TranscribeButton {
         shouldBeOpen = open;
         if (animated) {
             if (open && !wasShouldBeOpen) {
+                iconAnimationStart = SystemClock.uptimeMillis();
                 isOpen = false;
                 inIconDrawable.setCurrentFrame(0);
                 outIconDrawable.setCurrentFrame(0);
                 outIconDrawable.start();
             } else if (!open && wasShouldBeOpen) {
+                iconAnimationStart = SystemClock.uptimeMillis();
                 isOpen = true;
                 outIconDrawable.setCurrentFrame(0);
                 inIconDrawable.setCurrentFrame(0);
@@ -216,6 +219,10 @@ public class TranscribeButton {
         }
         if (parent != null) {
             parent.invalidate();
+            if (animated) {
+                // Look again once the animation should be over, in case it stopped short of its end.
+                parent.postInvalidateDelayed(750);
+            }
         }
     }
 
@@ -473,10 +480,14 @@ public class TranscribeButton {
         checkEngineIcon();
         // Svipe: an icon animation that stopped before its last frame (its finish callback never ran)
         // froze the button halfway between "→A/→S" and "^". Settle on the state it was heading to.
-        if (!isOpen && shouldBeOpen && !outIconDrawable.isRunning()) {
+        // The animation is 20 frames (~330 ms); one still unfinished well after that is stuck.
+        final boolean overdue = SystemClock.uptimeMillis() - iconAnimationStart > 700;
+        if (!isOpen && shouldBeOpen && (!outIconDrawable.isRunning() || overdue)) {
+            outIconDrawable.stop();
             isOpen = true;
             inIconDrawable.setCurrentFrame(0);
-        } else if (isOpen && !shouldBeOpen && !inIconDrawable.isRunning()) {
+        } else if (isOpen && !shouldBeOpen && (!inIconDrawable.isRunning() || overdue)) {
+            inIconDrawable.stop();
             isOpen = false;
             outIconDrawable.setCurrentFrame(0);
         }
