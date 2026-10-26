@@ -15693,6 +15693,7 @@ public class MessagesStorage extends BaseController {
                 message.peer_id.user_id = userId;
                 message.from_id = new TLRPC.TL_peerUser();
                 message.from_id.user_id = getUserConfig().getClientUserId(); // the event is mine
+                message.flags |= TLRPC.MESSAGE_FLAG_HAS_FROM_ID; // or from_id is not serialized
                 data = new NativeByteBuffer(message.getObjectSize());
                 message.serializeToStream(data);
                 SQLitePreparedStatement state = database.executeFast("REPLACE INTO svipe_deleted_messages(uid, mid, svipe_version, data, date, edit_date, out, media, group_id, from_id, svipe_kind, svipe_media_path, captured_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");

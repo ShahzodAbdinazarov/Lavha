@@ -7163,6 +7163,15 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         AndroidUtilities.runOnUIThread(
                 () -> org.telegram.svipe.SvipeChannelSync.syncAll(currentAccount), 4000);
         org.telegram.svipe.SvipeSettingsSync.pullOnResume(currentAccount);
+        // Svipe: Recent actions captured while the upload could not run (offline, app killed) go up now,
+        // for every signed-in account, without the chat having to be opened.
+        AndroidUtilities.runOnUIThread(() -> {
+            for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                if (UserConfig.getInstance(a).isClientActivated()) {
+                    org.telegram.svipe.SvipeMessageSync.flushPending(a);
+                }
+            }
+        }, 5000);
         //FileLog.d("UI resume time = " + (SystemClock.elapsedRealtime() - ApplicationLoader.startTime));
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.startAllHeavyOperations, 4096);
         MediaController.getInstance().setFeedbackView(feedbackView = actionBarLayout.getView(), true);

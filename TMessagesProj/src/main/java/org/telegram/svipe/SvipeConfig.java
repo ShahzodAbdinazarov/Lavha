@@ -163,6 +163,60 @@ public class SvipeConfig {
         }
     }
 
+    // Private chats whose archive may hold something the server does not have yet (see
+    // SvipeMessageSync.flushPending), and whether the list was seeded from the existing archive.
+    public static final String PREF_MSG_SYNC_PENDING = "svipe_msg_sync_pending";
+    // v2: re-seed once: secret-chat events logged before their author was serialized were skipped.
+    public static final String PREF_MSG_SYNC_PENDING_SEEDED = "svipe_msg_sync_pending_seeded_v2";
+
+    public static synchronized java.util.List<Long> getMsgSyncPending(int account) {
+        java.util.ArrayList<Long> out = new java.util.ArrayList<>();
+        try {
+            for (String id : MessagesController.getMainSettings(account).getStringSet(PREF_MSG_SYNC_PENDING, java.util.Collections.emptySet())) {
+                out.add(Long.parseLong(id));
+            }
+        } catch (Exception e) {
+            // best-effort
+        }
+        return out;
+    }
+
+    public static synchronized void addMsgSyncPending(int account, long dialogId) {
+        editMsgSyncPending(account, dialogId, true);
+    }
+
+    public static synchronized void removeMsgSyncPending(int account, long dialogId) {
+        editMsgSyncPending(account, dialogId, false);
+    }
+
+    private static void editMsgSyncPending(int account, long dialogId, boolean add) {
+        try {
+            android.content.SharedPreferences prefs = MessagesController.getMainSettings(account);
+            java.util.HashSet<String> ids = new java.util.HashSet<>(prefs.getStringSet(PREF_MSG_SYNC_PENDING, java.util.Collections.emptySet()));
+            if (add ? ids.add(String.valueOf(dialogId)) : ids.remove(String.valueOf(dialogId))) {
+                prefs.edit().putStringSet(PREF_MSG_SYNC_PENDING, ids).apply();
+            }
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
+    public static boolean isMsgSyncPendingSeeded(int account) {
+        try {
+            return MessagesController.getMainSettings(account).getBoolean(PREF_MSG_SYNC_PENDING_SEEDED, false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static void setMsgSyncPendingSeeded(int account) {
+        try {
+            MessagesController.getMainSettings(account).edit().putBoolean(PREF_MSG_SYNC_PENDING_SEEDED, true).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
     public static void setShowInChat(int account, long dialogId, boolean on) {
         try {
             MessagesController.getMainSettings(account).edit().putBoolean(PREF_SHOW_IN_CHAT_PREFIX + dialogId, on).apply();
