@@ -64,7 +64,7 @@ public final class SvipeProfileTabs {
             t.botId = o.optLong("bot_id");
             t.username = o.optString("username");
             t.title = o.optString("title", t.username);
-            t.listLayout = "list".equals(o.optString("layout"));
+            t.listLayout = SvipeBotTabAdapter.isRowLayout(o.optString("layout"));
             t.everyone = !"me".equals(o.optString("visibility"));
             out.add(t);
         }

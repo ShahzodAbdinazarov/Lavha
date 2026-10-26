@@ -23,6 +23,17 @@ public class SvipeBotTab {
         public String badge;
         public String link;
         public String image;
+        // Read by some layouts only (svipe.uz/bots/profile-tabs#layouts).
+        public String description;  // links
+        public String urlText;      // links: the address shown
+        public String fileName;     // files
+        public long size;           // files, bytes
+        public String performer;    // music
+        public int duration;        // music, voice, video tiles; seconds
+        public String audio;        // music, voice: played in the app, from our server
+        public boolean isVideo;     // media, stories, gifs
+        public String price;        // gifts
+        public String ribbon;       // gifts
     }
 
     public static class State {
@@ -34,6 +45,8 @@ public class SvipeBotTab {
         public String botUsername;
         public String title;
         public boolean listLayout;
+        /** The bot's layout: grid, list, media, stories, gifs, gifts, files, links, music, voice, people. */
+        public String layout = "grid";
         public boolean isAttacher;
         public boolean canRename;
         public int total;
@@ -95,7 +108,8 @@ public class SvipeBotTab {
         JSONObject bot = res.optJSONObject("bot");
         state.botUsername = bot != null ? bot.optString("username", null) : null;
         state.title = res.optString("title", state.botUsername);
-        state.listLayout = "list".equals(res.optString("layout"));
+        state.layout = res.optString("layout", "grid");
+        state.listLayout = SvipeBotTabAdapter.isRowLayout(state.layout);
         state.isAttacher = res.optBoolean("is_attacher");
         state.canRename = res.optBoolean("can_rename");
         state.total = res.optInt("total");
@@ -118,10 +132,24 @@ public class SvipeBotTab {
                 card.badge = o.isNull("badge") ? null : o.optString("badge");
                 card.link = o.optString("link");
                 card.image = o.isNull("image") ? null : o.optString("image");
+                card.description = str(o, "description");
+                card.urlText = str(o, "url_text");
+                card.fileName = str(o, "file_name");
+                card.size = o.optLong("size");
+                card.performer = str(o, "performer");
+                card.duration = o.optInt("duration");
+                card.audio = str(o, "audio");
+                card.isVideo = o.optBoolean("is_video");
+                card.price = str(o, "price");
+                card.ribbon = str(o, "ribbon");
                 state.cards.add(card);
             }
         }
         return state;
+    }
+
+    private static String str(JSONObject o, String key) {
+        return o.has(key) && !o.isNull(key) ? o.optString(key) : null;
     }
 
     /** Result of an admin action: the error code from the server, or null when it worked. */

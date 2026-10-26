@@ -3292,6 +3292,9 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     org.telegram.svipe.SvipeBotTabAdapter adapter = userTabAdapters[userTabIndex(mediaPage.selectedType)];
                     org.telegram.svipe.SvipeBotTab.Card card = adapter.getCard(position);
                     org.telegram.svipe.SvipeBotTab.State state = adapter.getState();
+                    if (adapter.onCardClick(position)) {
+                        return; // a music or voice card plays here
+                    }
                     if (card != null && state != null && profileActivity != null && profileActivity.getParentActivity() != null) {
                         // The mini app it opens is told whose profile this is (svipeInitData, chat_type profile).
                         org.telegram.svipe.SvipeProfileTabs.openingFromProfile(state.botId, state.ownerId);
@@ -3299,6 +3302,9 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     }
                 } else if (mediaPage.selectedType == TAB_BOT_TAB) { // Svipe: a card opens the bot's mini app
                     org.telegram.svipe.SvipeBotTab.Card card = botTabAdapter.getCard(position);
+                    if (botTabAdapter.onCardClick(position)) {
+                        return; // a music or voice card plays here
+                    }
                     if (card != null && profileActivity != null && profileActivity.getParentActivity() != null) {
                         org.telegram.messenger.browser.Browser.openUrl(profileActivity.getParentActivity(), card.link);
                     }
@@ -5108,6 +5114,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
 
     public void onDestroy() {
         observersGroup.removeAllObservers();
+        org.telegram.svipe.SvipeBotTabAdapter.stopAudio(); // Svipe: a bot tab's music card that was playing
 
         if (storiesAdapter != null && storiesAdapter.storiesList != null) {
             storiesAdapter.destroy();
