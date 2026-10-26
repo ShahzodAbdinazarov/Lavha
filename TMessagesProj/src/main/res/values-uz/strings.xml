@@ -46,8 +46,12 @@
     <string name="SvipeYouDeletedMessage">Siz bu xabarni o\'chirdingiz:</string>
     <string name="SvipeYouRemovedForYou">Siz bu xabarni o\'zingizdan o\'chirdingiz:</string>
     <string name="SvipeUserRemovedForThem">%1$s bu xabarni o\'zidan o\'chirdi:</string>
-    <string name="SvipeYouStartedSecretChat">Siz %1$s bilan maxfiy chat boshladingiz</string>
-    <string name="SvipeUserStartedSecretChat">%1$s siz bilan maxfiy chat boshladi</string>
+    <string name="SvipeYouStartedSecretChat">Siz %1$s bilan maxfiy chat ochishni taklif qildingiz</string>
+    <string name="SvipeUserStartedSecretChat">%1$s siz bilan maxfiy chat ochishni taklif qildi</string>
+    <string name="SvipeUserDeclinedSecretChat">%1$s maxfiy chatni rad etdi</string>
+    <string name="SvipeYouDeclinedSecretChat">Siz maxfiy chatni rad etdingiz</string>
+    <string name="SvipeUserAcceptedSecretChat">%1$s maxfiy chatni qabul qildi</string>
+    <string name="SvipeYouAcceptedSecretChat">Siz maxfiy chatni qabul qildingiz</string>
     <string name="SvipeRecentActions">So\'nggi amallar</string>
     <string name="SvipeRecentActionsInfo">Bu qurilmada o\'chirilgan yoki tahrirlangan xabar va chatlar siz butunlay o\'chirmaguningizcha shu yerda saqlanadi.</string>
     <string name="SvipeArchivedCount">%1$d ta yozuv · %2$s</string>

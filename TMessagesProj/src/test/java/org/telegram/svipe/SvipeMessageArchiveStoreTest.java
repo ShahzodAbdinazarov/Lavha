@@ -156,4 +156,15 @@ public class SvipeMessageArchiveStoreTest {
         // The all-zero prefix would map to 0; it must be forced to a non-zero negative id.
         assertTrue(SvipeMessageArchiveStore.syntheticMid("0".repeat(64)) < 0);
     }
+
+    @Test
+    public void secretChatEventsGetTheirOwnNegativeRow() {
+        int offer = SvipeMessageArchiveStore.secretChatEventMid(77, SvipeMessageArchiveStore.EVENT_SECRET_CHAT);
+        int accepted = SvipeMessageArchiveStore.secretChatEventMid(77, SvipeMessageArchiveStore.EVENT_SECRET_CHAT_ACCEPTED);
+        int declined = SvipeMessageArchiveStore.secretChatEventMid(77, SvipeMessageArchiveStore.EVENT_SECRET_CHAT_DECLINED);
+        assertTrue(offer < 0 && accepted < 0 && declined < 0);
+        assertTrue(offer != accepted && accepted != declined && offer != declined);
+        assertTrue(offer != SvipeMessageArchiveStore.secretChatEventMid(78, SvipeMessageArchiveStore.EVENT_SECRET_CHAT));
+        assertTrue(SvipeMessageArchiveStore.secretChatEventMid(Integer.MAX_VALUE, SvipeMessageArchiveStore.EVENT_SECRET_CHAT_DECLINED) < 0);
+    }
 }

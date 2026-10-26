@@ -424,14 +424,22 @@ public class SvipeDeletedLogActivity extends BaseFragment
 
     /** The service line for a {@link SvipeMessageArchiveStore#KIND_EVENT} row, or null if unknown. */
     private CharSequence eventText(TLRPC.Message m) {
-        if (!SvipeMessageArchiveStore.EVENT_SECRET_CHAT.equals(m.message)) {
-            return null;
-        }
         TLRPC.User user = dialogId > 0 ? getMessagesController().getUser(dialogId) : null;
         String name = user != null ? UserObject.getUserName(user) : "";
-        return m.out
-                ? LocaleController.formatString(R.string.SvipeYouStartedSecretChat, name)
-                : LocaleController.formatString(R.string.SvipeUserStartedSecretChat, name);
+        if (SvipeMessageArchiveStore.EVENT_SECRET_CHAT.equals(m.message)) {
+            return m.out
+                    ? LocaleController.formatString(R.string.SvipeYouStartedSecretChat, name)
+                    : LocaleController.formatString(R.string.SvipeUserStartedSecretChat, name);
+        } else if (SvipeMessageArchiveStore.EVENT_SECRET_CHAT_ACCEPTED.equals(m.message)) {
+            return m.out
+                    ? LocaleController.getString(R.string.SvipeYouAcceptedSecretChat)
+                    : LocaleController.formatString(R.string.SvipeUserAcceptedSecretChat, name);
+        } else if (SvipeMessageArchiveStore.EVENT_SECRET_CHAT_DECLINED.equals(m.message)) {
+            return m.out
+                    ? LocaleController.getString(R.string.SvipeYouDeclinedSecretChat)
+                    : LocaleController.formatString(R.string.SvipeUserDeclinedSecretChat, name);
+        }
+        return null;
     }
 
     /** Mirrors ChannelAdminLogActivity#actionMessagesDeletedBy for the single-message case. */

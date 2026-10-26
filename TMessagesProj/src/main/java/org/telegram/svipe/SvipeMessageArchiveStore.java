@@ -33,7 +33,16 @@ public class SvipeMessageArchiveStore {
     public static final int KIND_REMOVED_BY_PEER = 5; // the partner deleted it only on their side (learned from their synced archive)
 
     /** {@link #KIND_EVENT} subtypes, kept in the stored message's {@code message} field. */
-    public static final String EVENT_SECRET_CHAT = "secret_chat";
+    public static final String EVENT_SECRET_CHAT = "secret_chat";                   // offered (by me if out)
+    public static final String EVENT_SECRET_CHAT_ACCEPTED = "secret_chat_accepted"; // accepted (by me if out)
+    public static final String EVENT_SECRET_CHAT_DECLINED = "secret_chat_declined"; // declined (by me if out)
+
+    /** Row id of one secret-chat event: stable per (secret chat, event), and never a real (positive) id. */
+    public static int secretChatEventMid(int encryptedChatId, String event) {
+        int sub = EVENT_SECRET_CHAT_ACCEPTED.equals(event) ? 1 : EVENT_SECRET_CHAT_DECLINED.equals(event) ? 2 : 0;
+        long v = (encryptedChatId & 0x0fffffffL) * 4 + sub + 1;
+        return -(int) (v & 0x7fffffffL);
+    }
 
     /** Media-pin outcomes (see {@link #planMediaPin}). */
     public static final int PIN_NONE = 0;   // pin nothing — the inline blurred thumb still rides in the blob

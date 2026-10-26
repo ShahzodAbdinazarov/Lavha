@@ -309,8 +309,12 @@
     <string name="SvipeYouDeletedMessage">Вы удалили это сообщение:</string>
     <string name="SvipeYouRemovedForYou">Вы удалили это сообщение у себя:</string>
     <string name="SvipeUserRemovedForThem">%1$s удалил(а) это сообщение у себя:</string>
-    <string name="SvipeYouStartedSecretChat">Вы начали секретный чат с %1$s</string>
-    <string name="SvipeUserStartedSecretChat">%1$s начал(а) с вами секретный чат</string>
+    <string name="SvipeYouStartedSecretChat">Вы предложили %1$s секретный чат</string>
+    <string name="SvipeUserStartedSecretChat">%1$s предлагает вам секретный чат</string>
+    <string name="SvipeUserDeclinedSecretChat">%1$s отклоняет секретный чат</string>
+    <string name="SvipeYouDeclinedSecretChat">Вы отклонили секретный чат</string>
+    <string name="SvipeUserAcceptedSecretChat">%1$s принимает секретный чат</string>
+    <string name="SvipeYouAcceptedSecretChat">Вы приняли секретный чат</string>
     <string name="SvipeRecentActions">Недавние действия</string>
     <string name="SvipeRecentActionsInfo">Сообщения и чаты, удалённые или изменённые на этом устройстве, хранятся здесь, пока вы не удалите их навсегда.</string>
     <string name="SvipeArchivedCount">Записей: %1$d · %2$s</string>

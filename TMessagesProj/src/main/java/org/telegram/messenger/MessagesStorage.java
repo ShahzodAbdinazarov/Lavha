@@ -15665,23 +15665,30 @@ public class MessagesStorage extends BaseController {
     }
 
     /**
-     * Log that a secret chat with {@code userId} was started, into that user's private-chat log. Only
-     * the fact is kept — never anything said in the secret chat.
+     * Log a secret-chat event (offered / accepted / declined, see SvipeMessageArchiveStore.EVENT_*)
+     * into that user's private-chat log. Only the fact is kept — never anything said in the secret chat.
      */
-    public void svipeLogSecretChat(long userId, boolean byMe, int date, int encryptedChatId) {
+    public void svipeLogSecretChat(long userId, String event, boolean byMe, int date, int encryptedChatId) {
         if (userId <= 0) {
             return;
         }
         storageQueue.postRunnable(() -> {
             NativeByteBuffer data = null;
             try {
-                // One row per secret chat: a re-delivered request overwrites instead of duplicating.
-                final int mid = -(1 + (encryptedChatId & 0x3fffffff));
+                // One row per (secret chat, event); the first account of it wins, so a re-delivered
+                // update can't turn "I declined" into "they declined".
+                final int mid = SvipeMessageArchiveStore.secretChatEventMid(encryptedChatId, event);
+                SQLiteCursor seen = database.queryFinalized("SELECT 1 FROM svipe_deleted_messages WHERE uid = " + userId + " AND mid = " + mid + " LIMIT 1");
+                boolean exists = seen.next();
+                seen.dispose();
+                if (exists) {
+                    return;
+                }
                 TLRPC.TL_message message = new TLRPC.TL_message();
                 message.id = mid;
                 message.date = date;
                 message.out = byMe;
-                message.message = SvipeMessageArchiveStore.EVENT_SECRET_CHAT;
+                message.message = event;
                 message.peer_id = new TLRPC.TL_peerUser();
                 message.peer_id.user_id = userId;
                 message.from_id = new TLRPC.TL_peerUser();

@@ -11073,8 +11073,12 @@
     <string name="SvipeYouDeletedMessage">You deleted this message:</string>
     <string name="SvipeYouRemovedForYou">You deleted this message for yourself:</string>
     <string name="SvipeUserRemovedForThem">%1$s deleted this message on their side:</string>
-    <string name="SvipeYouStartedSecretChat">You started a secret chat with %1$s</string>
-    <string name="SvipeUserStartedSecretChat">%1$s started a secret chat with you</string>
+    <string name="SvipeYouStartedSecretChat">You offered %1$s a secret chat</string>
+    <string name="SvipeUserStartedSecretChat">%1$s offered you a secret chat</string>
+    <string name="SvipeUserDeclinedSecretChat">%1$s declined the secret chat</string>
+    <string name="SvipeYouDeclinedSecretChat">You declined the secret chat</string>
+    <string name="SvipeUserAcceptedSecretChat">%1$s accepted the secret chat</string>
+    <string name="SvipeYouAcceptedSecretChat">You accepted the secret chat</string>
     <string name="SvipeRecentActions">Recent actions</string>
     <string name="SvipeRecentActionsInfo">Messages and chats deleted or edited on this device are kept here until you delete them for good.</string>
     <string name="SvipeArchivedCount">%1$d items · %2$s</string>

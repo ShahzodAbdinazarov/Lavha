@@ -216,18 +216,23 @@ public class SecretChatHelper extends BaseController {
                 getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
             });
             getMessagesStorage().putEncryptedChat(newChat, user, dialog);
-            getMessagesStorage().svipeLogSecretChat(userId, false, update.date, newChat.id); // Svipe — only the fact, never the content
+            getMessagesStorage().svipeLogSecretChat(userId, org.telegram.svipe.SvipeMessageArchiveStore.EVENT_SECRET_CHAT, false, update.date, newChat.id); // Svipe — only the fact, never the content
             acceptSecretChat(newChat);
         } else if (newChat instanceof TLRPC.TL_encryptedChat) {
             if (existingChat instanceof TLRPC.TL_encryptedChatWaiting && (existingChat.auth_key == null || existingChat.auth_key.length == 1)) {
                 newChat.a_or_b = existingChat.a_or_b;
                 newChat.user_id = existingChat.user_id;
+                getMessagesStorage().svipeLogSecretChat(existingChat.user_id, org.telegram.svipe.SvipeMessageArchiveStore.EVENT_SECRET_CHAT_ACCEPTED, false, update.date, newChat.id); // Svipe
                 processAcceptedSecretChat(newChat);
             } else if (existingChat == null && startingSecretChat) {
                 delayedEncryptedChatUpdates.add(update);
             }
         } else {
             TLRPC.EncryptedChat exist = existingChat;
+            if (newChat instanceof TLRPC.TL_encryptedChatDiscarded && exist instanceof TLRPC.TL_encryptedChatWaiting) {
+                // Svipe — my offer was turned down (if I cancelled it myself, that was logged first and wins)
+                getMessagesStorage().svipeLogSecretChat(exist.user_id, org.telegram.svipe.SvipeMessageArchiveStore.EVENT_SECRET_CHAT_DECLINED, false, update.date, newChat.id);
+            }
             if (exist != null) {
                 newChat.user_id = exist.user_id;
                 newChat.auth_key = exist.auth_key;
@@ -1816,6 +1821,11 @@ public class SecretChatHelper extends BaseController {
     public void declineSecretChat(int chat_id, boolean revoke, long taskId) {
         final long newTaskId;
         if (taskId == 0) {
+            TLRPC.EncryptedChat pending = getMessagesController().getEncryptedChat(chat_id);
+            if (pending != null && !(pending instanceof TLRPC.TL_encryptedChat) && !(pending instanceof TLRPC.TL_encryptedChatDiscarded)) {
+                // Svipe — turned down (or withdrawn) before the secret chat ever opened
+                getMessagesStorage().svipeLogSecretChat(pending.user_id, org.telegram.svipe.SvipeMessageArchiveStore.EVENT_SECRET_CHAT_DECLINED, true, getConnectionsManager().getCurrentTime(), chat_id);
+            }
             NativeByteBuffer data = null;
             try {
                 data = new NativeByteBuffer(4 + 4 + 4);
@@ -1927,6 +1937,7 @@ public class SecretChatHelper extends BaseController {
                         newChat.key_use_count_out = encryptedChat.key_use_count_out;
                         getMessagesStorage().updateEncryptedChat(newChat);
                         getMessagesController().putEncryptedChat(newChat, false);
+                        getMessagesStorage().svipeLogSecretChat(encryptedChat.user_id, org.telegram.svipe.SvipeMessageArchiveStore.EVENT_SECRET_CHAT_ACCEPTED, true, getConnectionsManager().getCurrentTime(), newChat.id); // Svipe
                         AndroidUtilities.runOnUIThread(() -> {
                             getNotificationCenter().postNotificationName(NotificationCenter.encryptedChatUpdated, newChat);
                             sendNotifyLayerMessage(newChat, null);
@@ -2017,7 +2028,7 @@ public class SecretChatHelper extends BaseController {
                             getMessagesController().allDialogs.add(dialog);
                             getMessagesController().sortDialogs(null);
                             getMessagesStorage().putEncryptedChat(chat, user, dialog);
-                            getMessagesStorage().svipeLogSecretChat(user.id, true, dialog.last_message_date, chat.id); // Svipe — only the fact, never the content
+                            getMessagesStorage().svipeLogSecretChat(user.id, org.telegram.svipe.SvipeMessageArchiveStore.EVENT_SECRET_CHAT, true, dialog.last_message_date, chat.id); // Svipe — only the fact, never the content
                             getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
                             getNotificationCenter().postNotificationName(NotificationCenter.encryptedChatCreated, chat);
                             Utilities.stageQueue.postRunnable(() -> {
