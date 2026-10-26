@@ -15454,6 +15454,7 @@ public class MessagesStorage extends BaseController {
             // prompt can appear immediately (channels/groups have negative dialog ids and never sync).
             if (dialogId > 0 && SvipeMessageArchiveStore.isUploaded(kind)) {
                 final long did = dialogId;
+                SvipeMessageSync.scheduleUpload(currentAccount, did);
                 AndroidUtilities.runOnUIThread(() -> NotificationCenter.getInstance(currentAccount)
                         .postNotificationName(NotificationCenter.svipeMsgLocalArchived, did));
             }
