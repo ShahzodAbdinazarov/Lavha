@@ -308,6 +308,7 @@
     <string name="SvipeArchiveEmpty">Здесь пока нет удалённых или изменённых сообщений</string>
     <string name="SvipeYouDeletedMessage">Вы удалили это сообщение:</string>
     <string name="SvipeYouRemovedForYou">Вы удалили это сообщение у себя:</string>
+    <string name="SvipeUserRemovedForThem">%1$s удалил(а) это сообщение у себя:</string>
     <string name="SvipeYouStartedSecretChat">Вы начали секретный чат с %1$s</string>
     <string name="SvipeUserStartedSecretChat">%1$s начал(а) с вами секретный чат</string>
     <string name="SvipeRecentActions">Недавние действия</string>

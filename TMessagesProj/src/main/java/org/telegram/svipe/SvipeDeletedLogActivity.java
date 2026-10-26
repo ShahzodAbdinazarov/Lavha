@@ -243,6 +243,7 @@ public class SvipeDeletedLogActivity extends BaseFragment
         TLRPC.Message deleted; // non-null for delete events, so we can build the header row
         boolean wasOut;        // captured before the admin-log constructor clears `out`: our own message
         boolean removedByMe;   // deleted only on my side
+        boolean removedByPeer; // deleted only on the partner's side
         CharSequence text;     // non-null for a chat event: the whole row is this service line
     }
 
@@ -265,7 +266,8 @@ public class SvipeDeletedLogActivity extends BaseFragment
             if (e == null || e.message == null) {
                 continue;
             }
-            if (e.kind == SvipeMessageArchiveStore.KIND_DELETED || e.kind == SvipeMessageArchiveStore.KIND_REMOVED_BY_ME) {
+            if (e.kind == SvipeMessageArchiveStore.KIND_DELETED || e.kind == SvipeMessageArchiveStore.KIND_REMOVED_BY_ME
+                    || e.kind == SvipeMessageArchiveStore.KIND_REMOVED_BY_PEER) {
                 deleted.add(e);
             } else if (e.kind == SvipeMessageArchiveStore.KIND_EVENT) {
                 CharSequence text = eventText(e.message);
@@ -295,6 +297,7 @@ public class SvipeDeletedLogActivity extends BaseFragment
             ev.deleted = e.message;
             ev.wasOut = e.message.out;
             ev.removedByMe = e.kind == SvipeMessageArchiveStore.KIND_REMOVED_BY_ME;
+            ev.removedByPeer = e.kind == SvipeMessageArchiveStore.KIND_REMOVED_BY_PEER;
             events.add(ev);
         }
 
@@ -337,7 +340,7 @@ public class SvipeDeletedLogActivity extends BaseFragment
                 } else if (ev.deleted != null) {
                     // The upstream constructor returns early for delete events (the real admin log
                     // builds a grouped header itself), so add our own header row the same way it does.
-                    MessageObject row = createDeletedHeader(ev.deleted, ev.event.date, ev.wasOut, ev.removedByMe);
+                    MessageObject row = createDeletedHeader(ev.deleted, ev.event.date, ev.wasOut, ev.removedByMe, ev.removedByPeer);
                     if (row != null && !messages.isEmpty()) {
                         messages.add(messages.size() - 1, row);
                     }
@@ -432,7 +435,8 @@ public class SvipeDeletedLogActivity extends BaseFragment
     }
 
     /** Mirrors ChannelAdminLogActivity#actionMessagesDeletedBy for the single-message case. */
-    private MessageObject createDeletedHeader(TLRPC.Message deletedMsg, int date, boolean wasOut, boolean removedByMe) {
+    private MessageObject createDeletedHeader(TLRPC.Message deletedMsg, int date, boolean wasOut, boolean removedByMe,
+                                              boolean removedByPeer) {
         try {
             TLRPC.TL_message msg = new TLRPC.TL_message();
             msg.dialog_id = -logChat.id;
@@ -443,6 +447,13 @@ public class SvipeDeletedLogActivity extends BaseFragment
             if (removedByMe) {
                 // Gone only on my side — whoever wrote it, I am the one who removed it.
                 messageObject.messageText = LocaleController.getString(R.string.SvipeYouRemovedForYou);
+                return messageObject;
+            }
+            if (removedByPeer) {
+                // Gone only on the partner's side (a 1:1 chat, so the partner is the dialog's user).
+                TLRPC.User peer = getMessagesController().getUser(dialogId);
+                messageObject.messageText = LocaleController.formatString(R.string.SvipeUserRemovedForThem,
+                        peer != null ? UserObject.getUserName(peer) : "");
                 return messageObject;
             }
             if (wasOut) {

@@ -11072,6 +11072,7 @@
     <string name="SvipeArchiveEmpty">No deleted or edited messages here yet</string>
     <string name="SvipeYouDeletedMessage">You deleted this message:</string>
     <string name="SvipeYouRemovedForYou">You deleted this message for yourself:</string>
+    <string name="SvipeUserRemovedForThem">%1$s deleted this message on their side:</string>
     <string name="SvipeYouStartedSecretChat">You started a secret chat with %1$s</string>
     <string name="SvipeUserStartedSecretChat">%1$s started a secret chat with you</string>
     <string name="SvipeRecentActions">Recent actions</string>

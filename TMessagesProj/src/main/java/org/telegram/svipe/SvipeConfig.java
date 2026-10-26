@@ -143,6 +143,26 @@ public class SvipeConfig {
         }
     }
 
+    // When the user last deleted a chat's archive for good (seconds): items dated up to then that
+    // the server still returns (the partner's archive) are not pulled back in.
+    public static final String PREF_ARCHIVE_PURGED_AT_PREFIX = "svipe_archive_purged_at_";
+
+    public static long getArchivePurgedAt(int account, long dialogId) {
+        try {
+            return MessagesController.getMainSettings(account).getLong(PREF_ARCHIVE_PURGED_AT_PREFIX + dialogId, 0);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    public static void setArchivePurgedAt(int account, long dialogId, long seconds) {
+        try {
+            MessagesController.getMainSettings(account).edit().putLong(PREF_ARCHIVE_PURGED_AT_PREFIX + dialogId, seconds).apply();
+        } catch (Exception e) {
+            // best-effort
+        }
+    }
+
     public static void setShowInChat(int account, long dialogId, boolean on) {
         try {
             MessagesController.getMainSettings(account).edit().putBoolean(PREF_SHOW_IN_CHAT_PREFIX + dialogId, on).apply();

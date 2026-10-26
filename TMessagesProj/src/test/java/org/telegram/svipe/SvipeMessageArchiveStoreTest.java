@@ -51,12 +51,25 @@ public class SvipeMessageArchiveStoreTest {
     }
 
     @Test
-    public void onlyRealDeletionsAreShared() {
-        assertTrue(SvipeMessageArchiveStore.isShared(SvipeMessageArchiveStore.KIND_DELETED));
-        assertTrue(SvipeMessageArchiveStore.isShared(SvipeMessageArchiveStore.KIND_EDITED_PRIOR));
-        assertFalse("removed only on my side — the partner still has it", SvipeMessageArchiveStore.isShared(SvipeMessageArchiveStore.KIND_REMOVED_BY_ME));
-        assertFalse(SvipeMessageArchiveStore.isShared(SvipeMessageArchiveStore.KIND_EVENT));
-        assertFalse(SvipeMessageArchiveStore.isShared(SvipeMessageArchiveStore.KIND_LIVE));
+    public void everythingOfMineIsUploadedButNotThePartnersRemovals() {
+        assertTrue(SvipeMessageArchiveStore.isUploaded(SvipeMessageArchiveStore.KIND_DELETED));
+        assertTrue(SvipeMessageArchiveStore.isUploaded(SvipeMessageArchiveStore.KIND_EDITED_PRIOR));
+        assertTrue(SvipeMessageArchiveStore.isUploaded(SvipeMessageArchiveStore.KIND_REMOVED_BY_ME));
+        assertTrue(SvipeMessageArchiveStore.isUploaded(SvipeMessageArchiveStore.KIND_EVENT));
+        assertFalse("already in the partner's archive", SvipeMessageArchiveStore.isUploaded(SvipeMessageArchiveStore.KIND_REMOVED_BY_PEER));
+        assertFalse(SvipeMessageArchiveStore.isUploaded(SvipeMessageArchiveStore.KIND_LIVE));
+    }
+
+    @Test
+    public void serverItemsLandRelativeToMe() {
+        final long me = 1, peer = 2;
+        int byMe = SvipeMessageArchiveStore.KIND_REMOVED_BY_ME, event = SvipeMessageArchiveStore.KIND_EVENT;
+        assertEquals("my other device's removal stays mine", byMe, SvipeMessageArchiveStore.kindFromServer(byMe, me, me));
+        assertEquals("the partner's removal", SvipeMessageArchiveStore.KIND_REMOVED_BY_PEER, SvipeMessageArchiveStore.kindFromServer(byMe, peer, me));
+        assertEquals(event, SvipeMessageArchiveStore.kindFromServer(event, me, me));
+        assertEquals("my device logged its own copy", -1, SvipeMessageArchiveStore.kindFromServer(event, peer, me));
+        assertEquals(SvipeMessageArchiveStore.KIND_DELETED, SvipeMessageArchiveStore.kindFromServer(SvipeMessageArchiveStore.KIND_DELETED, peer, me));
+        assertEquals("older server without an owner", byMe, SvipeMessageArchiveStore.kindFromServer(byMe, 0, me));
     }
 
     // ---- media-pin policy (plan §7) ----

@@ -30,6 +30,7 @@ public class SvipeMessageArchiveStore {
     public static final int KIND_LIVE = 2;          // not stored: the current live message, attached on read so the log can show the newest edit
     public static final int KIND_REMOVED_BY_ME = 3; // I deleted it only on my side (delete-for-me, delete chat, clear history) — the partner still has it
     public static final int KIND_EVENT = 4;         // a chat event with no message body (a secret chat was started)
+    public static final int KIND_REMOVED_BY_PEER = 5; // the partner deleted it only on their side (learned from their synced archive)
 
     /** {@link #KIND_EVENT} subtypes, kept in the stored message's {@code message} field. */
     public static final String EVENT_SECRET_CHAT = "secret_chat";
@@ -104,9 +105,25 @@ public class SvipeMessageArchiveStore {
         return onlyHistory == 0 && dialogId > 0;
     }
 
-    /** Kinds that may go to the shared pool. A delete-for-me or an event is mine alone. */
-    public static boolean isShared(int kind) {
-        return kind == KIND_DELETED || kind == KIND_EDITED_PRIOR;
+    /**
+     * Kinds this device uploads to my server archive. Not the live version (never stored), and not a
+     * partner's own removal: that already lives in their archive, and "removed by peer" is relative.
+     */
+    public static boolean isUploaded(int kind) {
+        return kind == KIND_DELETED || kind == KIND_EDITED_PRIOR || kind == KIND_REMOVED_BY_ME || kind == KIND_EVENT;
+    }
+
+    /**
+     * How an item pulled from the server lands locally. {@code owner} is whose archive it came from
+     * (0 = unknown, older server). My own removals and events come back as they are; the partner's
+     * removal becomes {@link #KIND_REMOVED_BY_PEER}; the partner's copy of an event is dropped (my
+     * device logged its own). Returns -1 to skip.
+     */
+    public static int kindFromServer(int kind, long owner, long self) {
+        if (owner == 0 || owner == self) return kind;
+        if (kind == KIND_REMOVED_BY_ME) return KIND_REMOVED_BY_PEER;
+        if (kind == KIND_EVENT) return -1;
+        return kind;
     }
 
     // ---- automated deletes that must leave no trace ----

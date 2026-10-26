@@ -45,6 +45,7 @@
     <string name="SvipeArchiveEmpty">Bu yerda hali o\'chgan yoki tahrirlangan xabar yo\'q</string>
     <string name="SvipeYouDeletedMessage">Siz bu xabarni o\'chirdingiz:</string>
     <string name="SvipeYouRemovedForYou">Siz bu xabarni o\'zingizdan o\'chirdingiz:</string>
+    <string name="SvipeUserRemovedForThem">%1$s bu xabarni o\'zidan o\'chirdi:</string>
     <string name="SvipeYouStartedSecretChat">Siz %1$s bilan maxfiy chat boshladingiz</string>
     <string name="SvipeUserStartedSecretChat">%1$s siz bilan maxfiy chat boshladi</string>
     <string name="SvipeRecentActions">So\'nggi amallar</string>

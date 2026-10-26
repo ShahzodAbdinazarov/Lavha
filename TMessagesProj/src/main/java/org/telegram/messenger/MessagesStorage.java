@@ -37,7 +37,9 @@ import org.telegram.SQLite.SQLiteDatabase;
 import org.telegram.SQLite.SQLiteException;
 import org.telegram.SQLite.SQLitePreparedStatement;
 import org.telegram.messenger.support.LongSparseIntArray;
+import org.telegram.svipe.SvipeConfig;
 import org.telegram.svipe.SvipeMessageArchiveStore;
+import org.telegram.svipe.SvipeMessageSync;
 import org.telegram.messenger.utils.EphemeralMessagesHelper;
 import org.telegram.tgnet.NativeByteBuffer;
 import org.telegram.tgnet.RequestDelegate;
@@ -15450,8 +15452,7 @@ public class MessagesStorage extends BaseController {
 
             // Tell an open ChatActivity of a 1:1 chat that a delete/edit just landed, so the consent
             // prompt can appear immediately (channels/groups have negative dialog ids and never sync).
-            // Removals on my side only never sync, so they don't prompt.
-            if (dialogId > 0 && SvipeMessageArchiveStore.isShared(kind)) {
+            if (dialogId > 0 && SvipeMessageArchiveStore.isUploaded(kind)) {
                 final long did = dialogId;
                 AndroidUtilities.runOnUIThread(() -> NotificationCenter.getInstance(currentAccount)
                         .postNotificationName(NotificationCenter.svipeMsgLocalArchived, did));
@@ -15682,7 +15683,8 @@ public class MessagesStorage extends BaseController {
                 message.message = SvipeMessageArchiveStore.EVENT_SECRET_CHAT;
                 message.peer_id = new TLRPC.TL_peerUser();
                 message.peer_id.user_id = userId;
-                // no from_id: an event has no author, so it never enters the shared pool
+                message.from_id = new TLRPC.TL_peerUser();
+                message.from_id.user_id = getUserConfig().getClientUserId(); // the event is mine
                 data = new NativeByteBuffer(message.getObjectSize());
                 message.serializeToStream(data);
                 SQLitePreparedStatement state = database.executeFast("REPLACE INTO svipe_deleted_messages(uid, mid, svipe_version, data, date, edit_date, out, media, group_id, from_id, svipe_kind, svipe_media_path, captured_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -15774,8 +15776,10 @@ public class MessagesStorage extends BaseController {
         });
     }
 
-    /** Remove everything archived for a chat, rows and pinned media, for good. */
+    /** Remove everything archived for a chat, rows and pinned media, for good — here and on the server. */
     public void svipePurgeArchive(long dialogId, Runnable done) {
+        SvipeConfig.setArchivePurgedAt(currentAccount, dialogId, getConnectionsManager().getCurrentTime());
+        SvipeMessageSync.deleteChatArchive(currentAccount, dialogId);
         storageQueue.postRunnable(() -> {
             try {
                 database.executeFast("DELETE FROM svipe_deleted_messages WHERE uid = " + dialogId).stepThis().dispose();
