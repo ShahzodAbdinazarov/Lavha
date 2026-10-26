@@ -15448,11 +15448,10 @@ public class MessagesStorage extends BaseController {
             state.step();
             state.dispose();
 
-            svipeTrimArchive(dialogId);
-
             // Tell an open ChatActivity of a 1:1 chat that a delete/edit just landed, so the consent
             // prompt can appear immediately (channels/groups have negative dialog ids and never sync).
-            if (dialogId > 0) {
+            // Removals on my side only never sync, so they don't prompt.
+            if (dialogId > 0 && SvipeMessageArchiveStore.isShared(kind)) {
                 final long did = dialogId;
                 AndroidUtilities.runOnUIThread(() -> NotificationCenter.getInstance(currentAccount)
                         .postNotificationName(NotificationCenter.svipeMsgLocalArchived, did));
@@ -15506,8 +15505,6 @@ public class MessagesStorage extends BaseController {
             state.bindLong(13, System.currentTimeMillis());
             state.step();
             state.dispose();
-
-            svipeTrimArchive(dialogId);
         } catch (Exception e) {
             FileLog.e(e);
         } finally {
@@ -15605,54 +15602,201 @@ public class MessagesStorage extends BaseController {
         return null;
     }
 
-    /** Enforce the per-dialog count + byte caps, deleting the oldest rows and their pinned media. */
-    private void svipeTrimArchive(long dialogId) {
+    /**
+     * Keep messages I am about to remove only on my side (delete-for-me). Queued on the storage queue
+     * BEFORE the delete itself, so the rows are still there to read.
+     */
+    public void svipeKeepRemovedByMe(long dialogId, ArrayList<Integer> mids) {
+        if (dialogId == 0 || DialogObject.isEncryptedDialog(dialogId) || mids == null || mids.isEmpty()) {
+            return;
+        }
+        final ArrayList<Integer> ids = new ArrayList<>(mids);
+        storageQueue.postRunnable(() -> svipeKeepWhere(dialogId, "uid = " + dialogId + " AND mid IN(" + TextUtils.join(",", ids) + ")", SvipeMessageArchiveStore.KIND_REMOVED_BY_ME));
+    }
+
+    /**
+     * Keep every cached message of a dialog I am about to delete or clear. Queued on the storage queue
+     * BEFORE {@link #deleteDialog}, which runs on the same queue, so it reads the rows first. With
+     * {@code revoke} the partner loses them too, so they are real deletions; otherwise mine alone.
+     */
+    public void svipeKeepDialog(long dialogId, boolean revoke) {
+        if (dialogId == 0 || DialogObject.isEncryptedDialog(dialogId)) {
+            return;
+        }
+        final int kind = revoke ? SvipeMessageArchiveStore.KIND_DELETED : SvipeMessageArchiveStore.KIND_REMOVED_BY_ME;
+        storageQueue.postRunnable(() -> svipeKeepWhere(dialogId, "uid = " + dialogId, kind));
+    }
+
+    private void svipeKeepWhere(long dialogId, String where, int kind) {
+        SQLiteCursor cursor = null;
+        boolean any = false;
         try {
-            // Cheap gate: a bulk channel delete inserts thousands of rows in a tight loop, so avoid the
-            // full per-row scan on every insert. Only scan when the count cap is exceeded, or
-            // periodically (to enforce the byte cap for a few large media at low count).
-            int count = 0;
-            SQLiteCursor agg = database.queryFinalized("SELECT COUNT(*) FROM svipe_deleted_messages WHERE uid = " + dialogId);
-            if (agg.next()) {
-                count = agg.intValue(0);
-            }
-            agg.dispose();
-            if (count <= SvipeMessageArchiveStore.MAX_PER_DIALOG && (count == 0 || count % 128 != 0)) {
-                return;
-            }
-
-            ArrayList<SvipeMessageArchiveStore.ArchiveRow> rows = new ArrayList<>();
-            SQLiteCursor c = database.queryFinalized(String.format(Locale.US, "SELECT mid, svipe_version, captured_at, length(data), svipe_media_path FROM svipe_deleted_messages WHERE uid = %d", dialogId));
-            while (c.next()) {
-                int mid = c.intValue(0);
-                int version = c.intValue(1);
-                long capturedAt = c.longValue(2);
-                long bytes = c.longValue(3);
-                String mediaPath = c.isNull(4) ? null : c.stringValue(4);
-                long mediaBytes = 0;
-                if (mediaPath != null) {
-                    File mf = new File(mediaPath);
-                    if (mf.exists()) {
-                        mediaBytes = mf.length();
-                    }
+            database.beginTransaction();
+            cursor = database.queryFinalized("SELECT data FROM messages_v2 WHERE " + where + " AND mid > 0");
+            while (cursor.next()) {
+                NativeByteBuffer data = cursor.byteBufferValue(0);
+                if (data == null) {
+                    continue;
                 }
-                rows.add(new SvipeMessageArchiveStore.ArchiveRow(mid, version, capturedAt, bytes + mediaBytes, mediaPath));
-            }
-            c.dispose();
-
-            List<SvipeMessageArchiveStore.ArchiveRow> evict = SvipeMessageArchiveStore.planTrim(rows, SvipeMessageArchiveStore.MAX_PER_DIALOG, SvipeMessageArchiveStore.MAX_BYTES_PER_DIALOG);
-            for (SvipeMessageArchiveStore.ArchiveRow r : evict) {
-                database.executeFast(String.format(Locale.US, "DELETE FROM svipe_deleted_messages WHERE uid = %d AND mid = %d AND svipe_version = %d", dialogId, r.mid, r.version)).stepThis().dispose();
-                if (r.mediaPath != null) {
-                    try {
-                        new File(r.mediaPath).delete();
-                    } catch (Exception ignore) {
-                    }
+                TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+                if (message != null) {
+                    message.readAttachPath(data, getUserConfig().clientUserId);
                 }
+                data.reuse();
+                if (message == null || message instanceof TLRPC.TL_messageEmpty) {
+                    continue;
+                }
+                svipeArchiveMessage(dialogId, message, kind);
+                any = true;
             }
         } catch (Exception e) {
-            FileLog.e(e);
+            checkSQLException(e);
+        } finally {
+            if (cursor != null) {
+                cursor.dispose();
+            }
+            database.commitTransaction();
         }
+        if (any) {
+            AndroidUtilities.runOnUIThread(() -> getNotificationCenter().postNotificationName(NotificationCenter.svipeMessageArchiveUpdated, dialogId));
+        }
+    }
+
+    /**
+     * Log that a secret chat with {@code userId} was started, into that user's private-chat log. Only
+     * the fact is kept — never anything said in the secret chat.
+     */
+    public void svipeLogSecretChat(long userId, boolean byMe, int date, int encryptedChatId) {
+        if (userId <= 0) {
+            return;
+        }
+        storageQueue.postRunnable(() -> {
+            NativeByteBuffer data = null;
+            try {
+                // One row per secret chat: a re-delivered request overwrites instead of duplicating.
+                final int mid = -(1 + (encryptedChatId & 0x3fffffff));
+                TLRPC.TL_message message = new TLRPC.TL_message();
+                message.id = mid;
+                message.date = date;
+                message.out = byMe;
+                message.message = SvipeMessageArchiveStore.EVENT_SECRET_CHAT;
+                message.peer_id = new TLRPC.TL_peerUser();
+                message.peer_id.user_id = userId;
+                // no from_id: an event has no author, so it never enters the shared pool
+                data = new NativeByteBuffer(message.getObjectSize());
+                message.serializeToStream(data);
+                SQLitePreparedStatement state = database.executeFast("REPLACE INTO svipe_deleted_messages(uid, mid, svipe_version, data, date, edit_date, out, media, group_id, from_id, svipe_kind, svipe_media_path, captured_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                state.requery();
+                state.bindLong(1, userId);
+                state.bindInteger(2, mid);
+                state.bindInteger(3, 1);
+                state.bindByteBuffer(4, data);
+                state.bindInteger(5, date);
+                state.bindInteger(6, 0);
+                state.bindInteger(7, byMe ? 1 : 0);
+                state.bindInteger(8, 0);
+                state.bindLong(9, 0);
+                state.bindLong(10, 0);
+                state.bindInteger(11, SvipeMessageArchiveStore.KIND_EVENT);
+                state.bindNull(12);
+                state.bindLong(13, date * 1000L);
+                state.step();
+                state.dispose();
+                AndroidUtilities.runOnUIThread(() -> getNotificationCenter().postNotificationName(NotificationCenter.svipeMessageArchiveUpdated, userId));
+            } catch (Exception e) {
+                FileLog.e(e);
+            } finally {
+                if (data != null) {
+                    data.reuse();
+                }
+            }
+        });
+    }
+
+    /** One chat that has anything in the archive, for Settings → Recent actions. */
+    public static class SvipeArchivedDialog {
+        public long dialogId;
+        public int count;
+        public long bytes;
+        public long lastAt;
+    }
+
+    /**
+     * Every chat with archived items, newest activity first. Users and chats that are no longer in
+     * memory (a deleted chat) are loaded from the database so the list can show their name and photo.
+     */
+    public void getSvipeArchivedDialogs(Utilities.Callback<ArrayList<SvipeArchivedDialog>> callback) {
+        storageQueue.postRunnable(() -> {
+            ArrayList<SvipeArchivedDialog> result = new ArrayList<>();
+            ArrayList<TLRPC.User> users = new ArrayList<>();
+            ArrayList<TLRPC.Chat> chats = new ArrayList<>();
+            try {
+                SQLiteCursor c = database.queryFinalized("SELECT uid, COUNT(*), SUM(length(data)), MAX(captured_at) FROM svipe_deleted_messages GROUP BY uid ORDER BY MAX(captured_at) DESC");
+                ArrayList<Long> userIds = new ArrayList<>();
+                ArrayList<Long> chatIds = new ArrayList<>();
+                while (c.next()) {
+                    SvipeArchivedDialog d = new SvipeArchivedDialog();
+                    d.dialogId = c.longValue(0);
+                    d.count = c.intValue(1);
+                    d.bytes = c.longValue(2);
+                    d.lastAt = c.longValue(3);
+                    result.add(d);
+                    if (d.dialogId > 0) {
+                        userIds.add(d.dialogId);
+                    } else if (d.dialogId < 0) {
+                        chatIds.add(-d.dialogId);
+                    }
+                }
+                c.dispose();
+                for (SvipeArchivedDialog d : result) {
+                    File dir = SvipeMessageArchiveStore.getInstance().dialogDir(currentAccount, d.dialogId);
+                    File[] files = dir.listFiles();
+                    if (files != null) {
+                        for (File f : files) {
+                            d.bytes += f.length();
+                        }
+                    }
+                }
+                if (!userIds.isEmpty()) {
+                    getUsersInternal(userIds, users);
+                }
+                if (!chatIds.isEmpty()) {
+                    getChatsInternal(TextUtils.join(",", chatIds), chats);
+                }
+            } catch (Exception e) {
+                checkSQLException(e);
+            }
+            AndroidUtilities.runOnUIThread(() -> {
+                getMessagesController().putUsers(users, true);
+                getMessagesController().putChats(chats, true);
+                callback.run(result);
+            });
+        });
+    }
+
+    /** Remove everything archived for a chat, rows and pinned media, for good. */
+    public void svipePurgeArchive(long dialogId, Runnable done) {
+        storageQueue.postRunnable(() -> {
+            try {
+                database.executeFast("DELETE FROM svipe_deleted_messages WHERE uid = " + dialogId).stepThis().dispose();
+                File dir = SvipeMessageArchiveStore.getInstance().dialogDir(currentAccount, dialogId);
+                File[] files = dir.listFiles();
+                if (files != null) {
+                    for (File f : files) {
+                        f.delete();
+                    }
+                }
+                dir.delete();
+            } catch (Exception e) {
+                checkSQLException(e);
+            }
+            AndroidUtilities.runOnUIThread(() -> {
+                getNotificationCenter().postNotificationName(NotificationCenter.svipeMessageArchiveUpdated, dialogId);
+                if (done != null) {
+                    done.run();
+                }
+            });
+        });
     }
 
     /**

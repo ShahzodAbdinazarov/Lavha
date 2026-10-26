@@ -4,10 +4,10 @@ import org.telegram.messenger.ApplicationLoader;
 import org.telegram.tgnet.TLRPC;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Filesystem + policy layer for the deleted/edited message archive. The archive metadata and the
@@ -16,9 +16,9 @@ import java.util.List;
  * class owns only the pinned-media files on disk and the pure, JVM-testable capacity policy.
  *
  * <p>Pinned media goes under {@link ApplicationLoader#getFilesDirFixed(String)} so it survives every
- * in-app "Clear Cache". Capture is always-on (see docs/svipe-deleted-edited-messages-plan.md); the
- * per-dialog caps here bound growth by both entry count and on-disk bytes, evicting oldest-captured
- * first and deleting the evicted blob's media file alongside its row.
+ * in-app "Clear Cache". Capture is always-on (see docs/svipe-deleted-edited-messages-plan.md). Nothing
+ * is evicted automatically: an archived chat stays until the user removes it from Settings → Recent
+ * actions.
  */
 public class SvipeMessageArchiveStore {
 
@@ -28,10 +28,11 @@ public class SvipeMessageArchiveStore {
     public static final int KIND_DELETED = 0;       // a message that was deleted
     public static final int KIND_EDITED_PRIOR = 1;  // a pre-edit version of a still-live message
     public static final int KIND_LIVE = 2;          // not stored: the current live message, attached on read so the log can show the newest edit
+    public static final int KIND_REMOVED_BY_ME = 3; // I deleted it only on my side (delete-for-me, delete chat, clear history) — the partner still has it
+    public static final int KIND_EVENT = 4;         // a chat event with no message body (a secret chat was started)
 
-    /** Per-dialog caps (see plan §5, owner-approved). */
-    public static final int MAX_PER_DIALOG = 2000;
-    public static final long MAX_BYTES_PER_DIALOG = 32L * 1024 * 1024; // 32 MB
+    /** {@link #KIND_EVENT} subtypes, kept in the stored message's {@code message} field. */
+    public static final String EVENT_SECRET_CHAT = "secret_chat";
 
     /** Media-pin outcomes (see {@link #planMediaPin}). */
     public static final int PIN_NONE = 0;   // pin nothing — the inline blurred thumb still rides in the blob
@@ -91,21 +92,35 @@ public class SvipeMessageArchiveStore {
 
     // ---- pure policy (JVM-testable, no Android) ----
 
-    /** One archived version's identity + size, used for capacity planning. */
-    public static class ArchiveRow {
-        public final int mid;
-        public final int version;
-        public final long capturedAt;
-        public final long bytes;        // serialized blob length + pinned media length
-        public final String mediaPath;  // absolute path to the pinned media file, or null
+    /**
+     * Whether deleting a whole dialog myself keeps its messages. Clearing history keeps them in every
+     * chat; deleting the chat keeps them only in a private chat, because on a group or channel "delete"
+     * means leaving it. Secret chats are never kept, and neither are the housekeeping modes (2 = drop a
+     * channel's local cache, 3 = drop an empty dialog). {@code onlyHistory} is MessagesController's.
+     */
+    public static boolean keepsDialogDelete(long dialogId, int onlyHistory, boolean encrypted) {
+        if (encrypted || dialogId == 0) return false;
+        if (onlyHistory == 1) return true;
+        return onlyHistory == 0 && dialogId > 0;
+    }
 
-        public ArchiveRow(int mid, int version, long capturedAt, long bytes, String mediaPath) {
-            this.mid = mid;
-            this.version = version;
-            this.capturedAt = capturedAt;
-            this.bytes = bytes;
-            this.mediaPath = mediaPath;
-        }
+    /** Kinds that may go to the shared pool. A delete-for-me or an event is mine alone. */
+    public static boolean isShared(int kind) {
+        return kind == KIND_DELETED || kind == KIND_EDITED_PRIOR;
+    }
+
+    // ---- automated deletes that must leave no trace ----
+
+    private static final Set<Long> skipNextDelete = Collections.newSetFromMap(new ConcurrentHashMap<>());
+
+    /** The app itself is about to delete this dialog (not the user) — don't keep it. */
+    public static void skipNextDialogDelete(long dialogId) {
+        skipNextDelete.add(dialogId);
+    }
+
+    /** Consumes a {@link #skipNextDialogDelete} mark. */
+    public static boolean consumeSkip(long dialogId) {
+        return skipNextDelete.remove(dialogId);
     }
 
     /**
@@ -168,38 +183,5 @@ public class SvipeMessageArchiveStore {
             }
         }
         return max + 1;
-    }
-
-    /**
-     * Decide which rows to evict so that the surviving set is within both {@code maxCount} and
-     * {@code maxBytes}. Evicts oldest-captured first (stable tie-break by mid/version). Pure: returns
-     * the rows to remove, mutates nothing.
-     */
-    public static List<ArchiveRow> planTrim(List<ArchiveRow> rows, int maxCount, long maxBytes) {
-        ArrayList<ArchiveRow> evict = new ArrayList<>();
-        if (rows == null || rows.isEmpty()) return evict;
-
-        ArrayList<ArchiveRow> sorted = new ArrayList<>(rows);
-        Collections.sort(sorted, new Comparator<ArchiveRow>() {
-            @Override
-            public int compare(ArchiveRow a, ArchiveRow b) {
-                if (a.capturedAt != b.capturedAt) return Long.compare(a.capturedAt, b.capturedAt); // oldest first
-                if (a.mid != b.mid) return Integer.compare(a.mid, b.mid);
-                return Integer.compare(a.version, b.version);
-            }
-        });
-
-        int count = sorted.size();
-        long totalBytes = 0;
-        for (ArchiveRow r : sorted) totalBytes += r.bytes;
-
-        int i = 0;
-        while ((count > maxCount || totalBytes > maxBytes) && i < sorted.size()) {
-            ArchiveRow r = sorted.get(i++);
-            evict.add(r);
-            count--;
-            totalBytes -= r.bytes;
-        }
-        return evict;
     }
 }

@@ -36,6 +36,7 @@ public class SvipeSettingsActivity extends BaseFragment {
     // Group A: the archive / sync settings that carry a live value label.
     private int avatarRow;
     private int msgSyncRow;
+    private int recentActionsRow;
     private int groupShadowRow;
     // Group B: reels/music media & history.
     private int musicHistoryRow;
@@ -50,6 +51,7 @@ public class SvipeSettingsActivity extends BaseFragment {
         rowCount = 0;
         avatarRow = rowCount++;
         msgSyncRow = rowCount++;
+        recentActionsRow = rowCount++;
         groupShadowRow = rowCount++;
         musicHistoryRow = rowCount++;
         reelsHistoryRow = rowCount++;
@@ -101,6 +103,8 @@ public class SvipeSettingsActivity extends BaseFragment {
             presentFragment(new SvipeAvatarSettingsActivity());
         } else if (position == msgSyncRow) {
             presentFragment(new SvipeMessageSyncSettingsActivity());
+        } else if (position == recentActionsRow) {
+            presentFragment(new SvipeRecentActionsActivity());
         } else if (position == musicHistoryRow) {
             presentFragment(new SvipeMusicHistoryActivity());
         } else if (position == reelsHistoryRow) {
@@ -138,7 +142,7 @@ public class SvipeSettingsActivity extends BaseFragment {
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == avatarRow || position == msgSyncRow || position == musicHistoryRow
+            return position == avatarRow || position == msgSyncRow || position == recentActionsRow || position == musicHistoryRow
                     || position == reelsHistoryRow || position == backgroundPlayRow
                     || position == numberHistoryRow || position == blockedChannelsRow;
         }
@@ -191,7 +195,9 @@ public class SvipeSettingsActivity extends BaseFragment {
                         SvipeAvatarSettingsActivity.visibilityLabel(SvipeConfig.getAvatarVisibility(currentAccount)), true);
             } else if (position == msgSyncRow) {
                 cell.setTextAndValue(LocaleController.getString(R.string.SvipeMsgSyncTitle),
-                        SvipeMessageSyncSettingsActivity.modeLabel(SvipeConfig.getMsgSyncMode(currentAccount)), false);
+                        SvipeMessageSyncSettingsActivity.modeLabel(SvipeConfig.getMsgSyncMode(currentAccount)), true);
+            } else if (position == recentActionsRow) {
+                cell.setText(LocaleController.getString(R.string.SvipeRecentActions), false);
             } else if (position == musicHistoryRow) {
                 cell.setText(LocaleController.getString(R.string.SvipeMusicListeningHistory), true);
             } else if (position == reelsHistoryRow) {

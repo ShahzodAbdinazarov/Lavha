@@ -11071,6 +11071,14 @@
     <string name="SvipeEditedSection">Edited</string>
     <string name="SvipeArchiveEmpty">No deleted or edited messages here yet</string>
     <string name="SvipeYouDeletedMessage">You deleted this message:</string>
+    <string name="SvipeYouRemovedForYou">You deleted this message for yourself:</string>
+    <string name="SvipeYouStartedSecretChat">You started a secret chat with %1$s</string>
+    <string name="SvipeUserStartedSecretChat">%1$s started a secret chat with you</string>
+    <string name="SvipeRecentActions">Recent actions</string>
+    <string name="SvipeRecentActionsInfo">Messages and chats deleted or edited on this device are kept here until you delete them for good.</string>
+    <string name="SvipeArchivedCount">%1$d items · %2$s</string>
+    <string name="SvipeDeleteForever">Delete for good</string>
+    <string name="SvipeDeleteForeverInfo">Everything kept from this chat will be removed from this device. This can\'t be undone.</string>
     <string name="SvipeYouEditedMessage">You edited this message:</string>
 
     <!-- Svipe profile-photo archive (cross-app pool of deleted profile photos) -->

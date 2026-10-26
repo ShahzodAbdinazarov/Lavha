@@ -1,6 +1,7 @@
 package org.telegram.svipe;
 
 import android.content.Context;
+import android.content.DialogInterface;
 import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.view.Gravity;
@@ -23,6 +24,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.UserObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.ChatActionCell;
@@ -105,9 +107,13 @@ public class SvipeDeletedLogActivity extends BaseFragment
             public void onItemClick(int id) {
                 if (id == -1) {
                     finishFragment();
+                } else if (id == MENU_DELETE_FOREVER) {
+                    confirmDeleteForever();
                 }
             }
         });
+        actionBar.createMenu().addItem(MENU_DELETE_FOREVER, R.drawable.msg_delete)
+                .setContentDescription(LocaleController.getString(R.string.SvipeDeleteForever));
 
         LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
@@ -193,6 +199,27 @@ public class SvipeDeletedLogActivity extends BaseFragment
         return fragmentView;
     }
 
+    private static final int MENU_DELETE_FOREVER = 1;
+
+    /** Removes everything kept for this chat from the device, after a confirmation. */
+    private void confirmDeleteForever() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+        builder.setTitle(LocaleController.getString(R.string.SvipeDeleteForever));
+        builder.setMessage(LocaleController.getString(R.string.SvipeDeleteForeverInfo));
+        builder.setPositiveButton(LocaleController.getString(R.string.Delete), (d, w) ->
+                getMessagesStorage().svipePurgeArchive(dialogId, this::finishFragment));
+        builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+        AlertDialog dialog = builder.create();
+        showDialog(dialog);
+        TextView button = (TextView) dialog.getButton(DialogInterface.BUTTON_POSITIVE);
+        if (button != null) {
+            button.setTextColor(Theme.getColor(Theme.key_text_RedBold));
+        }
+    }
+
     // ---- data ----
 
     private void loadArchive() {
@@ -215,6 +242,8 @@ public class SvipeDeletedLogActivity extends BaseFragment
         TLRPC.TL_channelAdminLogEvent event;
         TLRPC.Message deleted; // non-null for delete events, so we can build the header row
         boolean wasOut;        // captured before the admin-log constructor clears `out`: our own message
+        boolean removedByMe;   // deleted only on my side
+        CharSequence text;     // non-null for a chat event: the whole row is this service line
     }
 
     private void build(ArrayList<SvipeMessageArchiveStore.Entry> entries) {
@@ -230,12 +259,25 @@ public class SvipeDeletedLogActivity extends BaseFragment
         // Group the archive by message id so edited versions form a chain.
         HashMap<Integer, ArrayList<SvipeMessageArchiveStore.Entry>> byMid = new HashMap<>();
         ArrayList<SvipeMessageArchiveStore.Entry> deleted = new ArrayList<>();
+        ArrayList<Event> events = new ArrayList<>();
+        long eventId = 1;
         for (SvipeMessageArchiveStore.Entry e : entries) {
             if (e == null || e.message == null) {
                 continue;
             }
-            if (e.kind == SvipeMessageArchiveStore.KIND_DELETED) {
+            if (e.kind == SvipeMessageArchiveStore.KIND_DELETED || e.kind == SvipeMessageArchiveStore.KIND_REMOVED_BY_ME) {
                 deleted.add(e);
+            } else if (e.kind == SvipeMessageArchiveStore.KIND_EVENT) {
+                CharSequence text = eventText(e.message);
+                if (text != null) {
+                    // Any action renders as a service row; its text is replaced below.
+                    TLRPC.TL_channelAdminLogEventActionChangeTitle action = new TLRPC.TL_channelAdminLogEventActionChangeTitle();
+                    action.new_value = "";
+                    Event ev = new Event();
+                    ev.event = newEvent(eventId++, e.message.date, dialogId, action);
+                    ev.text = text;
+                    events.add(ev);
+                }
             } else {
                 ArrayList<SvipeMessageArchiveStore.Entry> list = byMid.get(e.message.id);
                 if (list == null) {
@@ -245,9 +287,6 @@ public class SvipeDeletedLogActivity extends BaseFragment
             }
         }
 
-        ArrayList<Event> events = new ArrayList<>();
-        long eventId = 1;
-
         for (SvipeMessageArchiveStore.Entry e : deleted) {
             TLRPC.TL_channelAdminLogEventActionDeleteMessage action = new TLRPC.TL_channelAdminLogEventActionDeleteMessage();
             action.message = e.message;
@@ -255,6 +294,7 @@ public class SvipeDeletedLogActivity extends BaseFragment
             ev.event = newEvent(eventId++, e.capturedAt > 0 ? (int) (e.capturedAt / 1000L) : e.message.date, peerIdOf(e.message), action);
             ev.deleted = e.message;
             ev.wasOut = e.message.out;
+            ev.removedByMe = e.kind == SvipeMessageArchiveStore.KIND_REMOVED_BY_ME;
             events.add(ev);
         }
 
@@ -290,10 +330,14 @@ public class SvipeDeletedLogActivity extends BaseFragment
         for (Event ev : events) {
             try {
                 MessageObject header = new MessageObject(currentAccount, ev.event, messages, messagesByDays, logChat, mid, false);
-                if (ev.deleted != null) {
+                if (ev.text != null) {
+                    if (header != null) {
+                        header.messageText = ev.text;
+                    }
+                } else if (ev.deleted != null) {
                     // The upstream constructor returns early for delete events (the real admin log
                     // builds a grouped header itself), so add our own header row the same way it does.
-                    MessageObject row = createDeletedHeader(ev.deleted, ev.event.date, ev.wasOut);
+                    MessageObject row = createDeletedHeader(ev.deleted, ev.event.date, ev.wasOut, ev.removedByMe);
                     if (row != null && !messages.isEmpty()) {
                         messages.add(messages.size() - 1, row);
                     }
@@ -375,8 +419,20 @@ public class SvipeDeletedLogActivity extends BaseFragment
         return stub;
     }
 
+    /** The service line for a {@link SvipeMessageArchiveStore#KIND_EVENT} row, or null if unknown. */
+    private CharSequence eventText(TLRPC.Message m) {
+        if (!SvipeMessageArchiveStore.EVENT_SECRET_CHAT.equals(m.message)) {
+            return null;
+        }
+        TLRPC.User user = dialogId > 0 ? getMessagesController().getUser(dialogId) : null;
+        String name = user != null ? UserObject.getUserName(user) : "";
+        return m.out
+                ? LocaleController.formatString(R.string.SvipeYouStartedSecretChat, name)
+                : LocaleController.formatString(R.string.SvipeUserStartedSecretChat, name);
+    }
+
     /** Mirrors ChannelAdminLogActivity#actionMessagesDeletedBy for the single-message case. */
-    private MessageObject createDeletedHeader(TLRPC.Message deletedMsg, int date, boolean wasOut) {
+    private MessageObject createDeletedHeader(TLRPC.Message deletedMsg, int date, boolean wasOut, boolean removedByMe) {
         try {
             TLRPC.TL_message msg = new TLRPC.TL_message();
             msg.dialog_id = -logChat.id;
@@ -384,6 +440,11 @@ public class SvipeDeletedLogActivity extends BaseFragment
             msg.date = date;
             MessageObject messageObject = new MessageObject(currentAccount, msg, false, false);
             messageObject.contentType = 1;
+            if (removedByMe) {
+                // Gone only on my side — whoever wrote it, I am the one who removed it.
+                messageObject.messageText = LocaleController.getString(R.string.SvipeYouRemovedForYou);
+                return messageObject;
+            }
             if (wasOut) {
                 // Our own message — we deleted it, so don't name ourselves in third person.
                 messageObject.messageText = LocaleController.getString(R.string.SvipeYouDeletedMessage);

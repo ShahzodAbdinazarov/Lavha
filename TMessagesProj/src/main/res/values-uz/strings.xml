@@ -44,6 +44,14 @@
     <string name="SvipeEditedSection">Tahrirlanganlar</string>
     <string name="SvipeArchiveEmpty">Bu yerda hali o\'chgan yoki tahrirlangan xabar yo\'q</string>
     <string name="SvipeYouDeletedMessage">Siz bu xabarni o\'chirdingiz:</string>
+    <string name="SvipeYouRemovedForYou">Siz bu xabarni o\'zingizdan o\'chirdingiz:</string>
+    <string name="SvipeYouStartedSecretChat">Siz %1$s bilan maxfiy chat boshladingiz</string>
+    <string name="SvipeUserStartedSecretChat">%1$s siz bilan maxfiy chat boshladi</string>
+    <string name="SvipeRecentActions">So\'nggi amallar</string>
+    <string name="SvipeRecentActionsInfo">Bu qurilmada o\'chirilgan yoki tahrirlangan xabar va chatlar siz butunlay o\'chirmaguningizcha shu yerda saqlanadi.</string>
+    <string name="SvipeArchivedCount">%1$d ta yozuv · %2$s</string>
+    <string name="SvipeDeleteForever">Butunlay o\'chirish</string>
+    <string name="SvipeDeleteForeverInfo">Bu chatdan saqlangan hamma narsa qurilmadan o\'chiriladi. Buni qaytarib bo\'lmaydi.</string>
     <string name="SvipeYouEditedMessage">Siz bu xabarni tahrirladingiz:</string>
 
     <!-- Svipe profil rasmlari arxivi -->

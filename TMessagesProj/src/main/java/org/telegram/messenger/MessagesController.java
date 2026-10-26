@@ -9360,6 +9360,9 @@ public class MessagesController extends BaseController implements NotificationCe
                 } else {
                     markDialogMessageAsDeleted(dialogId, messages);
                 }
+                if (!forAll) {
+                    getMessagesStorage().svipeKeepRemovedByMe(dialogId, messages); // Svipe — keep delete-for-me
+                }
                 getMessagesStorage().markMessagesAsDeleted(dialogId, messages, true, forAll, 0, topicId);
                 getMessagesStorage().updateDialogsWithDeletedMessages(dialogId, channelId, messages, null);
             }
@@ -10098,6 +10101,11 @@ public class MessagesController extends BaseController implements NotificationCe
             boolean isPromoDialog = false;
             if (did == getUserConfig().getClientUserId()) {
                 getSavedMessagesController().deleteAllDialogs();
+            }
+            // Svipe — keep the chat I delete or clear (first pass only; later passes find nothing local).
+            if (!org.telegram.svipe.SvipeMessageArchiveStore.consumeSkip(did)
+                    && org.telegram.svipe.SvipeMessageArchiveStore.keepsDialogDelete(did, onlyHistory, DialogObject.isEncryptedDialog(did))) {
+                getMessagesStorage().svipeKeepDialog(did, revoke);
             }
             getMessagesStorage().deleteDialog(did, onlyHistory);
             TLRPC.Dialog dialog = dialogs_dict.get(did);

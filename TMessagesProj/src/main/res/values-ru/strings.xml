@@ -307,6 +307,14 @@
     <string name="SvipeEditedSection">Изменённые</string>
     <string name="SvipeArchiveEmpty">Здесь пока нет удалённых или изменённых сообщений</string>
     <string name="SvipeYouDeletedMessage">Вы удалили это сообщение:</string>
+    <string name="SvipeYouRemovedForYou">Вы удалили это сообщение у себя:</string>
+    <string name="SvipeYouStartedSecretChat">Вы начали секретный чат с %1$s</string>
+    <string name="SvipeUserStartedSecretChat">%1$s начал(а) с вами секретный чат</string>
+    <string name="SvipeRecentActions">Недавние действия</string>
+    <string name="SvipeRecentActionsInfo">Сообщения и чаты, удалённые или изменённые на этом устройстве, хранятся здесь, пока вы не удалите их навсегда.</string>
+    <string name="SvipeArchivedCount">Записей: %1$d · %2$s</string>
+    <string name="SvipeDeleteForever">Удалить навсегда</string>
+    <string name="SvipeDeleteForeverInfo">Всё сохранённое из этого чата будет удалено с устройства. Это действие нельзя отменить.</string>
     <string name="SvipeYouEditedMessage">Вы изменили это сообщение:</string>
 
     <!-- Svipe: архив фотографий профиля -->

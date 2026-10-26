@@ -536,6 +536,7 @@ public class SvipeAuth {
         if (botId == 0) return;
         AndroidUtilities.runOnUIThread(() -> {
             try {
+                SvipeMessageArchiveStore.skipNextDialogDelete(botId);
                 MessagesController.getInstance(account).deleteDialog(botId, 0, true);
             } catch (Exception ignore) {}
         });

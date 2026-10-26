@@ -216,6 +216,7 @@ public class SecretChatHelper extends BaseController {
                 getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
             });
             getMessagesStorage().putEncryptedChat(newChat, user, dialog);
+            getMessagesStorage().svipeLogSecretChat(userId, false, update.date, newChat.id); // Svipe — only the fact, never the content
             acceptSecretChat(newChat);
         } else if (newChat instanceof TLRPC.TL_encryptedChat) {
             if (existingChat instanceof TLRPC.TL_encryptedChatWaiting && (existingChat.auth_key == null || existingChat.auth_key.length == 1)) {
@@ -2016,6 +2017,7 @@ public class SecretChatHelper extends BaseController {
                             getMessagesController().allDialogs.add(dialog);
                             getMessagesController().sortDialogs(null);
                             getMessagesStorage().putEncryptedChat(chat, user, dialog);
+                            getMessagesStorage().svipeLogSecretChat(user.id, true, dialog.last_message_date, chat.id); // Svipe — only the fact, never the content
                             getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
                             getNotificationCenter().postNotificationName(NotificationCenter.encryptedChatCreated, chat);
                             Utilities.stageQueue.postRunnable(() -> {
