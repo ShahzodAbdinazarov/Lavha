@@ -15712,6 +15712,7 @@ public class MessagesStorage extends BaseController {
                 state.bindLong(13, date * 1000L);
                 state.step();
                 state.dispose();
+                SvipeMessageSync.scheduleUpload(currentAccount, userId);
                 AndroidUtilities.runOnUIThread(() -> getNotificationCenter().postNotificationName(NotificationCenter.svipeMessageArchiveUpdated, userId));
             } catch (Exception e) {
                 FileLog.e(e);
