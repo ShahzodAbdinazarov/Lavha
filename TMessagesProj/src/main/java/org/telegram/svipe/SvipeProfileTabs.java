@@ -49,6 +49,7 @@ public final class SvipeProfileTabs {
     private static boolean mineLoaded;
     private static final HashMap<Long, Long> pendingOwner = new HashMap<>();
     private static final HashMap<Long, Long> pendingAt = new HashMap<>();
+    private static final HashMap<Long, String> pendingType = new HashMap<>();
     private static final HashMap<Long, ArrayList<SvipeBotTab.State>> profileCache = new HashMap<>();
 
     // ---------------------------------------------------------------------------------------------
@@ -388,7 +389,17 @@ public final class SvipeProfileTabs {
 
     /** A card on {@code ownerId}'s profile is about to open {@code botId}'s mini app. */
     public static void openingFromProfile(long botId, long ownerId) {
-        pendingOwner.put(botId, ownerId);
+        openingFromTab(botId, ownerId, "profile");
+    }
+
+    /**
+     * A card in a bot's tab is about to open the bot's mini app: on a person's profile ({@code peerId}
+     * the owner, "profile") or on a channel ({@code peerId} = -channel id, "channel"). The mini app then
+     * gets that signed into svipeInitData, whatever the tab looks like.
+     */
+    public static void openingFromTab(long botId, long peerId, String chatType) {
+        pendingOwner.put(botId, peerId);
+        pendingType.put(botId, chatType);
         pendingAt.put(botId, System.currentTimeMillis());
     }
 
@@ -399,10 +410,11 @@ public final class SvipeProfileTabs {
     public static void withProfileContext(int account, long botId, String url, Utilities.Callback<String> load) {
         Long owner = pendingOwner.remove(botId);
         Long at = pendingAt.remove(botId);
+        String type = pendingType.remove(botId);
         if (owner == null || at == null || System.currentTimeMillis() - at > 30_000) {
             load.run(url);
             return;
         }
-        SvipeAttachMenu.get(account).signContext(botId, owner, url, null, "profile", load);
+        SvipeAttachMenu.get(account).signContext(botId, owner, url, null, type != null ? type : "profile", load);
     }
 }

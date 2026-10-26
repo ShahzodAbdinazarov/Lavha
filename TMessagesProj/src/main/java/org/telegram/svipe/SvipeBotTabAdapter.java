@@ -37,11 +37,12 @@ import org.telegram.ui.Components.RecyclerListView;
 public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
 
     private static final int TYPE_TILE = 0, TYPE_ROW = 1, TYPE_STORY = 2, TYPE_GIFT = 3, TYPE_FILE = 4,
-            TYPE_LINK = 5, TYPE_AUDIO = 6, TYPE_PERSON = 7;
+            TYPE_LINK = 5, TYPE_AUDIO = 6, TYPE_PERSON = 7, TYPE_WEB = 8;
 
     private final Context context;
     private SvipeBotTab.State state;
     private Runnable onNearEnd;
+    private SvipeBotTabWebCell webCell;
 
     public SvipeBotTabAdapter(Context context) {
         this.context = context;
@@ -103,6 +104,14 @@ public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
         Player.stop();
     }
 
+    /** The profile closed: let go of the tab's page, if it shows one. */
+    public void destroy() {
+        if (webCell != null) {
+            webCell.destroy();
+            webCell = null;
+        }
+    }
+
     @Override
     public boolean isEnabled(RecyclerView.ViewHolder holder) {
         return true;
@@ -110,6 +119,9 @@ public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
 
     @Override
     public int getItemViewType(int position) {
+        if (state != null && state.isWeb()) {
+            return TYPE_WEB;
+        }
         switch (state != null ? state.layout : "grid") {
             case "list": return TYPE_ROW;
             case "stories": return TYPE_STORY;
@@ -125,7 +137,10 @@ public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
 
     @Override
     public int getItemCount() {
-        return state != null && state.active ? state.cards.size() : 0;
+        if (state == null || !state.active) {
+            return 0;
+        }
+        return state.isWeb() ? 1 : state.cards.size();
     }
 
     @Override
@@ -139,6 +154,7 @@ public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
             case TYPE_FILE: view = new SharedDocumentCell(context); break;
             case TYPE_LINK: view = new LinkCell(context); break;
             case TYPE_AUDIO: view = new AudioCell(context); break;
+            case TYPE_WEB: view = webCell = new SvipeBotTabWebCell(context); break;
             default: view = new TileCell(context, 1f); break;
         }
         view.setLayoutParams(new RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT,
@@ -148,6 +164,10 @@ public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
 
     @Override
     public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
+        if (holder.itemView instanceof SvipeBotTabWebCell) {
+            ((SvipeBotTabWebCell) holder.itemView).bind(state);
+            return;
+        }
         SvipeBotTab.Card card = getCard(position);
         if (card == null) {
             return;

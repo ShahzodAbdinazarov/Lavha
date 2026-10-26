@@ -3305,6 +3305,11 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     if (botTabAdapter.onCardClick(position)) {
                         return; // a music or voice card plays here
                     }
+                    org.telegram.svipe.SvipeBotTab.State channelTab = botTabAdapter.getState();
+                    if (card != null && channelTab != null && channelTab.botId != 0) {
+                        // The mini app it opens is told which channel this is (svipeInitData, chat_type channel).
+                        org.telegram.svipe.SvipeProfileTabs.openingFromTab(channelTab.botId, dialog_id, "channel");
+                    }
                     if (card != null && profileActivity != null && profileActivity.getParentActivity() != null) {
                         org.telegram.messenger.browser.Browser.openUrl(profileActivity.getParentActivity(), card.link);
                     }
@@ -5115,6 +5120,10 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
     public void onDestroy() {
         observersGroup.removeAllObservers();
         org.telegram.svipe.SvipeBotTabAdapter.stopAudio(); // Svipe: a bot tab's music card that was playing
+        if (botTabAdapter != null) botTabAdapter.destroy(); // Svipe: a bot tab's page, if it shows one
+        for (org.telegram.svipe.SvipeBotTabAdapter adapter : userTabAdapters) {
+            if (adapter != null) adapter.destroy();
+        }
 
         if (storiesAdapter != null && storiesAdapter.storiesList != null) {
             storiesAdapter.destroy();

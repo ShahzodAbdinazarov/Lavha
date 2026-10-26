@@ -47,11 +47,18 @@ public class SvipeBotTab {
         public boolean listLayout;
         /** The bot's layout: grid, list, media, stories, gifs, gifts, files, links, music, voice, people. */
         public String layout = "grid";
+        /** "cards", or "web": the bot's page ({@link #webUrl}) fills the tab (SvipeBotTabWebCell). */
+        public String mode = "cards";
+        public String webUrl;
         public boolean isAttacher;
         public boolean canRename;
         public int total;
         public final ArrayList<Card> cards = new ArrayList<>();
         /** This person's own request for the channel, for the admin screen: bot and pending/active/refused. */
+        public boolean isWeb() {
+            return "web".equals(mode) && webUrl != null;
+        }
+
         public String myRequestBot;
         public String myRequestState;
     }
@@ -107,9 +114,14 @@ public class SvipeBotTab {
         state.active = "active".equals(res.optString("state"));
         JSONObject bot = res.optJSONObject("bot");
         state.botUsername = bot != null ? bot.optString("username", null) : null;
+        if (bot != null && state.botId == 0) {
+            state.botId = bot.optLong("bot_id");
+        }
+        state.mode = res.optString("mode", "cards");
+        state.webUrl = str(res, "web_url");
         state.title = res.optString("title", state.botUsername);
         state.layout = res.optString("layout", "grid");
-        state.listLayout = SvipeBotTabAdapter.isRowLayout(state.layout);
+        state.listLayout = SvipeBotTabAdapter.isRowLayout(state.layout) || state.isWeb();
         state.isAttacher = res.optBoolean("is_attacher");
         state.canRename = res.optBoolean("can_rename");
         state.total = res.optInt("total");
