@@ -118,7 +118,6 @@ public class NotificationsController extends BaseController implements Notificat
     private final LongSparseArray<HashSet<Integer>> mutedTypeMessages = new LongSparseArray<>();
     // Pushes already held back once, so the retry is never held back again.
     private final LongSparseArray<HashSet<Integer>> deferredTypeChecks = new LongSparseArray<>();
-    private static final long MUTED_TYPE_PUSH_DELAY = 2000L;
     private final LongSparseArray<Point> smartNotificationsDialogs = new LongSparseArray<>();
     private static NotificationManagerCompat notificationManager = null;
     private static NotificationManager systemNotificationManager = null;
@@ -6469,33 +6468,26 @@ public class NotificationsController extends BaseController implements Notificat
     }
 
     /**
-     * Waiting for the MTProto copy is not enough: with the app asleep it often never comes in time,
-     * and the push rang as if it were an ordinary message. So ask Telegram for this one message —
-     * only in a chat that carries a message-type exception, only once per message — and let the
-     * copy that knows its type decide. Costs a request per such push; the user asked for exactly
-     * that over a muted forward ringing.
+     * Waiting for the MTProto copy is not enough: with the app asleep it often never comes in time.
+     * So ask Telegram for this one message — only in a chat that carries a message-type exception,
+     * only once per message — and let the copy that knows its type decide. Until then the push is
+     * treated as muted: it rings only once Telegram has shown it is NOT of a muted kind. A message
+     * Telegram never answers for stays silent (it is still in the chat and the unread count); the
+     * real copy arriving over MTProto (e.g. when the app is opened) judges and rings it instead.
      */
-    private static final long[] TYPE_CHECK_RETRY = {2000L, 5000L, 15000L, 30000L};
-    // After the push was let through for want of an answer: keep asking, as Telegram itself takes
-    // back a notification for a message that turns out to be gone. Opening the app does the same
-    // through getDifference, which reaches processNewMessages and the retract below.
-    private static final long[] TYPE_CHECK_LATE = {60_000L, 300_000L, 900_000L};
+    private static final long[] TYPE_CHECK_RETRY = {2000L, 5000L, 15000L, 30000L, 60_000L, 300_000L, 900_000L};
     private static final long TYPE_CHECK_TIMEOUT = 10000L;
 
     private void judgeByServer(long dialogId, int mid, MessageObject push, int attempt) {
         final ArrayList<MessageObject> retry = new ArrayList<>(1);
         retry.add(push);
-        final boolean shown = attempt > TYPE_CHECK_RETRY.length; // already on screen, unjudged
-        final Runnable release = () -> {
-            if (!shown) processNewMessages(retry, true, true, null);
-        };
+        final Runnable release = () -> processNewMessages(retry, true, true, null);
         TLObject request;
         if (DialogObject.isChatDialog(dialogId) && (push.localChannel
                 || ChatObject.isChannel(getMessagesController().getChat(-dialogId)))) {
             TLRPC.InputChannel channel = getMessagesController().getInputChannel(-dialogId);
             if (channel == null || channel.access_hash == 0) {
-                // No way to address the channel from here: fall back to waiting for the real copy.
-                if (!shown) notificationsQueue.postRunnable(release, MUTED_TYPE_PUSH_DELAY);
+                // No way to address the channel from here: only the real copy can tell, so wait for it.
                 return;
             }
             TLRPC.TL_channels_getMessages req = new TLRPC.TL_channels_getMessages();
@@ -6512,22 +6504,12 @@ public class NotificationsController extends BaseController implements Notificat
             if (settled[0]) return;
             settled[0] = true;
             if (isKnownMutedTypeMessage(dialogId, mid)) {
-                // The real copy arrived meanwhile and already judged (and retracted) it.
-                release.run();
+                // The real copy arrived meanwhile and already judged it muted: nothing to ring.
                 return;
             }
-            if (attempt == TYPE_CHECK_RETRY.length) {
-                // Telegram never answered: an ordinary message must not be lost to a check that
-                // failed. Let it ring, and keep asking so a muted one is taken back.
-                release.run();
-            }
+            // No answer yet: stay silent and ask again; it rings only once the answer is "not muted".
             if (attempt < TYPE_CHECK_RETRY.length) {
                 notificationsQueue.postRunnable(() -> judgeByServer(dialogId, mid, push, attempt + 1), TYPE_CHECK_RETRY[attempt]);
-            } else {
-                int late = attempt - TYPE_CHECK_RETRY.length;
-                if (late < TYPE_CHECK_LATE.length) {
-                    notificationsQueue.postRunnable(() -> judgeByServer(dialogId, mid, push, attempt + 1), TYPE_CHECK_LATE[late]);
-                }
             }
         };
         final int reqId = getConnectionsManager().sendRequest(request, (response, error) -> notificationsQueue.postRunnable(() -> {
@@ -6550,12 +6532,10 @@ public class NotificationsController extends BaseController implements Notificat
                     || isMutedMessageType(dialogId, new MessageObject(currentAccount, found, false, false));
             if (muted) {
                 if (BuildVars.LOGS_ENABLED) {
-                    FileLog.d("server says push for dialog " + dialogId + " mid = " + mid + " is a muted type" + (shown ? ", taking it back" : ""));
+                    FileLog.d("server says push for dialog " + dialogId + " mid = " + mid + " is a muted type");
                 }
                 rememberMutedTypeMessage(dialogId, mid);
-                if (shown) {
-                    retractMutedTypeNotification(dialogId, mid);
-                }
+                return;
             }
             release.run();
         }));
