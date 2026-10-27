@@ -5,9 +5,11 @@ import android.content.Context;
 import android.text.TextUtils;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewParent;
 import android.widget.FrameLayout;
 
 import androidx.annotation.Nullable;
+import androidx.recyclerview.widget.RecyclerView;
 
 import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
@@ -73,16 +75,19 @@ public class SvipeBotTabWebCell extends FrameLayout {
 
     private void open(int account, TLRPC.User bot, String webUrl, long peerId, String chatType, String key) {
         container.setBotUser(bot);
-        TLRPC.TL_messages_requestSimpleWebView req = new TLRPC.TL_messages_requestSimpleWebView();
+        // requestWebView, as an inline button in the bot's chat opens it: a simple (keyboard) web view
+        // gets no Telegram initData, and the page needs it to know who is looking.
+        TLRPC.TL_messages_requestWebView req = new TLRPC.TL_messages_requestWebView();
+        req.peer = MessagesController.getInstance(account).getInputPeer(bot.id);
         req.bot = MessagesController.getInstance(account).getInputUser(bot);
         req.platform = "android";
         req.url = webUrl;
-        req.flags |= 8;
+        req.flags |= 2;
         JSONObject theme = BotWebViewSheet.makeThemeParams(null);
         if (theme != null) {
             req.theme_params = new TLRPC.TL_dataJSON();
             req.theme_params.data = theme.toString();
-            req.flags |= 1;
+            req.flags |= 4;
         }
         ConnectionsManager.getInstance(account).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
             if (!(response instanceof TLRPC.TL_webViewResultUrl) || !key.equals(loaded) || container == null) {
@@ -100,11 +105,32 @@ public class SvipeBotTabWebCell extends FrameLayout {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        // The page scrolls itself; the profile list must not take the gesture away from it.
-        if (ev.getActionMasked() == MotionEvent.ACTION_DOWN && getParent() != null) {
+        // Until the tabs are pinned to the top the profile scrolls (and collapses its header) as with any
+        // tab; from then on the page scrolls itself and the profile must not take the gesture away from it.
+        if (ev.getActionMasked() == MotionEvent.ACTION_DOWN && getParent() != null && profileFullyScrolled()) {
             getParent().requestDisallowInterceptTouchEvent(true);
         }
         return super.dispatchTouchEvent(ev);
+    }
+
+    @Override
+    public void requestDisallowInterceptTouchEvent(boolean disallow) {
+        // The web view asks for every gesture it scrolls; while the profile can still scroll it gets none.
+        if (disallow && !profileFullyScrolled()) {
+            return;
+        }
+        super.requestDisallowInterceptTouchEvent(disallow);
+    }
+
+    /** True when no list above this cell (the profile's) can scroll further down. */
+    private boolean profileFullyScrolled() {
+        ViewParent parent = getParent() != null ? getParent().getParent() : null;
+        for (; parent instanceof View; parent = parent.getParent()) {
+            if (parent instanceof RecyclerView && ((RecyclerView) parent).canScrollVertically(1)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
