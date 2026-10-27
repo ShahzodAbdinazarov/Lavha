@@ -459,9 +459,9 @@
     <string name="SvipeProfileTabFullTitle">Profil tablari to\'lgan</string>
     <string name="SvipeProfileTabFullText">Profilingizda ko\'pi bilan %1$d ta bot tabi bo\'lishi mumkin. **%2$s** qaysi birining o\'rniga qo\'yilsin, tanlang.</string>
     <string name="SvipeProfileTabAdded">**%s** tabi profilingizga qo\'shildi.</string>
-    <string name="SvipeProfileTabRequestPrivate">**%s** o\'z tabini siz ochgan har bir profilda ko\'rsatishni so\'ramoqda. U yerda uni faqat siz ko\'rasiz, boshqa hech kimdan so\'ralmaydi.</string>
+    <string name="SvipeProfileTabRequestPrivate">**%s** shaxsiy tab so\'ramoqda: profilingizni ochgan hamma uni ko\'radi, siz esa uni botning boshqa foydalanuvchilari profilida ko\'rasiz. Har kim faqat ikkingizga tegishli narsani ko\'radi.</string>
     <string name="SvipeProfileTabFullTextPrivate">Ko\'pi bilan %1$d ta shaxsiy bot tabi bo\'lishi mumkin. **%2$s** qaysi birining o\'rniga qo\'yilishini tanlang.</string>
-    <string name="SvipeProfileTabAddedPrivate">**%s** tabi qo\'shildi. Uni siz ochgan profillarda ko\'rasiz.</string>
+    <string name="SvipeProfileTabAddedPrivate">**%s** tabi qo\'shildi. U profilingizda turadi, siz esa uni botning boshqa foydalanuvchilari profilida ko\'rasiz.</string>
     <string name="SvipeProfileTabNotRegistered">Bu bot profilingizga tab qo\'sha olmaydi.</string>
     <string name="SvipeProfileTabsTitle">Bot tablari</string>
     <string name="SvipeProfileTabsInfo">Botlar sizning ruxsatingiz bilan profilingizga qo\'shgan tablar. Kim ko\'rishini tanlash uchun birini bosing.</string>

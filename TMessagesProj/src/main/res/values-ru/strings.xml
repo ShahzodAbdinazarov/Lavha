@@ -732,9 +732,9 @@
     <string name="SvipeProfileTabFullTitle">Вкладки профиля заполнены</string>
     <string name="SvipeProfileTabFullText">В профиле может быть не больше %1$d вкладок ботов. Выберите, какую заменить на **%2$s**.</string>
     <string name="SvipeProfileTabAdded">Вкладка **%s** добавлена в ваш профиль.</string>
-    <string name="SvipeProfileTabRequestPrivate">**%s** просит показывать свою вкладку в профиле каждого, кого вы откроете. Видеть её там будете только вы, больше никого не спросят.</string>
+    <string name="SvipeProfileTabRequestPrivate">**%s** просит личную вкладку: её увидят все, кто откроет ваш профиль, а вы будете видеть её в профилях других пользователей бота. Каждый видит только то, что касается вас двоих.</string>
     <string name="SvipeProfileTabFullTextPrivate">Личных вкладок ботов может быть не больше %1$d. Выберите, какую заменить на **%2$s**.</string>
-    <string name="SvipeProfileTabAddedPrivate">Вкладка **%s** добавлена. Вы увидите её в профилях, которые откроете.</string>
+    <string name="SvipeProfileTabAddedPrivate">Вкладка **%s** добавлена. Она в вашем профиле, а вы увидите её в профилях других пользователей бота.</string>
     <string name="SvipeProfileTabNotRegistered">Этот бот не может добавить вкладку в ваш профиль.</string>
     <string name="SvipeProfileTabsTitle">Вкладки ботов</string>
     <string name="SvipeProfileTabsInfo">Вкладки, которые боты добавили в ваш профиль с вашего разрешения. Нажмите на вкладку, чтобы выбрать, кто её видит.</string>

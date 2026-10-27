@@ -7076,8 +7076,12 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             return;
         }
         final int account = profileActivity.getCurrentAccount();
-        if ("private".equals(state.chatType)) {
-            // My private tab, here on someone else's profile: mine to take off (from every profile).
+        boolean myPrivate = false;
+        for (org.telegram.svipe.SvipeProfileTabs.Tab tab : org.telegram.svipe.SvipeProfileTabs.getMine()) {
+            if (tab.botId == state.botId && "private".equals(tab.kind)) myPrivate = true;
+        }
+        if ("private".equals(state.chatType) && myPrivate) {
+            // My own private tab (on my profile, or on one of the bot's users'): mine to take off everywhere.
             new AlertDialog.Builder(profileActivity.getParentActivity())
                     .setTitle(state.title)
                     .setItems(new CharSequence[]{getString(R.string.SvipeProfileTabRemove)}, (d, which) ->
@@ -7097,7 +7101,8 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     .show();
             return;
         }
-        if (state.ownerId != profileActivity.getUserConfig().getClientUserId() || "bot".equals(state.chatType)) {
+        if (state.ownerId != profileActivity.getUserConfig().getClientUserId() || "bot".equals(state.chatType)
+                || "private".equals(state.chatType)) {
             final String[] reasons = {"spam", "violence", "porn", "fake", "other"};
             CharSequence[] labels = {
                     getString(R.string.ReportChatSpam), getString(R.string.ReportChatViolence),

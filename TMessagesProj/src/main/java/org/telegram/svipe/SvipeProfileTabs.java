@@ -338,6 +338,9 @@ public final class SvipeProfileTabs {
      */
     public static void load(int account, long ownerId, boolean saved, boolean ownerIsBot, Utilities.Callback<ArrayList<SvipeBotTab.State>> done) {
         final long cacheKey = saved ? -ownerId : ownerId;
+        if (!mineLoaded) {
+            loadMine(account, null); // which of the shown tabs are mine (long-press: remove, or report)
+        }
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {
                 done.run(null);
