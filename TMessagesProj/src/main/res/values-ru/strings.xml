@@ -286,8 +286,6 @@
     <string name="SvipeBotTabInfo">Бот должен быть зарегистрирован в Svipe. Он проверит, что вы администратор этого канала, и покажет свою вкладку в профиле канала в Svipe.</string>
     <string name="SvipeBotTabCurrentGroup">Вкладка в профиле группы</string>
     <string name="SvipeBotTabInfoGroup">Бот должен быть зарегистрирован в Svipe. Он проверит, что вы администратор этой группы, и покажет свою вкладку в профиле группы в Svipe.</string>
-    <string name="SvipeBotTabCurrentPrivate">Вкладка в этом чате</string>
-    <string name="SvipeBotTabInfoPrivate">Бот должен быть зарегистрирован в Svipe. Вы оба увидите его вкладку в профилях друг друга в Svipe, и любой из вас может её удалить.</string>
     <string name="SvipeBotTabCurrentSaved">Вкладка в Избранном</string>
     <string name="SvipeBotTabInfoSaved">Бот должен быть зарегистрирован в Svipe. Его вкладку в Избранном в Svipe увидите только вы.</string>
     <string name="SvipeBotTabErrorNotRegistered">Этот бот не зарегистрирован в Svipe.</string>

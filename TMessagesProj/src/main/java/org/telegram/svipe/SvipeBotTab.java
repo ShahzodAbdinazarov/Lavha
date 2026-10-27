@@ -52,6 +52,12 @@ public class SvipeBotTab {
         /** "cards", or "web": the bot's page ({@link #webUrl}) fills the tab (SvipeBotTabWebCell). */
         public String mode = "cards";
         public String webUrl;
+        /** What the bot shows this viewer instead of cards when it has none (svipe.uz/bots/profile-tabs#live). */
+        public String emptyText, emptyImage;
+
+        public boolean showsEmpty() {
+            return !isWeb() && cards.isEmpty() && (emptyText != null || emptyImage != null);
+        }
         public boolean isAttacher;
         public boolean canRename;
         public int total;
@@ -67,8 +73,8 @@ public class SvipeBotTab {
         /** The dialog the tab is in, for svipeInitData: a channel or supergroup, a basic group, or a person. */
         public long dialogId() {
             if (ownerId != 0) {
-                // On a person's profile or in our private chat the person is the receiver; Saved Messages and
-                // a bot's own profile have no one else to name.
+                // On a person's profile the person is the receiver; Saved Messages and a bot's own profile
+                // have no one else to name.
                 return "saved".equals(chatType) || "bot".equals(chatType) ? 0 : ownerId;
             }
             return "group".equals(chatType) ? channelId : -channelId;
@@ -76,11 +82,8 @@ public class SvipeBotTab {
     }
 
     /** Where a chat's tab lives on the server: a channel, supergroup or basic group (keyed by its negative
-     *  id), or a private chat / Saved Messages (svipe.uz/bots/profile-tabs#places). */
+     *  id), or Saved Messages (svipe.uz/bots/profile-tabs#places). */
     static String path(String chatType, long key) {
-        if ("private".equals(chatType)) {
-            return "/v1/chat-tabs/private/" + key;
-        }
         if ("saved".equals(chatType)) {
             return "/v1/chat-tabs/saved/0";
         }
@@ -88,7 +91,7 @@ public class SvipeBotTab {
     }
 
     private static boolean isChatOfMany(String chatType) {
-        return !"private".equals(chatType) && !"saved".equals(chatType);
+        return !"saved".equals(chatType);
     }
 
     private static final HashMap<Long, State> cache = new HashMap<>();
@@ -151,6 +154,11 @@ public class SvipeBotTab {
         }
         state.mode = res.optString("mode", "cards");
         state.chatType = res.optString("chat_type", "channel");
+        JSONObject empty = res.optJSONObject("empty");
+        if (empty != null) {
+            state.emptyText = str(empty, "text");
+            state.emptyImage = str(empty, "image");
+        }
         state.webUrl = str(res, "web_url");
         state.title = res.optString("title", state.botUsername);
         state.layout = res.optString("layout", "grid");

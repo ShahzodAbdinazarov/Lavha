@@ -9,6 +9,7 @@ import android.graphics.Shader;
 import android.media.AudioAttributes;
 import android.media.MediaPlayer;
 import android.text.TextUtils;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -37,7 +38,7 @@ import org.telegram.ui.Components.RecyclerListView;
 public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
 
     private static final int TYPE_TILE = 0, TYPE_ROW = 1, TYPE_STORY = 2, TYPE_GIFT = 3, TYPE_FILE = 4,
-            TYPE_LINK = 5, TYPE_AUDIO = 6, TYPE_PERSON = 7, TYPE_WEB = 8;
+            TYPE_LINK = 5, TYPE_AUDIO = 6, TYPE_PERSON = 7, TYPE_WEB = 8, TYPE_EMPTY = 9;
 
     private final Context context;
     private SvipeBotTab.State state;
@@ -77,7 +78,7 @@ public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
     }
 
     public boolean isList() {
-        return state != null && state.listLayout;
+        return state != null && (state.listLayout || state.showsEmpty());
     }
 
     public SvipeBotTab.Card getCard(int position) {
@@ -122,6 +123,9 @@ public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
         if (state != null && state.isWeb()) {
             return TYPE_WEB;
         }
+        if (state != null && state.showsEmpty()) {
+            return TYPE_EMPTY;
+        }
         switch (state != null ? state.layout : "grid") {
             case "list": return TYPE_ROW;
             case "stories": return TYPE_STORY;
@@ -140,7 +144,7 @@ public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
         if (state == null || !state.active) {
             return 0;
         }
-        return state.isWeb() ? 1 : state.cards.size();
+        return state.isWeb() || state.showsEmpty() ? 1 : state.cards.size();
     }
 
     @Override
@@ -155,6 +159,7 @@ public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
             case TYPE_LINK: view = new LinkCell(context); break;
             case TYPE_AUDIO: view = new AudioCell(context); break;
             case TYPE_WEB: view = webCell = new SvipeBotTabWebCell(context); break;
+            case TYPE_EMPTY: view = new EmptyCell(context); break;
             default: view = new TileCell(context, 1f); break;
         }
         view.setLayoutParams(new RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT,
@@ -166,6 +171,10 @@ public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
     public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
         if (holder.itemView instanceof SvipeBotTabWebCell) {
             ((SvipeBotTabWebCell) holder.itemView).bind(state);
+            return;
+        }
+        if (holder.itemView instanceof EmptyCell) {
+            ((EmptyCell) holder.itemView).set(state.emptyImage, state.emptyText);
             return;
         }
         SvipeBotTab.Card card = getCard(position);
@@ -628,6 +637,36 @@ public class SvipeBotTabAdapter extends RecyclerListView.SelectionAdapter {
             }
             player = null;
             current = null;
+        }
+    }
+
+    /** The bot's empty state for this viewer: its image above a line of text, centred, like Telegram's. */
+    private static class EmptyCell extends LinearLayout {
+        private final BackupImageView image;
+        private final TextView text;
+
+        EmptyCell(Context context) {
+            super(context);
+            setOrientation(VERTICAL);
+            setGravity(Gravity.CENTER_HORIZONTAL);
+            setPadding(AndroidUtilities.dp(32), AndroidUtilities.dp(40), AndroidUtilities.dp(32), AndroidUtilities.dp(40));
+            image = new BackupImageView(context);
+            image.setRoundRadius(AndroidUtilities.dp(12));
+            addView(image, LayoutHelper.createLinear(120, 120, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 16));
+            text = new TextView(context);
+            text.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+            text.setGravity(Gravity.CENTER);
+            text.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText2));
+            addView(text, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
+        }
+
+        void set(String imageUrl, String line) {
+            image.setVisibility(imageUrl != null ? VISIBLE : GONE);
+            if (imageUrl != null) {
+                image.setImage(imageUrl, null, (android.graphics.drawable.Drawable) null);
+            }
+            text.setVisibility(line != null ? VISIBLE : GONE);
+            text.setText(line);
         }
     }
 }

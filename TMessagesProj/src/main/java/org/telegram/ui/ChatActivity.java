@@ -1686,7 +1686,7 @@ public class ChatActivity extends BaseFragment implements
     private final static int svipe_show_in_chat = 75; // Svipe — per-chat "Show in chat" toggle
     private final static int svipe_deleted_log = 76;  // Svipe — open the deleted & edited log
     private final static int svipe_send_for_index = 77;  // Svipe — send this channel in to be indexed
-    private final static int svipe_bot_tab = 78;  // Svipe — a bot's tab in this private chat / Saved Messages
+    private final static int svipe_bot_tab = 78;  // Svipe — a bot's tab in Saved Messages
 
     private final static int view_as_topics = 59;
 
@@ -3888,8 +3888,7 @@ public class ChatActivity extends BaseFragment implements
                 } else if (id == svipe_send_for_index) { // Svipe
                     svipeSendForIndex();
                 } else if (id == svipe_bot_tab) { // Svipe: svipe.uz/bots/profile-tabs#places
-                    boolean self = UserObject.isUserSelf(currentUser);
-                    presentFragment(new org.telegram.svipe.SvipeBotTabSettingsActivity(self ? 0 : currentUser.id, self ? "saved" : "private"));
+                    presentFragment(new org.telegram.svipe.SvipeBotTabSettingsActivity(0, "saved"));
                 } else if (id == clear_history || id == delete_chat || id == auto_delete_timer) {
                     if (getParentActivity() == null) {
                         return;
@@ -4516,9 +4515,8 @@ public class ChatActivity extends BaseFragment implements
                 headerItem.lazilyAddSubItem(svipe_send_for_index, R.drawable.svipe_index_send, LocaleController.getString(R.string.SvipeChannelIndexSend));
                 headerItem.setSubItemShown(svipe_send_for_index, false); // shown after the async status check
             }
-            // Svipe — a bot's tab in a private chat (both people see it) or in Saved Messages (only me)
-            if (currentUser != null && !currentUser.bot && currentEncryptedChat == null && chatMode == 0
-                    && getDialogId() != UserObject.VERIFY && !UserObject.isReplyUser(currentUser) && !UserObject.isDeleted(currentUser)) {
+            // Svipe — a bot's tab in Saved Messages, seen by me alone
+            if (currentUser != null && UserObject.isUserSelf(currentUser) && chatMode == 0) {
                 headerItem.lazilyAddSubItem(svipe_bot_tab, R.drawable.msg_bots, LocaleController.getString(R.string.SvipeBotTab));
             }
             if (currentUser != null && currentUser.self && getDialogId() != UserObject.VERIFY) {

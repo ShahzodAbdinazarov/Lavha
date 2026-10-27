@@ -11050,8 +11050,6 @@
     <string name="SvipeBotTabInfo">The bot must be registered with Svipe. It checks that you are an admin of this channel, then shows its tab on the channel profile in Svipe.</string>
     <string name="SvipeBotTabCurrentGroup">Tab on the group profile</string>
     <string name="SvipeBotTabInfoGroup">The bot must be registered with Svipe. It checks that you are an admin of this group, then shows its tab on the group profile in Svipe.</string>
-    <string name="SvipeBotTabCurrentPrivate">Tab in this chat</string>
-    <string name="SvipeBotTabInfoPrivate">The bot must be registered with Svipe. Both of you will see its tab on each other\'s profile in Svipe, and either of you can remove it.</string>
     <string name="SvipeBotTabCurrentSaved">Tab in Saved Messages</string>
     <string name="SvipeBotTabInfoSaved">The bot must be registered with Svipe. Only you will see its tab in Saved Messages in Svipe.</string>
     <string name="SvipeBotTabErrorNotRegistered">This bot isn\'t registered with Svipe.</string>

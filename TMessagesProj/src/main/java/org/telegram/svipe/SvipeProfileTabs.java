@@ -43,7 +43,7 @@ public final class SvipeProfileTabs {
         public String title;
         public boolean listLayout;
         public boolean everyone;
-        /** "profile", "private" (our chat), "saved" (my Saved Messages) or "bot" (the bot's own profile). */
+        /** "profile" (the person's), "saved" (my Saved Messages) or "bot" (the bot's own profile). */
         public String place = "profile";
     }
 
@@ -377,7 +377,8 @@ public final class SvipeProfileTabs {
             SvipeBotTab.State state = SvipeBotTab.parse(0, res);
             state.ownerId = ownerId;
             state.botId = botId;
-            state.chatType = place;
+            // "profile" on my own page, "private" on anyone else's (the server knows which I am).
+            state.chatType = res.optString("chat_type", place);
             done.run(state);
         });
     }
@@ -396,11 +397,6 @@ public final class SvipeProfileTabs {
 
     // ---------------------------------------------------------------------------------------------
     // Who is looking
-
-    /** A card on {@code ownerId}'s profile is about to open {@code botId}'s mini app. */
-    public static void openingFromProfile(long botId, long ownerId) {
-        openingFromTab(botId, ownerId, "profile");
-    }
 
     /**
      * A card in a bot's tab is about to open the bot's mini app: on a person's profile ({@code peerId}

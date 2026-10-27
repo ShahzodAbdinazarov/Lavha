@@ -35,7 +35,6 @@ public class SvipeBotTabSettingsActivity extends BaseFragment {
     private int headerText() {
         switch (chatType) {
             case "supergroup": case "group": return R.string.SvipeBotTabCurrentGroup;
-            case "private": return R.string.SvipeBotTabCurrentPrivate;
             case "saved": return R.string.SvipeBotTabCurrentSaved;
             default: return R.string.SvipeBotTabCurrent;
         }
@@ -44,18 +43,16 @@ public class SvipeBotTabSettingsActivity extends BaseFragment {
     private int infoText() {
         switch (chatType) {
             case "supergroup": case "group": return R.string.SvipeBotTabInfoGroup;
-            case "private": return R.string.SvipeBotTabInfoPrivate;
             case "saved": return R.string.SvipeBotTabInfoSaved;
             default: return R.string.SvipeBotTabInfo;
         }
     }
 
-    /** "channel", "supergroup", "group", "private" or "saved" (svipe.uz/bots/profile-tabs#places). */
+    /** "channel", "supergroup", "group" or "saved" (svipe.uz/bots/profile-tabs#places). */
     private final String chatType;
 
     /**
-     * @param key a channel's or supergroup's id, a basic group's negative id, the other person's id in a
-     *            private chat, or 0 for Saved Messages
+     * @param key a channel's or supergroup's id, a basic group's negative id, or 0 for Saved Messages
      */
     public SvipeBotTabSettingsActivity(long key, String chatType) {
         this.channelId = key;
@@ -81,7 +78,7 @@ public class SvipeBotTabSettingsActivity extends BaseFragment {
         content.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(content, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0));
         fragmentView = scroll;
-        state = "private".equals(chatType) || "saved".equals(chatType) ? null : SvipeBotTab.cached(channelId);
+        state = "saved".equals(chatType) ? null : SvipeBotTab.cached(channelId);
         render();
         reload();
         return fragmentView;

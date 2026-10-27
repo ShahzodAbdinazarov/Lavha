@@ -7076,9 +7076,9 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             return;
         }
         final int account = profileActivity.getCurrentAccount();
-        if ("private".equals(state.chatType) || "saved".equals(state.chatType)) {
-            // Our chat's tab, or my Saved Messages': it is mine (or ours) to take down.
-            final long key = "saved".equals(state.chatType) ? 0 : state.ownerId;
+        if ("saved".equals(state.chatType)) {
+            // My Saved Messages' tab: mine to take down.
+            final long key = 0;
             new AlertDialog.Builder(profileActivity.getParentActivity())
                     .setTitle(state.title)
                     .setItems(new CharSequence[]{getString(R.string.SvipeBotTabRemove)}, (d, which) ->
