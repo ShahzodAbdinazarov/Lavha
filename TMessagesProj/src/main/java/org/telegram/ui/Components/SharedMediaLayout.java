@@ -7038,6 +7038,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             int before = userTabCount();
             setUserTabs(states);
             updateTabs(true);
+            showBotTabPageIfSelected();
             if ((before == 0) != (userTabCount() == 0) && profileActivity instanceof ProfileActivity) {
                 // A profile with no media has no shared-media row at all; the tabs alone must bring it in.
                 ((ProfileActivity) profileActivity).updateListAnimated(false);
@@ -7122,6 +7123,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             boolean wasActive = hasBotTab();
             botTabAdapter.setState(state);
             updateTabs(true);
+            showBotTabPageIfSelected();
             if (wasActive != state.active && profileActivity instanceof ProfileActivity) {
                 // A channel with no media has no shared-media row at all; the tab alone must bring it in.
                 ((ProfileActivity) profileActivity).updateListAnimated(false);
@@ -7138,6 +7140,23 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                 botTabAdapter.notifyDataSetChanged();
             });
         });
+    }
+
+    /**
+     * A bot tab arrives after the profile has drawn its pages; when it is the only tab (a channel or a person
+     * with no media) the strip selects it but the page still shows the media list, so put its adapter in.
+     */
+    private void showBotTabPageIfSelected() {
+        MediaPage page = mediaPages[0];
+        if (page == null || (page.selectedType != TAB_BOT_TAB && !isUserBotTab(page.selectedType))) {
+            return;
+        }
+        RecyclerView.Adapter want = page.selectedType == TAB_BOT_TAB ? botTabAdapter : userTabAdapters[userTabIndex(page.selectedType)];
+        if (page.listView.getAdapter() != want) {
+            switchToCurrentSelectedMode(false);
+        } else if (want != null) {
+            want.notifyDataSetChanged();
+        }
     }
 
     private void showBotTabReport() {
