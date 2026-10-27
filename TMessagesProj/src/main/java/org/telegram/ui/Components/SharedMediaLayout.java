@@ -7588,6 +7588,15 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         scrollSlidingTextTabStrip.finishAddingTabs();
         onSelectedTabChanged();
         checkStoriesTabsPosition();
+        // Svipe: a bot tab came in where the strip had nothing (a basic group with no media): the strip still
+        // holds the id it started with, a tab it doesn't have, so select the bot tab and show its page.
+        if (mediaPages[0] != null && !scrollSlidingTextTabStrip.hasTab(scrollSlidingTextTabStrip.getCurrentTabId())
+                && (firstTab == TAB_BOT_TAB || isUserBotTab(firstTab)) && scrollSlidingTextTabStrip.hasTab(firstTab)) {
+            scrollSlidingTextTabStrip.setInitialTabId(firstTab);
+            mediaPages[0].selectedType = firstTab;
+            switchToCurrentSelectedMode(false);
+            onSelectedTabChanged();
+        }
     }
 
     private void startStopVisibleGifs() {

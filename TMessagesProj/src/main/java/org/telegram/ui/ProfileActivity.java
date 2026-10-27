@@ -10624,7 +10624,10 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             hasMedia = chatInfo.stories_pinned_available;
         }
         if (!hasMedia && chatId != 0) { // Svipe: a bot's tab is enough to show the tabs
-            org.telegram.svipe.SvipeBotTab.State botTab = org.telegram.svipe.SvipeBotTab.cached(chatId);
+            // A channel's or supergroup's tab is keyed by its id, a basic group's by its negative id.
+            TLRPC.Chat tabChat = getMessagesController().getChat(chatId);
+            org.telegram.svipe.SvipeBotTab.State botTab = org.telegram.svipe.SvipeBotTab.cached(
+                    tabChat == null || ChatObject.isChannel(tabChat) ? chatId : -chatId);
             hasMedia = botTab != null && botTab.active;
         }
         if (!hasMedia) {
