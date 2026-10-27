@@ -43,8 +43,27 @@ public final class SvipeProfileTabs {
         public String title;
         public boolean listLayout;
         public boolean everyone;
-        /** "profile" (the person's), "saved" (my Saved Messages) or "bot" (the bot's own profile). */
+        /** "profile" (the person's), "private" (mine, on others' profiles), "saved" or "bot" (the bot's own). */
         public String place = "profile";
+        /** Of my own tabs: "profile", or "private" (I see it on the profile of everyone I open). */
+        public String kind = "profile";
+    }
+
+    /** The {@code place} a mini app's event asks about ({@code checkProfileTabStatus / addToProfile}). */
+    public static String kindOf(String eventData) {
+        try {
+            if (eventData != null && "private".equals(new JSONObject(eventData).optString("place"))) {
+                return "private";
+            }
+        } catch (Exception ignore) {
+        }
+        return "profile";
+    }
+
+    private static ArrayList<Tab> mineOf(String kind) {
+        ArrayList<Tab> out = new ArrayList<>();
+        for (Tab t : mine) if (kind.equals(t.kind)) out.add(t);
+        return out;
     }
 
     private static final ArrayList<Tab> mine = new ArrayList<>();
@@ -70,6 +89,7 @@ public final class SvipeProfileTabs {
             t.listLayout = SvipeBotTabAdapter.isRowLayout(o.optString("layout"));
             t.everyone = !"me".equals(o.optString("visibility"));
             t.place = o.optString("place", "profile");
+            t.kind = o.optString("kind", "profile");
             out.add(t);
         }
         return out;
@@ -99,15 +119,15 @@ public final class SvipeProfileTabs {
     }
 
     /** For checkProfileTabStatus(): "added", "declined" or "missed". */
-    public static void status(int account, long botId, Utilities.Callback<String> done) {
+    public static void status(int account, long botId, String kind, Utilities.Callback<String> done) {
         Runnable answer = () -> {
             for (Tab t : mine) {
-                if (t.botId == botId) {
+                if (t.botId == botId && kind.equals(t.kind)) {
                     done.run("added");
                     return;
                 }
             }
-            done.run(declined().contains(String.valueOf(botId)) ? "declined" : "missed");
+            done.run(declined().contains(kind + botId) || "profile".equals(kind) && declined().contains(String.valueOf(botId)) ? "declined" : "missed");
         };
         if (mineLoaded) answer.run(); else loadMine(account, answer);
     }
@@ -145,12 +165,12 @@ public final class SvipeProfileTabs {
      * The bot asks for a tab on my profile. {@code whenDone} gets (whether a dialog was shown, whether
      * the tab is on the profile now). From a mini app a declined bot isn't asked again.
      */
-    public static void request(int account, TLRPC.User bot, boolean fromMiniApp, Utilities.Callback2<Boolean, Boolean> whenDone) {
+    public static void request(int account, TLRPC.User bot, boolean fromMiniApp, String kind, Utilities.Callback2<Boolean, Boolean> whenDone) {
         if (bot == null || !bot.bot) {
             whenDone.run(false, false);
             return;
         }
-        status(account, bot.id, status -> {
+        status(account, bot.id, kind, status -> {
             if ("added".equals(status)) {
                 whenDone.run(false, true);
                 return;
@@ -164,15 +184,16 @@ public final class SvipeProfileTabs {
                 whenDone.run(false, false);
                 return;
             }
-            if (mine.size() >= MAX) {
-                choose(account, activity, bot, whenDone);
+            if (mineOf(kind).size() >= MAX) {
+                choose(account, activity, bot, kind, whenDone);
             } else {
-                ask(account, activity, bot, whenDone);
+                ask(account, activity, bot, kind, whenDone);
             }
         });
     }
 
-    private static void ask(int account, Activity activity, TLRPC.User bot, Utilities.Callback2<Boolean, Boolean> whenDone) {
+    private static void ask(int account, Activity activity, TLRPC.User bot, String kind, Utilities.Callback2<Boolean, Boolean> whenDone) {
+        final boolean isPrivate = "private".equals(kind);
         AttachBotIntroTopView top = new AttachBotIntroTopView(activity);
         top.svipeSetIcon(R.drawable.msg_openprofile);
         top.setColor(Theme.getColor(Theme.key_chat_attachIcon));
@@ -181,35 +202,36 @@ public final class SvipeProfileTabs {
         final boolean[] answered = new boolean[1];
         new AlertDialog.Builder(activity)
                 .setTopView(top)
-                .setMessage(AndroidUtilities.replaceTags(LocaleController.formatString(R.string.SvipeProfileTabRequest, UserObject.getUserName(bot))))
+                .setMessage(AndroidUtilities.replaceTags(LocaleController.formatString(isPrivate ? R.string.SvipeProfileTabRequestPrivate : R.string.SvipeProfileTabRequest, UserObject.getUserName(bot))))
                 .setPositiveButton(LocaleController.getString(R.string.SvipeProfileTabAdd), (di, w) -> {
                     if (answered[0]) return;
                     answered[0] = true;
-                    add(account, bot, 0, whenDone);
+                    add(account, bot, 0, kind, whenDone);
                 })
                 .setNegativeButton(LocaleController.getString(R.string.Cancel), (di, w) -> {
                     if (answered[0]) return;
                     answered[0] = true;
-                    decline(bot.id);
+                    decline(kind, bot.id);
                     whenDone.run(true, false);
                 })
                 .setOnDismissListener(di -> {
                     if (answered[0]) return;
                     answered[0] = true;
-                    decline(bot.id);
+                    decline(kind, bot.id);
                     whenDone.run(true, false);
                 })
                 .show();
     }
 
     /** Three already: which one this replaces, or cancel. Choosing is agreeing. */
-    private static void choose(int account, Activity activity, TLRPC.User bot, Utilities.Callback2<Boolean, Boolean> whenDone) {
-        final long[] picked = {mine.get(mine.size() - 1).botId};
+    private static void choose(int account, Activity activity, TLRPC.User bot, String kind, Utilities.Callback2<Boolean, Boolean> whenDone) {
+        final ArrayList<Tab> same = mineOf(kind);
+        final long[] picked = {same.get(same.size() - 1).botId};
         final boolean[] answered = new boolean[1];
         android.widget.LinearLayout list = new android.widget.LinearLayout(activity);
         list.setOrientation(android.widget.LinearLayout.VERTICAL);
         final ArrayList<RadioColorCell> cells = new ArrayList<>();
-        for (Tab t : mine) {
+        for (Tab t : same) {
             RadioColorCell cell = new RadioColorCell(activity);
             cell.setPadding(AndroidUtilities.dp(4), 0, AndroidUtilities.dp(4), 0);
             cell.setCheckColor(Theme.getColor(Theme.key_radioBackground), Theme.getColor(Theme.key_dialogRadioBackgroundChecked));
@@ -223,12 +245,12 @@ public final class SvipeProfileTabs {
         }
         new AlertDialog.Builder(activity)
                 .setTitle(LocaleController.getString(R.string.SvipeProfileTabFullTitle))
-                .setMessage(AndroidUtilities.replaceTags(LocaleController.formatString(R.string.SvipeProfileTabFullText, MAX, UserObject.getUserName(bot))))
+                .setMessage(AndroidUtilities.replaceTags(LocaleController.formatString("private".equals(kind) ? R.string.SvipeProfileTabFullTextPrivate : R.string.SvipeProfileTabFullText, MAX, UserObject.getUserName(bot))))
                 .setView(list)
                 .setPositiveButton(LocaleController.getString(R.string.SvipeSideMenuReplace), (di, w) -> {
                     if (answered[0]) return;
                     answered[0] = true;
-                    add(account, bot, picked[0], whenDone);
+                    add(account, bot, picked[0], kind, whenDone);
                 })
                 .setNegativeButton(LocaleController.getString(R.string.Cancel), (di, w) -> {
                     if (answered[0]) return;
@@ -243,7 +265,7 @@ public final class SvipeProfileTabs {
                 .show();
     }
 
-    private static void add(int account, TLRPC.User bot, long replace, Utilities.Callback2<Boolean, Boolean> whenDone) {
+    private static void add(int account, TLRPC.User bot, long replace, String kind, Utilities.Callback2<Boolean, Boolean> whenDone) {
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {
                 whenDone.run(true, false);
@@ -253,6 +275,7 @@ public final class SvipeProfileTabs {
             try {
                 body.put("bot_username", UserObject.getPublicUsername(bot));
                 if (replace != 0) body.put("replace_bot_id", replace);
+                body.put("kind", kind);
             } catch (Exception ignore) {
             }
             SvipeApi.post("/v1/profile-tabs", body, token, (res, code, err) -> {
@@ -261,10 +284,11 @@ public final class SvipeProfileTabs {
                     setMine(res);
                     profileCache.clear();
                     declined().remove(String.valueOf(bot.id));
+                    declined().remove(kind + bot.id);
                     saveDeclined();
                     if (fragment != null) {
                         BulletinFactory.of(fragment).createSimpleBulletin(R.raw.contact_check,
-                                AndroidUtilities.replaceTags(LocaleController.formatString(R.string.SvipeProfileTabAdded, UserObject.getFirstName(bot)))).show();
+                                AndroidUtilities.replaceTags(LocaleController.formatString("private".equals(kind) ? R.string.SvipeProfileTabAddedPrivate : R.string.SvipeProfileTabAdded, UserObject.getFirstName(bot)))).show();
                     }
                     whenDone.run(true, true);
                 } else {
@@ -288,8 +312,8 @@ public final class SvipeProfileTabs {
         return declinedSet;
     }
 
-    private static void decline(long botId) {
-        declined().add(String.valueOf(botId));
+    private static void decline(String kind, long botId) {
+        declined().add("profile".equals(kind) ? String.valueOf(botId) : kind + botId);
         saveDeclined();
     }
 
@@ -312,14 +336,14 @@ public final class SvipeProfileTabs {
      * The tabs this profile screen shows me, each with its first page of cards: the person's own tabs, our
      * private chat's, the bot's own when it is a bot; with {@code saved}, my Saved Messages' tab only.
      */
-    public static void load(int account, long ownerId, boolean saved, Utilities.Callback<ArrayList<SvipeBotTab.State>> done) {
+    public static void load(int account, long ownerId, boolean saved, boolean ownerIsBot, Utilities.Callback<ArrayList<SvipeBotTab.State>> done) {
         final long cacheKey = saved ? -ownerId : ownerId;
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {
                 done.run(null);
                 return;
             }
-            SvipeApi.get("/v1/users/" + ownerId + "/tabs" + (saved ? "?saved=1" : ""), token, (res, code, err) -> {
+            SvipeApi.get("/v1/users/" + ownerId + "/tabs" + (saved ? "?saved=1" : ownerIsBot ? "?bot=1" : ""), token, (res, code, err) -> {
                 if (res == null || code != 200) {
                     done.run(null);
                     return;

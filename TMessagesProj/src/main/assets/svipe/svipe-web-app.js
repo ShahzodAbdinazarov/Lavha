@@ -715,7 +715,8 @@
   });
 
   // callback(status): 'added', 'missed', 'declined' or 'unsupported', as checkAttachmentMenuStatus().
-  Telegram.WebApp.checkProfileTabStatus = function (callback) {
+  // options.place: 'profile' (default) or 'private', a tab the user sees on everyone else's profile.
+  Telegram.WebApp.checkProfileTabStatus = function (callback, options) {
     if (callback) {
       profileCheckCallbacks.push(callback);
     }
@@ -724,7 +725,7 @@
         profileCheckTimer = null;
         answerProfileCheck('unsupported');
       }, ATTACH_TIMEOUT_MS);
-      WebView.postEvent('web_app_check_profile_tab', false);
+      WebView.postEvent('web_app_check_profile_tab', false, { place: (options && options.place) || 'profile' });
     }
     return Telegram.WebApp;
   };
@@ -762,12 +763,12 @@
         return;
       }
       profileAddCallbacks.push(answer);
-      WebView.postEvent('web_app_add_to_profile', false);
+      WebView.postEvent('web_app_add_to_profile', false, { place: options.place || 'profile' });
     };
-    if (profileStatus === 'missed') {
+    if (profileStatus === 'missed' && !options.place) {
       go(profileStatus);
     } else {
-      Telegram.WebApp.checkProfileTabStatus(go);
+      Telegram.WebApp.checkProfileTabStatus(go, options);
     }
     return Telegram.WebApp;
   };

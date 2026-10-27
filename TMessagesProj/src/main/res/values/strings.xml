@@ -12004,6 +12004,9 @@
     <string name="SvipeProfileTabFullTitle">Profile tabs are full</string>
     <string name="SvipeProfileTabFullText">Your profile can have up to %1$d bot tabs. Choose one to replace with **%2$s**.</string>
     <string name="SvipeProfileTabAdded">**%s** tab added to your profile.</string>
+    <string name="SvipeProfileTabRequestPrivate">**%s** asks to show its tab on the profile of everyone you open. Only you will see it there; nobody else is asked.</string>
+    <string name="SvipeProfileTabFullTextPrivate">You can have up to %1$d private bot tabs. Choose one to replace with **%2$s**.</string>
+    <string name="SvipeProfileTabAddedPrivate">**%s** tab added. You\'ll see it on the profiles you open.</string>
     <string name="SvipeProfileTabNotRegistered">This bot can\'t add a tab to your profile.</string>
     <string name="SvipeProfileTabsTitle">Bot tabs</string>
     <string name="SvipeProfileTabsInfo">Tabs that bots added to your profile with your permission. Tap one to choose who sees it.</string>

@@ -2787,7 +2787,8 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                     return;
                 }
                 final TLRPC.User bot = botUser;
-                org.telegram.svipe.SvipeProfileTabs.request(currentAccount, bot, true, (shown, added) -> {
+                org.telegram.svipe.SvipeProfileTabs.request(currentAccount, bot, true,
+                        org.telegram.svipe.SvipeProfileTabs.kindOf(eventData), (shown, added) -> {
                     if (added) {
                         notifyEvent(requestContext, "profile_tab_added", null);
                     } else {
@@ -2802,7 +2803,7 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                 }
                 final long statusBot = botUser.id;
                 org.telegram.svipe.SvipeProfileTabs.status(currentAccount, statusBot,
-                        status -> notifyEvent(requestContext, "profile_tab_checked", obj("status", status)));
+                        org.telegram.svipe.SvipeProfileTabs.kindOf(eventData), status -> notifyEvent(requestContext, "profile_tab_checked", obj("status", status)));
                 break;
             }
             case "web_app_check_side_menu": {

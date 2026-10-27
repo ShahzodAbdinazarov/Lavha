@@ -7037,7 +7037,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
         if (cached != null && userTabCount() == 0) {
             setUserTabs(cached);
         }
-        org.telegram.svipe.SvipeProfileTabs.load(profileActivity.getCurrentAccount(), ownerId, saved, states -> {
+        org.telegram.svipe.SvipeProfileTabs.load(profileActivity.getCurrentAccount(), ownerId, saved, user.bot, states -> {
             if (states == null || dialog_id != ownerId) {
                 return;
             }
@@ -7076,6 +7076,16 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             return;
         }
         final int account = profileActivity.getCurrentAccount();
+        if ("private".equals(state.chatType)) {
+            // My private tab, here on someone else's profile: mine to take off (from every profile).
+            new AlertDialog.Builder(profileActivity.getParentActivity())
+                    .setTitle(state.title)
+                    .setItems(new CharSequence[]{getString(R.string.SvipeProfileTabRemove)}, (d, which) ->
+                            org.telegram.svipe.SvipeProfileTabs.remove(account, state.botId,
+                                    () -> AndroidUtilities.runOnUIThread(this::loadUserBotTabs)))
+                    .show();
+            return;
+        }
         if ("saved".equals(state.chatType)) {
             // My Saved Messages' tab: mine to take down.
             final long key = 0;
