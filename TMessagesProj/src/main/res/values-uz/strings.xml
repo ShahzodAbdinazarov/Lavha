@@ -23,6 +23,10 @@
     <string name="SvipeBotTabInfo">Bot Svipe\'da ro\'yxatdan o\'tgan bo\'lishi kerak. U sizning shu kanal admini ekaningizni tekshiradi, so\'ng Svipe\'da kanal profilida o\'z tabini ko\'rsatadi.</string>
     <string name="SvipeBotTabCurrentGroup">Guruh profilidagi tab</string>
     <string name="SvipeBotTabInfoGroup">Bot Svipe\'da ro\'yxatdan o\'tgan bo\'lishi kerak. U sizning shu guruh admini ekaningizni tekshiradi, so\'ng Svipe\'da guruh profilida o\'z tabini ko\'rsatadi.</string>
+    <string name="SvipeBotTabCurrentPrivate">Shu chatdagi tab</string>
+    <string name="SvipeBotTabInfoPrivate">Bot Svipe\'da ro\'yxatdan o\'tgan bo\'lishi kerak. Uning tabini Svipe\'da ikkalangiz ham bir-biringizning profilingizda ko\'rasiz, istalgan biringiz uni olib tashlashingiz mumkin.</string>
+    <string name="SvipeBotTabCurrentSaved">Saqlangan xabarlardagi tab</string>
+    <string name="SvipeBotTabInfoSaved">Bot Svipe\'da ro\'yxatdan o\'tgan bo\'lishi kerak. Uning tabini Svipe\'da Saqlangan xabarlarda faqat siz ko\'rasiz.</string>
     <string name="SvipeBotTabErrorNotRegistered">Bu bot Svipe\'da ro\'yxatdan o\'tmagan.</string>
     <string name="SvipeBotTabErrorRefused">Bu bot so\'rovni rad etgan.</string>
     <string name="SvipeBotTabErrorNotAllowed">Buni faqat tabni qo\'shgan admin qila oladi.</string>

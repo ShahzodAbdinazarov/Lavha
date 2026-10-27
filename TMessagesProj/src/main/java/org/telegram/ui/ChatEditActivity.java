@@ -1291,12 +1291,15 @@ public class ChatEditActivity extends BaseFragment implements ImageUpdater.Image
             }
 
             infoContainer.addView(reactionsCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-            if (ChatObject.isChannel(currentChat) && ChatObject.canChangeChatInfo(currentChat)) {
-                // Svipe: the channel's or (super)group's bot tab (svipe.uz/bots/profile-tabs). Admins only.
+            if (ChatObject.canChangeChatInfo(currentChat)) {
+                // Svipe: the chat's bot tab (svipe.uz/bots/profile-tabs#places): a channel, a supergroup or a
+                // basic group (keyed by its negative id). Admins only; the bot checks them again.
                 TextCell botTabCell = new TextCell(context);
                 botTabCell.setBackground(Theme.getSelectorDrawable(false));
                 botTabCell.setTextAndIcon(getString(R.string.SvipeBotTab), R.drawable.msg_bots, true);
-                botTabCell.setOnClickListener(v -> presentFragment(new org.telegram.svipe.SvipeBotTabSettingsActivity(chatId)));
+                final boolean channel = ChatObject.isChannel(currentChat);
+                final String tabType = ChatObject.isChannelAndNotMegaGroup(currentChat) ? "channel" : channel ? "supergroup" : "group";
+                botTabCell.setOnClickListener(v -> presentFragment(new org.telegram.svipe.SvipeBotTabSettingsActivity(channel ? chatId : -chatId, tabType)));
                 infoContainer.addView(botTabCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
             }
             if (welcomeMessagesCell != null) {

@@ -43,6 +43,8 @@ public final class SvipeProfileTabs {
         public String title;
         public boolean listLayout;
         public boolean everyone;
+        /** "profile", "private" (our chat), "saved" (my Saved Messages) or "bot" (the bot's own profile). */
+        public String place = "profile";
     }
 
     private static final ArrayList<Tab> mine = new ArrayList<>();
@@ -67,6 +69,7 @@ public final class SvipeProfileTabs {
             t.title = o.optString("title", t.username);
             t.listLayout = SvipeBotTabAdapter.isRowLayout(o.optString("layout"));
             t.everyone = !"me".equals(o.optString("visibility"));
+            t.place = o.optString("place", "profile");
             out.add(t);
         }
         return out;
@@ -301,29 +304,35 @@ public final class SvipeProfileTabs {
     // ---------------------------------------------------------------------------------------------
     // Someone's profile
 
-    public static ArrayList<SvipeBotTab.State> cached(long ownerId) {
-        return profileCache.get(ownerId);
+    public static ArrayList<SvipeBotTab.State> cached(long ownerId, boolean saved) {
+        return profileCache.get(saved ? -ownerId : ownerId);
     }
 
-    /** The tabs this person's profile shows me, each with its first page of cards. */
-    public static void load(int account, long ownerId, Utilities.Callback<ArrayList<SvipeBotTab.State>> done) {
+    /**
+     * The tabs this profile screen shows me, each with its first page of cards: the person's own tabs, our
+     * private chat's, the bot's own when it is a bot; with {@code saved}, my Saved Messages' tab only.
+     */
+    public static void load(int account, long ownerId, boolean saved, Utilities.Callback<ArrayList<SvipeBotTab.State>> done) {
+        final long cacheKey = saved ? -ownerId : ownerId;
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {
                 done.run(null);
                 return;
             }
-            SvipeApi.get("/v1/users/" + ownerId + "/tabs", token, (res, code, err) -> {
+            SvipeApi.get("/v1/users/" + ownerId + "/tabs" + (saved ? "?saved=1" : ""), token, (res, code, err) -> {
                 if (res == null || code != 200) {
                     done.run(null);
                     return;
                 }
                 ArrayList<Tab> tabs = parseTabs(res);
                 AndroidUtilities.runOnUIThread(() -> {
-                    for (Tab tab : tabs) SvipeAttachMenu.get(account).presignProfile(tab.botId, ownerId);
+                    for (Tab tab : tabs) {
+                        if ("profile".equals(tab.place)) SvipeAttachMenu.get(account).presignProfile(tab.botId, ownerId);
+                    }
                 });
                 ArrayList<SvipeBotTab.State> states = new ArrayList<>();
                 if (tabs.isEmpty()) {
-                    profileCache.put(ownerId, states);
+                    profileCache.put(cacheKey, states);
                     done.run(states);
                     return;
                 }
@@ -331,11 +340,11 @@ public final class SvipeProfileTabs {
                 final SvipeBotTab.State[] slots = new SvipeBotTab.State[tabs.size()];
                 for (int i = 0; i < tabs.size(); i++) {
                     final int at = i;
-                    loadPage(token, ownerId, tabs.get(i).botId, 0, state -> {
+                    loadPage(token, ownerId, tabs.get(i).botId, tabs.get(i).place, 0, state -> {
                         slots[at] = state;
                         if (--left[0] == 0) {
                             for (SvipeBotTab.State s : slots) if (s != null) states.add(s);
-                            profileCache.put(ownerId, states);
+                            profileCache.put(cacheKey, states);
                             done.run(states);
                         }
                     });
@@ -348,15 +357,15 @@ public final class SvipeProfileTabs {
         if (state == null || state.cards.size() >= state.total) return;
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) return;
-            loadPage(token, state.ownerId, state.botId, state.cards.size(), more -> {
+            loadPage(token, state.ownerId, state.botId, state.chatType, state.cards.size(), more -> {
                 if (more != null) state.cards.addAll(more.cards);
                 done.run();
             });
         });
     }
 
-    private static void loadPage(String token, long ownerId, long botId, int offset, Utilities.Callback<SvipeBotTab.State> done) {
-        SvipeApi.get("/v1/users/" + ownerId + "/tabs/" + botId + (offset > 0 ? "?offset=" + offset : ""), token, (res, code, err) -> {
+    private static void loadPage(String token, long ownerId, long botId, String place, int offset, Utilities.Callback<SvipeBotTab.State> done) {
+        SvipeApi.get("/v1/users/" + ownerId + "/tabs/" + botId + "?place=" + place + (offset > 0 ? "&offset=" + offset : ""), token, (res, code, err) -> {
             if (res == null || code != 200) {
                 done.run(null);
                 return;
@@ -368,6 +377,7 @@ public final class SvipeProfileTabs {
             SvipeBotTab.State state = SvipeBotTab.parse(0, res);
             state.ownerId = ownerId;
             state.botId = botId;
+            state.chatType = place;
             done.run(state);
         });
     }

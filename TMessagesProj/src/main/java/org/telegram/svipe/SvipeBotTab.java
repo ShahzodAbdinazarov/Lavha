@@ -63,6 +63,32 @@ public class SvipeBotTab {
 
         public String myRequestBot;
         public String myRequestState;
+
+        /** The dialog the tab is in, for svipeInitData: a channel or supergroup, a basic group, or a person. */
+        public long dialogId() {
+            if (ownerId != 0) {
+                // On a person's profile or in our private chat the person is the receiver; Saved Messages and
+                // a bot's own profile have no one else to name.
+                return "saved".equals(chatType) || "bot".equals(chatType) ? 0 : ownerId;
+            }
+            return "group".equals(chatType) ? channelId : -channelId;
+        }
+    }
+
+    /** Where a chat's tab lives on the server: a channel, supergroup or basic group (keyed by its negative
+     *  id), or a private chat / Saved Messages (svipe.uz/bots/profile-tabs#places). */
+    static String path(String chatType, long key) {
+        if ("private".equals(chatType)) {
+            return "/v1/chat-tabs/private/" + key;
+        }
+        if ("saved".equals(chatType)) {
+            return "/v1/chat-tabs/saved/0";
+        }
+        return "/v1/channel-tabs/" + key;
+    }
+
+    private static boolean isChatOfMany(String chatType) {
+        return !"private".equals(chatType) && !"saved".equals(chatType);
     }
 
     private static final HashMap<Long, State> cache = new HashMap<>();
@@ -73,7 +99,11 @@ public class SvipeBotTab {
     }
 
     public static void load(int account, long channelId, Utilities.Callback<State> done) {
-        loadPage(account, channelId, 0, done);
+        loadPage(account, "channel", channelId, 0, done);
+    }
+
+    public static void load(int account, String chatType, long key, Utilities.Callback<State> done) {
+        loadPage(account, chatType, key, 0, done);
     }
 
     /** The next page of cards, appended to {@code state}. */
@@ -81,7 +111,7 @@ public class SvipeBotTab {
         if (state == null || state.cards.size() >= state.total) {
             return;
         }
-        loadPage(account, state.channelId, state.cards.size(), more -> {
+        loadPage(account, state.chatType, state.channelId, state.cards.size(), more -> {
             if (more != null && more.active) {
                 state.cards.addAll(more.cards);
             }
@@ -89,20 +119,20 @@ public class SvipeBotTab {
         });
     }
 
-    private static void loadPage(int account, long channelId, int offset, Utilities.Callback<State> done) {
+    private static void loadPage(int account, String chatType, long channelId, int offset, Utilities.Callback<State> done) {
         SvipeAuth.ensureToken(account, token -> {
             if (token == null) {
                 done.run(null);
                 return;
             }
-            SvipeApi.get("/v1/channel-tabs/" + channelId + (offset > 0 ? "?offset=" + offset : ""), token,
+            SvipeApi.get(path(chatType, channelId) + (offset > 0 ? "?offset=" + offset : ""), token,
                     (res, code, err) -> {
                 if (res == null || code < 200 || code >= 300) {
                     done.run(null);
                     return;
                 }
                 State state = parse(channelId, res);
-                if (offset == 0) {
+                if (offset == 0 && isChatOfMany(chatType)) {
                     cache.put(channelId, state);
                 }
                 done.run(state);
@@ -172,20 +202,22 @@ public class SvipeBotTab {
         void run(String error);
     }
 
-    public static void attach(int account, long channelId, String botUsername, boolean group, Done done) {
+    public static void attach(int account, String chatType, long channelId, String botUsername, Done done) {
         withToken(account, done, token -> {
             JSONObject body = new JSONObject();
             try {
                 body.put("bot_username", botUsername);
-                body.put("chat_type", group ? "supergroup" : "channel");
+                if (isChatOfMany(chatType)) {
+                    body.put("chat_type", chatType);
+                }
             } catch (Exception ignore) {
             }
-            SvipeApi.put("/v1/channel-tabs/" + channelId, body, token, (res, code, err) -> finish(res, code, done));
+            SvipeApi.put(path(chatType, channelId), body, token, (res, code, err) -> finish(res, code, done));
         });
     }
 
-    public static void detach(int account, long channelId, Done done) {
-        withToken(account, done, token -> SvipeApi.delete("/v1/channel-tabs/" + channelId, token,
+    public static void detach(int account, String chatType, long channelId, Done done) {
+        withToken(account, done, token -> SvipeApi.delete(path(chatType, channelId), token,
                 (res, code, err) -> {
             cache.remove(channelId);
             finish(res, code, done);

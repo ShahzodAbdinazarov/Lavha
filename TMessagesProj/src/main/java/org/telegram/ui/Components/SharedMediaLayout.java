@@ -3297,7 +3297,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     }
                     if (card != null && state != null && profileActivity != null && profileActivity.getParentActivity() != null) {
                         // The mini app it opens is told whose profile this is (svipeInitData, chat_type profile).
-                        org.telegram.svipe.SvipeProfileTabs.openingFromProfile(state.botId, state.ownerId);
+                        org.telegram.svipe.SvipeProfileTabs.openingFromTab(state.botId, state.dialogId(), state.chatType);
                         org.telegram.messenger.browser.Browser.openUrl(profileActivity.getParentActivity(), card.link);
                     }
                 } else if (mediaPage.selectedType == TAB_BOT_TAB) { // Svipe: a card opens the bot's mini app
@@ -3308,7 +3308,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     org.telegram.svipe.SvipeBotTab.State channelTab = botTabAdapter.getState();
                     if (card != null && channelTab != null && channelTab.botId != 0) {
                         // The mini app it opens is told which channel this is (svipeInitData, chat_type channel).
-                        org.telegram.svipe.SvipeProfileTabs.openingFromTab(channelTab.botId, dialog_id, channelTab.chatType);
+                        org.telegram.svipe.SvipeProfileTabs.openingFromTab(channelTab.botId, channelTab.dialogId(), channelTab.chatType);
                     }
                     if (card != null && profileActivity != null && profileActivity.getParentActivity() != null) {
                         org.telegram.messenger.browser.Browser.openUrl(profileActivity.getParentActivity(), card.link);
@@ -6974,12 +6974,16 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
     // Svipe: a bot's tab on a channel profile. Shown from the last known state at once, then refreshed.
     private boolean botTabLoadingMore;
 
-    private boolean isBotTabChannel() {
+    /** The key of this chat's bot tab: a channel's or supergroup's id, a basic group's negative id; 0 if none. */
+    private long botTabKey() {
         if (profileActivity == null || dialog_id >= 0) {
-            return false;
+            return 0;
         }
         TLRPC.Chat chat = profileActivity.getMessagesController().getChat(-dialog_id);
-        return chat != null && ChatObject.isChannel(chat); // a channel or a supergroup
+        if (chat == null) {
+            return 0;
+        }
+        return ChatObject.isChannel(chat) ? -dialog_id : dialog_id;
     }
 
     private boolean hasBotTab() {
@@ -7023,15 +7027,17 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             return;
         }
         TLRPC.User user = profileActivity.getMessagesController().getUser(dialog_id);
-        if (user == null || user.bot) {
+        if (user == null) {
             return;
         }
         final long ownerId = dialog_id;
-        java.util.ArrayList<org.telegram.svipe.SvipeBotTab.State> cached = org.telegram.svipe.SvipeProfileTabs.cached(ownerId);
+        // My own dialog outside my profile screen is Saved Messages' media: its tab, not my profile's.
+        final boolean saved = UserObject.isUserSelf(user) && !(profileActivity instanceof ProfileActivity);
+        java.util.ArrayList<org.telegram.svipe.SvipeBotTab.State> cached = org.telegram.svipe.SvipeProfileTabs.cached(ownerId, saved);
         if (cached != null && userTabCount() == 0) {
             setUserTabs(cached);
         }
-        org.telegram.svipe.SvipeProfileTabs.load(profileActivity.getCurrentAccount(), ownerId, states -> {
+        org.telegram.svipe.SvipeProfileTabs.load(profileActivity.getCurrentAccount(), ownerId, saved, states -> {
             if (states == null || dialog_id != ownerId) {
                 return;
             }
@@ -7070,7 +7076,18 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             return;
         }
         final int account = profileActivity.getCurrentAccount();
-        if (state.ownerId != profileActivity.getUserConfig().getClientUserId()) {
+        if ("private".equals(state.chatType) || "saved".equals(state.chatType)) {
+            // Our chat's tab, or my Saved Messages': it is mine (or ours) to take down.
+            final long key = "saved".equals(state.chatType) ? 0 : state.ownerId;
+            new AlertDialog.Builder(profileActivity.getParentActivity())
+                    .setTitle(state.title)
+                    .setItems(new CharSequence[]{getString(R.string.SvipeBotTabRemove)}, (d, which) ->
+                            org.telegram.svipe.SvipeBotTab.detach(account, state.chatType, key,
+                                    error -> AndroidUtilities.runOnUIThread(this::loadUserBotTabs)))
+                    .show();
+            return;
+        }
+        if (state.ownerId != profileActivity.getUserConfig().getClientUserId() || "bot".equals(state.chatType)) {
             final String[] reasons = {"spam", "violence", "porn", "fake", "other"};
             CharSequence[] labels = {
                     getString(R.string.ReportChatSpam), getString(R.string.ReportChatViolence),
@@ -7108,16 +7125,16 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
     }
 
     public void loadBotTab() {
-        if (botTabAdapter == null || !isBotTabChannel()) {
+        final long channelId = botTabKey();
+        if (botTabAdapter == null || channelId == 0) {
             return;
         }
-        final long channelId = -dialog_id;
         org.telegram.svipe.SvipeBotTab.State cached = org.telegram.svipe.SvipeBotTab.cached(channelId);
         if (cached != null && botTabAdapter.getState() == null) {
             botTabAdapter.setState(cached);
         }
         org.telegram.svipe.SvipeBotTab.load(profileActivity.getCurrentAccount(), channelId, state -> {
-            if (state == null || dialog_id != -channelId) {
+            if (state == null || botTabKey() != channelId) {
                 return;
             }
             boolean wasActive = hasBotTab();

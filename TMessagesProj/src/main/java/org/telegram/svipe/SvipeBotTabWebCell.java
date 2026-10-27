@@ -47,9 +47,9 @@ public class SvipeBotTabWebCell extends FrameLayout {
         if (state == null || TextUtils.isEmpty(state.webUrl) || state.botId == 0) {
             return;
         }
-        final long peerId = state.ownerId != 0 ? state.ownerId : -state.channelId;
-        final String chatType = state.ownerId != 0 ? "profile" : state.chatType;
-        final String key = state.botId + "|" + state.webUrl + "|" + peerId;
+        final long peerId = state.dialogId();
+        final String chatType = state.chatType;
+        final String key = state.botId + "|" + state.webUrl + "|" + peerId + "|" + chatType;
         if (key.equals(loaded)) {
             return;
         }

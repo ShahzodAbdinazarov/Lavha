@@ -9,7 +9,6 @@ import android.widget.ScrollView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
-import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
@@ -33,14 +32,34 @@ public class SvipeBotTabSettingsActivity extends BaseFragment {
     private LinearLayout content;
     private boolean busy;
 
-    /** A supergroup's tab, not a channel's: the same flow, other words. */
-    private boolean isGroup() {
-        TLRPC.Chat chat = getMessagesController().getChat(channelId);
-        return chat != null && chat.megagroup;
+    private int headerText() {
+        switch (chatType) {
+            case "supergroup": case "group": return R.string.SvipeBotTabCurrentGroup;
+            case "private": return R.string.SvipeBotTabCurrentPrivate;
+            case "saved": return R.string.SvipeBotTabCurrentSaved;
+            default: return R.string.SvipeBotTabCurrent;
+        }
     }
 
-    public SvipeBotTabSettingsActivity(long channelId) {
-        this.channelId = channelId;
+    private int infoText() {
+        switch (chatType) {
+            case "supergroup": case "group": return R.string.SvipeBotTabInfoGroup;
+            case "private": return R.string.SvipeBotTabInfoPrivate;
+            case "saved": return R.string.SvipeBotTabInfoSaved;
+            default: return R.string.SvipeBotTabInfo;
+        }
+    }
+
+    /** "channel", "supergroup", "group", "private" or "saved" (svipe.uz/bots/profile-tabs#places). */
+    private final String chatType;
+
+    /**
+     * @param key a channel's or supergroup's id, a basic group's negative id, the other person's id in a
+     *            private chat, or 0 for Saved Messages
+     */
+    public SvipeBotTabSettingsActivity(long key, String chatType) {
+        this.channelId = key;
+        this.chatType = chatType;
     }
 
     @Override
@@ -62,14 +81,14 @@ public class SvipeBotTabSettingsActivity extends BaseFragment {
         content.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(content, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0));
         fragmentView = scroll;
-        state = SvipeBotTab.cached(channelId);
+        state = "private".equals(chatType) || "saved".equals(chatType) ? null : SvipeBotTab.cached(channelId);
         render();
         reload();
         return fragmentView;
     }
 
     private void reload() {
-        SvipeBotTab.load(currentAccount, channelId, loaded -> {
+        SvipeBotTab.load(currentAccount, chatType, channelId, loaded -> {
             if (loaded != null) {
                 state = loaded;
                 render();
@@ -85,7 +104,7 @@ public class SvipeBotTabSettingsActivity extends BaseFragment {
         content.removeAllViews();
 
         HeaderCell header = new HeaderCell(context);
-        header.setText(LocaleController.getString(isGroup() ? R.string.SvipeBotTabCurrentGroup : R.string.SvipeBotTabCurrent));
+        header.setText(LocaleController.getString(headerText()));
         header.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
         content.addView(header);
         TextCell status = new TextCell(context);
@@ -112,7 +131,7 @@ public class SvipeBotTabSettingsActivity extends BaseFragment {
             remove.setBackground(Theme.getSelectorDrawable(true));
             remove.setColors(Theme.key_text_RedRegular, Theme.key_text_RedRegular);
             remove.setText(LocaleController.getString(R.string.SvipeBotTabRemove), false);
-            remove.setOnClickListener(v -> run(done -> SvipeBotTab.detach(currentAccount, channelId, done)));
+            remove.setOnClickListener(v -> run(done -> SvipeBotTab.detach(currentAccount, chatType, channelId, done)));
             content.addView(remove);
         }
         content.addView(new ShadowSectionCell(context));
@@ -139,11 +158,11 @@ public class SvipeBotTabSettingsActivity extends BaseFragment {
                 return;
             }
             final String bot = name;
-            run(done -> SvipeBotTab.attach(currentAccount, channelId, bot, isGroup(), done));
+            run(done -> SvipeBotTab.attach(currentAccount, chatType, channelId, bot, done));
         });
         content.addView(send);
         TextInfoPrivacyCell info = new TextInfoPrivacyCell(context);
-        info.setText(LocaleController.getString(isGroup() ? R.string.SvipeBotTabInfoGroup : R.string.SvipeBotTabInfo));
+        info.setText(LocaleController.getString(infoText()));
         content.addView(info);
     }
 
