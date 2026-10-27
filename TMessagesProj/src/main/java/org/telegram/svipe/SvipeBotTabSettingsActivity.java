@@ -9,6 +9,7 @@ import android.widget.ScrollView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
+import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
@@ -31,6 +32,12 @@ public class SvipeBotTabSettingsActivity extends BaseFragment {
     private SvipeBotTab.State state;
     private LinearLayout content;
     private boolean busy;
+
+    /** A supergroup's tab, not a channel's: the same flow, other words. */
+    private boolean isGroup() {
+        TLRPC.Chat chat = getMessagesController().getChat(channelId);
+        return chat != null && chat.megagroup;
+    }
 
     public SvipeBotTabSettingsActivity(long channelId) {
         this.channelId = channelId;
@@ -78,7 +85,7 @@ public class SvipeBotTabSettingsActivity extends BaseFragment {
         content.removeAllViews();
 
         HeaderCell header = new HeaderCell(context);
-        header.setText(LocaleController.getString(R.string.SvipeBotTabCurrent));
+        header.setText(LocaleController.getString(isGroup() ? R.string.SvipeBotTabCurrentGroup : R.string.SvipeBotTabCurrent));
         header.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
         content.addView(header);
         TextCell status = new TextCell(context);
@@ -132,11 +139,11 @@ public class SvipeBotTabSettingsActivity extends BaseFragment {
                 return;
             }
             final String bot = name;
-            run(done -> SvipeBotTab.attach(currentAccount, channelId, bot, done));
+            run(done -> SvipeBotTab.attach(currentAccount, channelId, bot, isGroup(), done));
         });
         content.addView(send);
         TextInfoPrivacyCell info = new TextInfoPrivacyCell(context);
-        info.setText(LocaleController.getString(R.string.SvipeBotTabInfo));
+        info.setText(LocaleController.getString(isGroup() ? R.string.SvipeBotTabInfoGroup : R.string.SvipeBotTabInfo));
         content.addView(info);
     }
 

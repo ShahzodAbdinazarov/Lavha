@@ -3308,7 +3308,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
                     org.telegram.svipe.SvipeBotTab.State channelTab = botTabAdapter.getState();
                     if (card != null && channelTab != null && channelTab.botId != 0) {
                         // The mini app it opens is told which channel this is (svipeInitData, chat_type channel).
-                        org.telegram.svipe.SvipeProfileTabs.openingFromTab(channelTab.botId, dialog_id, "channel");
+                        org.telegram.svipe.SvipeProfileTabs.openingFromTab(channelTab.botId, dialog_id, channelTab.chatType);
                     }
                     if (card != null && profileActivity != null && profileActivity.getParentActivity() != null) {
                         org.telegram.messenger.browser.Browser.openUrl(profileActivity.getParentActivity(), card.link);
@@ -6979,7 +6979,7 @@ public class SharedMediaLayout extends FrameLayout implements NotificationCenter
             return false;
         }
         TLRPC.Chat chat = profileActivity.getMessagesController().getChat(-dialog_id);
-        return chat != null && ChatObject.isChannelAndNotMegaGroup(chat);
+        return chat != null && ChatObject.isChannel(chat); // a channel or a supergroup
     }
 
     private boolean hasBotTab() {

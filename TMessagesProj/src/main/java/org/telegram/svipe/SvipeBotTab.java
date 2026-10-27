@@ -38,6 +38,8 @@ public class SvipeBotTab {
 
     public static class State {
         public long channelId;
+        /** "channel" or "supergroup": also svipeInitData's chat_type for the tab's mini apps. */
+        public String chatType = "channel";
         // On a person's profile (SvipeProfileTabs): whose profile, and which bot's tab.
         public long ownerId;
         public long botId;
@@ -118,6 +120,7 @@ public class SvipeBotTab {
             state.botId = bot.optLong("bot_id");
         }
         state.mode = res.optString("mode", "cards");
+        state.chatType = res.optString("chat_type", "channel");
         state.webUrl = str(res, "web_url");
         state.title = res.optString("title", state.botUsername);
         state.layout = res.optString("layout", "grid");
@@ -169,11 +172,12 @@ public class SvipeBotTab {
         void run(String error);
     }
 
-    public static void attach(int account, long channelId, String botUsername, Done done) {
+    public static void attach(int account, long channelId, String botUsername, boolean group, Done done) {
         withToken(account, done, token -> {
             JSONObject body = new JSONObject();
             try {
                 body.put("bot_username", botUsername);
+                body.put("chat_type", group ? "supergroup" : "channel");
             } catch (Exception ignore) {
             }
             SvipeApi.put("/v1/channel-tabs/" + channelId, body, token, (res, code, err) -> finish(res, code, done));

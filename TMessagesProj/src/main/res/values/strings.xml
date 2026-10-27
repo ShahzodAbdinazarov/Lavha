@@ -11048,6 +11048,8 @@
     <string name="SvipeBotTabUsernameHint">Bot username, e.g. @shop_bot</string>
     <string name="SvipeBotTabSend">Send request</string>
     <string name="SvipeBotTabInfo">The bot must be registered with Svipe. It checks that you are an admin of this channel, then shows its tab on the channel profile in Svipe.</string>
+    <string name="SvipeBotTabCurrentGroup">Tab on the group profile</string>
+    <string name="SvipeBotTabInfoGroup">The bot must be registered with Svipe. It checks that you are an admin of this group, then shows its tab on the group profile in Svipe.</string>
     <string name="SvipeBotTabErrorNotRegistered">This bot isn\'t registered with Svipe.</string>
     <string name="SvipeBotTabErrorRefused">This bot declined the request.</string>
     <string name="SvipeBotTabErrorNotAllowed">Only the admin who added the tab can do this.</string>

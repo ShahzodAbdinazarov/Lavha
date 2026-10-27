@@ -284,6 +284,8 @@
     <string name="SvipeBotTabUsernameHint">Имя бота, например @shop_bot</string>
     <string name="SvipeBotTabSend">Отправить запрос</string>
     <string name="SvipeBotTabInfo">Бот должен быть зарегистрирован в Svipe. Он проверит, что вы администратор этого канала, и покажет свою вкладку в профиле канала в Svipe.</string>
+    <string name="SvipeBotTabCurrentGroup">Вкладка в профиле группы</string>
+    <string name="SvipeBotTabInfoGroup">Бот должен быть зарегистрирован в Svipe. Он проверит, что вы администратор этой группы, и покажет свою вкладку в профиле группы в Svipe.</string>
     <string name="SvipeBotTabErrorNotRegistered">Этот бот не зарегистрирован в Svipe.</string>
     <string name="SvipeBotTabErrorRefused">Этот бот отклонил запрос.</string>
     <string name="SvipeBotTabErrorNotAllowed">Это может только администратор, который добавил вкладку.</string>

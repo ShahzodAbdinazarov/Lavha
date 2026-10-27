@@ -1291,8 +1291,8 @@ public class ChatEditActivity extends BaseFragment implements ImageUpdater.Image
             }
 
             infoContainer.addView(reactionsCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-            if (ChatObject.isChannelAndNotMegaGroup(currentChat) && ChatObject.canChangeChatInfo(currentChat)) {
-                // Svipe: the channel's bot tab (svipe.uz/bots/profile-tabs).
+            if (ChatObject.isChannel(currentChat) && ChatObject.canChangeChatInfo(currentChat)) {
+                // Svipe: the channel's or (super)group's bot tab (svipe.uz/bots/profile-tabs). Admins only.
                 TextCell botTabCell = new TextCell(context);
                 botTabCell.setBackground(Theme.getSelectorDrawable(false));
                 botTabCell.setTextAndIcon(getString(R.string.SvipeBotTab), R.drawable.msg_bots, true);
