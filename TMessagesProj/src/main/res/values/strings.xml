@@ -12143,4 +12143,7 @@
     <string name="FpnvConsentCountry">Country</string>
     <string name="FpnvConsentMccMnc">MCC / MNC</string>
     <string name="FpnvConsentPhoneNumber">Phone Number</string>
+    <string name="SvipeQrLoginButton">Log in with QR code</string>
+    <string name="SvipeQrLoginTitle">Log in with QR code</string>
+    <string name="SvipeQrLoginText">Open Telegram on a phone where you are already signed in, go to Settings → Devices → Link Desktop Device, and scan this code.</string>
 </resources>

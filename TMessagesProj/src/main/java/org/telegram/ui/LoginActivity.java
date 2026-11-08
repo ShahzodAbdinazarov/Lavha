@@ -1722,6 +1722,38 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         onAuthSuccess(res, false);
     }
 
+    /** Svipe: QR login (SvipeQrLogin); a cloud password continues on the usual password screen. */
+    private void svipeQrLogin() {
+        org.telegram.svipe.SvipeQrLogin.show(getParentActivity(), currentAccount, new org.telegram.svipe.SvipeQrLogin.Listener() {
+            @Override
+            public void onAuthorized(TLRPC.TL_auth_authorization authorization) {
+                onAuthSuccess(authorization);
+            }
+
+            @Override
+            public void onPasswordNeeded() {
+                TL_account.getPassword req = new TL_account.getPassword();
+                ConnectionsManager.getInstance(currentAccount).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+                    if (error != null) {
+                        needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), error.text);
+                        return;
+                    }
+                    TL_account.Password password = (TL_account.Password) response;
+                    if (!TwoStepVerificationActivity.canHandleCurrentPassword(password, true)) {
+                        AlertsCreator.showUpdateAppAlert(getParentActivity(), getString("UpdateAppAlert", R.string.UpdateAppAlert), true);
+                        return;
+                    }
+                    Bundle bundle = new Bundle();
+                    SerializedData data = new SerializedData(password.getObjectSize());
+                    password.serializeToStream(data);
+                    bundle.putString("password", Utilities.bytesToHex(data.toByteArray()));
+                    bundle.putString("phoneFormated", "");
+                    setPage(VIEW_PASSWORD, true, bundle, false);
+                }), ConnectionsManager.RequestFlagFailOnServerErrors | ConnectionsManager.RequestFlagWithoutLogin);
+            }
+        });
+    }
+
     private boolean pendingSwitchingAccount;
 
     private void onAuthSuccess(TLRPC.TL_auth_authorization res, boolean afterSignup) {
@@ -2481,6 +2513,18 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             });
 
             int bottomMargin = 72;
+            if (activityMode == MODE_LOGIN) {
+                // Svipe: sign in by scanning a QR code with Telegram on another device, as on desktop.
+                TextView qrLoginView = new TextView(context);
+                qrLoginView.setText(getString(R.string.SvipeQrLoginButton));
+                qrLoginView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+                qrLoginView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
+                qrLoginView.setGravity(Gravity.CENTER);
+                qrLoginView.setPadding(AndroidUtilities.dp(16), AndroidUtilities.dp(10), AndroidUtilities.dp(16), AndroidUtilities.dp(10));
+                qrLoginView.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ROUNDRECT_6DP));
+                qrLoginView.setOnClickListener(v -> svipeQrLogin());
+                addView(qrLoginView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 16, 0, 16, 8));
+            }
             if (newAccount && activityMode == MODE_LOGIN) {
                 syncContactsBox = new CheckBoxCell(context, 2);
                 syncContactsBox.setText(getString("SyncContacts", R.string.SyncContacts), "", syncContacts, false);

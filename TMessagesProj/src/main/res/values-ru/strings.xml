@@ -741,4 +741,7 @@
     <string name="SvipeProfileTabEveryone">Все</string>
     <string name="SvipeProfileTabOnlyMe">Только я</string>
     <string name="SvipeProfileTabRemove">Убрать из профиля</string>
+    <string name="SvipeQrLoginButton">Войти по QR-коду</string>
+    <string name="SvipeQrLoginTitle">Вход по QR-коду</string>
+    <string name="SvipeQrLoginText">Откройте Telegram на телефоне, где вы уже вошли, перейдите в Настройки → Устройства → Подключить устройство и отсканируйте этот код.</string>
 </resources>

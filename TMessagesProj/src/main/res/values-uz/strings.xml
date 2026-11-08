@@ -468,4 +468,7 @@
     <string name="SvipeProfileTabEveryone">Hamma</string>
     <string name="SvipeProfileTabOnlyMe">Faqat men</string>
     <string name="SvipeProfileTabRemove">Profildan olib tashlash</string>
+    <string name="SvipeQrLoginButton">QR kod bilan kirish</string>
+    <string name="SvipeQrLoginTitle">QR kod bilan kirish</string>
+    <string name="SvipeQrLoginText">Akkauntingiz ochiq turgan telefonda Telegram\'ni oching, Sozlamalar → Qurilmalar → Desktop qurilmani ulash bo\'limiga o\'ting va shu kodni skanerlang.</string>
 </resources>
