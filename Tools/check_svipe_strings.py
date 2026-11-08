@@ -24,7 +24,15 @@ BASE = RES / "values/strings.xml"
 # The languages Svipe ships. Telegram's own keys cover far more, but those come from the cloud
 # langpack; ours are app resources, so these are the folders that must carry them.
 LOCALES = ["values-uz", "values-ru"]
-UPSTREAM = "origin/master"
+# Telegram itself (DrKLO/Telegram) when the upstream remote is there: our own master now carries the
+# Svipe features too (since 2026-08-25), so diffing against it would hide our keys or, after an upstream
+# merge, count Telegram's new keys as ours.
+UPSTREAM = (
+    "upstream/master"
+    if subprocess.run(["git", "-C", str(ROOT), "rev-parse", "-q", "--verify", "upstream/master"],
+                      capture_output=True).returncode == 0
+    else "origin/master"
+)
 
 # Keys that are deliberately identical in every language (brand names, wordmarks).
 BRAND = {"AppName", "AppNameBeta", "SvipeIntroTitle", "MainTabsReels"}
@@ -116,7 +124,8 @@ def hardcoded():
             s = line.strip()
             if s.startswith(("//", "*", "/*")):
                 continue
-            if "R.string." in line or "formatPluralString" in line:
+            # A literal that is only compared, never shown (an old title to recognise), says so inline.
+            if "R.string." in line or "formatPluralString" in line or "svipe-strings: not shown" in line:
                 continue
             for m in LITERAL.finditer(line):
                 lit = m.group(1)

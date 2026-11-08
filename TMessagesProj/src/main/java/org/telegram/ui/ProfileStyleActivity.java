@@ -51,7 +51,7 @@ import org.telegram.ui.Components.ScrollSlidingTextTabStrip;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
-import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceColor;
+import org.telegram.utils.glass.source.GlassSourceColor;
 import org.telegram.ui.Components.RecyclerListView;
 
 import java.util.ArrayList;
@@ -305,7 +305,7 @@ public abstract class ProfileStyleActivity extends BaseFragment {
             try {
                 // SharedMediaLayout's own fallback for when it is handed no liquid-glass factory:
                 // the same drawable off a plain colour source, without the render-node pipeline.
-                final BlurredBackgroundSourceColor source = new BlurredBackgroundSourceColor();
+                final GlassSourceColor source = new GlassSourceColor();
                 source.setColor(getThemedColor(Theme.key_windowBackgroundWhite));
                 final BlurredBackgroundDrawable pill = new BlurredBackgroundDrawableViewFactory(source)
                         .create(tabStrip, BlurredBackgroundProviderImpl.topPanel(getResourceProvider()));

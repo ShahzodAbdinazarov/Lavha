@@ -46,7 +46,7 @@ import java.util.List;
  * The surface lives in {@link SvipeVideoStage}, an overlay above the whole fragment stack, so a mode
  * change is pure geometry: the player is never rebuilt and playback never restarts.
  */
-public class SvipeVideoPlayerController implements org.telegram.messenger.pip.source.IPipSourceDelegate {
+public class SvipeVideoPlayerController {
 
     /** Nothing is open; the stage is GONE and swallows no touches. */
     public static final int MODE_CLOSED = 0;
@@ -983,6 +983,9 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
                     if (unappliedRotationDegrees == 90 || unappliedRotationDegrees == 270) { int t = width; width = height; height = t; }
                     float ratio = height == 0 ? 1f : (width * pixelWidthHeightRatio) / height;
                     if (stage != null) stage.setAspectRatio(ratio, unappliedRotationDegrees);
+                    pipContentWidth = Math.round(width * pixelWidthHeightRatio);
+                    pipContentHeight = height;
+                    if (pipSession != null) pipSession.invalidate();
                 }
 
                 // The live callback is the AnalyticsListener overload (with EventTime) — the no-arg
@@ -1456,21 +1459,14 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
     // ---------------- system picture-in-picture ----------------
 
     /**
-     * The registered PiP source. Its presence is what lets Android shrink the app into a floating
-     * window when the user leaves — the framework asks for it on {@code onUserLeaveHint}, so there is
-     * no button to press and nothing to remember.
+     * The registered PiP session. Its presence is what lets Android shrink the app into a floating
+     * window when the user leaves — the coordinator asks for it on {@code onUserLeaveHint}, so there
+     * is no button to press and nothing to remember.
      */
-    private org.telegram.messenger.pip.PipSource pipSource;
-
-    /**
-     * The second surface, living inside the PiP window.
-     *
-     * A separate one is unavoidable: the PiP window is a different view hierarchy, and the picture
-     * has to be rendered into it. What is avoidable — and avoided — is rebuilding the player around
-     * it: ExoPlayer re-points its video output at a new TextureView in place, so the handover keeps
-     * the position, the buffer and the audio, and costs at most a frame.
-     */
-    private android.view.TextureView pipTextureView;
+    private org.telegram.utils.pip.PipSession pipSession;
+    private int pipContentWidth = 16, pipContentHeight = 9;
+    /** The on-screen picture handed to the PiP window; while true the stage shows nothing. */
+    private boolean pipPrimaryHidden;
 
     /**
      * Whether the pause that stopped playback was the app going away, rather than the user asking.
@@ -1493,88 +1489,160 @@ public class SvipeVideoPlayerController implements org.telegram.messenger.pip.so
     }
 
     private void attachPipSource() {
-        if (pipSource != null || player == null || player.player == null || stage == null) return;
-        final Activity activity = activityOf();
-        if (activity == null) return;
+        if (pipSession != null || player == null || player.player == null || stage == null) return;
         try {
-            // Asked of the system directly, NOT through PipUtils.checkPermissions: that helper
-            // answers OVERLAY first whenever "display over other apps" happens to be granted — which
-            // it very often is, because Telegram asks for it — and gating on its PIP answer would
-            // therefore have silently disabled picture-in-picture for exactly the users most likely
-            // to want it. What matters here is one question: will Android let this app enter its own
-            // picture-in-picture mode?
-            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O
-                    || !AndroidUtilities.checkPipPermissions(activity)) {
-                return;   // no system PiP on this device, or the user switched it off for us
-            }
-            pipSource = new org.telegram.messenger.pip.PipSource.Builder(activity, this)
-                    .setTagPrefix("svipe-video")
-                    .setContentView(stage.getPipContentView())
-                    .setPlayer(player.player)
-                    .setNeedMediaSession(true)
-                    .build();
+            // No system PiP on this device, or the user switched it off for us.
+            if (!org.telegram.utils.pip.PipCoordinator.canEnterSystemPip()) return;
+            pipSession = org.telegram.utils.pip.PipCoordinator.getInstance().register(pipContent);
         } catch (Exception e) {
             FileLog.e(e);
         }
     }
 
     private void detachPipSource() {
-        if (pipSource != null) {
-            try { pipSource.destroy(); } catch (Exception ignore) {}
-            pipSource = null;
+        if (pipSession != null) {
+            final org.telegram.utils.pip.PipSession session = pipSession;
+            pipSession = null;
+            try { session.release(); } catch (Exception ignore) {}
         }
-        pipTextureView = null;
+        pipPrimaryHidden = false;
     }
 
-    @Override
-    public View pipCreatePictureInPictureView() {
-        pipTextureView = new android.view.TextureView(ApplicationLoader.applicationContext);
-        return pipTextureView;
-    }
-
-    @Override
-    public void pipHidePrimaryWindowView(Runnable firstFrameCallback) {
-        // Point the running player at the PiP surface and take the on-screen picture away. The
-        // player is untouched otherwise — no prepare, no seek, no gap in the sound.
-        if (player != null && pipTextureView != null) {
-            try { player.setTextureView(pipTextureView); } catch (Exception ignore) {}
+    /**
+     * What the PiP window is told about this video. Only system PiP: the player has no in-app
+     * floating window of its own. The handover re-points the running ExoPlayer at the PiP surface and
+     * back, so the position, the buffer and the audio carry over and it costs at most a frame.
+     */
+    private final org.telegram.utils.pip.PipContent pipContent = new org.telegram.utils.pip.PipContent() {
+        @Override
+        public int getContentWidth() {
+            return pipContentWidth;
         }
-        if (stage != null) stage.setPictureHidden(true);
-        if (firstFrameCallback != null) firstFrameCallback.run();
-    }
 
-    @Override
-    public void pipShowPrimaryWindowView(Runnable firstFrameCallback) {
-        if (player != null && stage != null) {
-            try { player.setTextureView(stage.getTextureView()); } catch (Exception ignore) {}
+        @Override
+        public int getContentHeight() {
+            return pipContentHeight;
         }
-        if (stage != null) stage.setPictureHidden(false);
-        if (firstFrameCallback != null) firstFrameCallback.run();
-    }
 
-    @Override
-    public android.graphics.Bitmap pipCreatePrimaryWindowViewBitmap() {
-        return stage != null ? stage.snapshotPicture() : null;
-    }
+        @Override
+        public boolean isOverlayAllowed() {
+            return false;
+        }
 
-    @Override
-    public android.graphics.Bitmap pipCreatePictureInPictureViewBitmap() {
-        try {
-            if (pipTextureView != null && pipTextureView.isAvailable()
-                    && pipTextureView.getWidth() > 0 && pipTextureView.getHeight() > 0) {
-                return pipTextureView.getBitmap();
+        @Override
+        public boolean isPlaying() {
+            return SvipeVideoPlayerController.this.isPlaying();
+        }
+
+        @Override
+        public boolean isCompleted() {
+            final long duration = getDurationMs();
+            return duration > 0 && getPositionMs() >= duration - END_EPSILON_MS;
+        }
+
+        @Override
+        public void play() {
+            if (player != null && !player.isPlaying()) togglePlayPause();
+        }
+
+        @Override
+        public void pause() {
+            if (player != null && player.isPlaying()) togglePlayPause();
+        }
+
+        @Override
+        public long getDuration() {
+            return getDurationMs();
+        }
+
+        @Override
+        public long getCurrentPosition() {
+            return getPositionMs();
+        }
+
+        @Override
+        public float getBufferedProgress() {
+            final long duration = getDurationMs();
+            return duration > 0 ? Math.min(1f, getBufferedMs() / (float) duration) : 0f;
+        }
+
+        @Override
+        public void seekTo(long positionMs) {
+            SvipeVideoPlayerController.this.seekTo(positionMs, false);
+        }
+
+        @Override
+        public androidx.media3.common.Player getMediaSessionPlayer() {
+            return player != null ? player.player : null;
+        }
+
+        @Override
+        public boolean needsPipOutsideApp() {
+            // Only while something is actually playing: a paused player in a floating window is a
+            // screenshot the user has to dismiss.
+            return isOpen() && SvipeVideoPlayerController.this.isPlaying();
+        }
+
+        @Override
+        public boolean isPrimaryVisible() {
+            return isOpen() && !pipPrimaryHidden && stage != null && stage.getTextureView() != null
+                    && stage.getTextureView().isAttachedToWindow();
+        }
+
+        @Override
+        public void getPrimaryVideoRect(@androidx.annotation.NonNull android.graphics.Rect outScreenRect) {
+            final View view = stage != null ? stage.getTextureView() : null;
+            if (view == null || !view.isAttachedToWindow()) {
+                outScreenRect.setEmpty();
+                return;
             }
-        } catch (Exception ignore) {
+            final int[] location = new int[2];
+            view.getLocationOnScreen(location);
+            outScreenRect.set(location[0], location[1], location[0] + view.getWidth(), location[1] + view.getHeight());
         }
-        return null;
-    }
 
-    @Override
-    public boolean pipIsAvailable() {
-        // Only while something is actually playing: a paused player in a floating window is a
-        // screenshot the user has to dismiss.
-        return isOpen() && isPlaying();
-    }
+        @Override
+        public void releasePrimary(@androidx.annotation.NonNull org.telegram.utils.pip.PipTextureView target) {
+            pipPrimaryHidden = true;
+            if (player != null) {
+                try { player.setTextureView(target); } catch (Exception ignore) {}
+            }
+            if (stage != null) stage.setPictureHidden(true);
+        }
+
+        @Override
+        public void restorePrimary(@androidx.annotation.NonNull android.graphics.SurfaceTexture surfaceTexture) {
+            pipPrimaryHidden = false;
+            if (player != null && stage != null) {
+                try { player.setTextureView(stage.getTextureView()); } catch (Exception ignore) {}
+            }
+            if (stage != null) stage.setPictureHidden(false);
+            // The stage keeps its own surface; the one the PiP window used is not needed any more.
+            surfaceTexture.release();
+        }
+
+        @Override
+        public void onExpandRequested() {
+            if (pipSession != null) pipSession.completeExpand(this::restorePrimary);
+        }
+
+        @Override
+        public void onDismissed() {
+            pipSession = null;
+            if (pipPrimaryHidden) {
+                restorePrimaryAfterDismiss();
+            }
+            if (player != null && player.isPlaying()) togglePlayPause();
+        }
+
+        private void restorePrimaryAfterDismiss() {
+            pipPrimaryHidden = false;
+            if (player != null && stage != null) {
+                try { player.setTextureView(stage.getTextureView()); } catch (Exception ignore) {}
+            }
+            if (stage != null) stage.setPictureHidden(false);
+        }
+    };
 
     // ---------------- activity lifecycle (LaunchActivity forwards) ----------------
 

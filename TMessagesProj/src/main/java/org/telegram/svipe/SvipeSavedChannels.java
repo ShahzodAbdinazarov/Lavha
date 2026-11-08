@@ -139,7 +139,7 @@ public final class SvipeSavedChannels {
      * is renamed the first time it is used, so it carries on under the new one — on every device, since
      * desktop finds the same channel by either name and renames it the same way.
      */
-    private static final String[] OLD_REELS_TITLES = {"Saved Clips", "Saqlangan Clips", "Сохранённые Clips"};
+    private static final String[] OLD_REELS_TITLES = {"Saved Clips", "Saqlangan Clips", "Сохранённые Clips"}; // svipe-strings: not shown
 
     private static void renameOldTitle(int account, Kind kind, TLRPC.Chat chat) {
         if (kind != Kind.SAVED_REELS || chat.title == null) {

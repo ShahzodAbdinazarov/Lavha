@@ -89,8 +89,8 @@ import org.telegram.ui.Components.blur3.capture.IBlur3Capture;
 import org.telegram.ui.Components.blur3.capture.IBlur3Hash;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
-import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceColor;
-import org.telegram.ui.Components.blur3.source.BlurredBackgroundSourceRenderNode;
+import org.telegram.utils.glass.source.GlassSourceColor;
+import org.telegram.utils.glass.source.GlassSourceRenderNode;
 import org.telegram.ui.Components.blur3.utils.Blur3Utils;
 import org.telegram.ui.Components.chat.ViewPositionWatcher;
 
@@ -180,8 +180,8 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
      * solid look. */
     private ViewPositionWatcher viewPositionWatcher;
     private DownscaleScrollableNoiseSuppressor scrollableViewNoiseSuppressor;
-    private BlurredBackgroundSourceRenderNode iBlur3SourceGlass;
-    private BlurredBackgroundSourceColor iBlur3SourceColor;
+    private GlassSourceRenderNode iBlur3SourceGlass;
+    private GlassSourceColor iBlur3SourceColor;
     private BlurredBackgroundDrawableViewFactory iBlur3FactoryLiquidGlass;
     private IBlur3Capture iBlur3VibeCapture;
     private IBlur3Capture iBlur3PanelCapture;
@@ -738,7 +738,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
             try {
                 // SharedMediaLayout's own fallback when it is handed no liquid-glass factory: the same
                 // pill drawable off a plain colour source, minus the render-node pipeline.
-                final BlurredBackgroundSourceColor source = new BlurredBackgroundSourceColor();
+                final GlassSourceColor source = new GlassSourceColor();
                 source.setColor(getThemedColor(Theme.key_windowBackgroundWhite));
                 final BlurredBackgroundDrawable pill = new BlurredBackgroundDrawableViewFactory(source)
                         .create(tabStrip, BlurredBackgroundProviderImpl.topPanel(getResourceProvider()));
@@ -1668,11 +1668,11 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     // DialogsActivity's constructor. Below S there is no render-node pipeline, so the factory falls
     // back to a solid-colour source and every glass drawable it makes is a plain solid fill.
     private void initBlur3() {
-        iBlur3SourceColor = new BlurredBackgroundSourceColor();
+        iBlur3SourceColor = new GlassSourceColor();
         iBlur3SourceColor.setColor(getThemedColor(Theme.key_windowBackgroundWhite));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             scrollableViewNoiseSuppressor = new DownscaleScrollableNoiseSuppressor();
-            iBlur3SourceGlass = new BlurredBackgroundSourceRenderNode(null);
+            iBlur3SourceGlass = new GlassSourceRenderNode(null);
             iBlur3SourceGlass.setupRenderer(new RenderNodeWithHash.Renderer() {
                 @Override
                 public void renderNodeCalculateHash(IBlur3Hash hash) {
