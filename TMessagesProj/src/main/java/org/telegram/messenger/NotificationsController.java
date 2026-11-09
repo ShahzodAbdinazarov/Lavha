@@ -6141,6 +6141,9 @@ public class NotificationsController extends BaseController implements Notificat
     }
 
     public void updateServerNotificationsSettings(long dialogId, long topicId, boolean post) {
+        // Svipe: a bot the user un/mutes by hand becomes an exception to "mute bots" — before the
+        // post below, whose observer re-applies the rule.
+        org.telegram.svipe.SvipeBotMute.onDialogSettingsChanged(currentAccount, dialogId, topicId);
         if (post) {
             getNotificationCenter().postNotificationName(NotificationCenter.notificationsSettingsUpdated);
         }

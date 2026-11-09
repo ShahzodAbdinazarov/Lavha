@@ -120,11 +120,11 @@ public final class SvipeBotMute {
                     boolean currentlyMuted = mc.isDialogMuted(dialog.id, 0);
                     if (shouldMute) {
                         if (!currentlyMuted) {
-                            NotificationsController.getInstance(account).muteDialog(dialog.id, 0, true);
+                            mute(account, dialog.id, true);
                         }
                         applied.add(dialog.id);
                     } else if (applied.remove(dialog.id) && currentlyMuted) {
-                        NotificationsController.getInstance(account).muteDialog(dialog.id, 0, false);
+                        mute(account, dialog.id, false);
                     }
                 }
                 writeIds(account, SvipeConfig.PREF_BOT_MUTE_APPLIED, applied);
@@ -142,17 +142,61 @@ public final class SvipeBotMute {
                 MessagesController mc = MessagesController.getInstance(account);
                 if (mute) {
                     if (applied.add(userId)) {
-                        NotificationsController.getInstance(account).muteDialog(userId, 0, true);
+                        mute(account, userId, true);
                         writeIds(account, SvipeConfig.PREF_BOT_MUTE_APPLIED, applied);
                     }
                 } else if (applied.remove(userId)) {
-                    NotificationsController.getInstance(account).muteDialog(userId, 0, false);
+                    mute(account, userId, false);
                     writeIds(account, SvipeConfig.PREF_BOT_MUTE_APPLIED, applied);
                 }
             } catch (Exception e) {
                 FileLog.e(e);
             }
         });
+    }
+
+    /** Nonzero while the rule itself is muting or unmuting a peer (UI thread only). */
+    private static int applying;
+
+    /** Telegram's per-peer mute, marked as the rule's own doing so it is not read as the user's. */
+    private static void mute(int account, long dialogId, boolean mute) {
+        applying++;
+        try {
+            NotificationsController.getInstance(account).muteDialog(dialogId, 0, mute);
+        } finally {
+            applying--;
+        }
+    }
+
+    /**
+     * A bot's notification settings changed — from its profile, the chat header, "Customize", or the
+     * mute menu. While the rule is on, that is the user telling us about this one bot, so it becomes
+     * (or stops being) an exception. Without this the rule's own watcher saw a bot that was not an
+     * exception and muted it again a moment later: a single bot could never be switched back on.
+     *
+     * A bot the user mutes by hand is left out of the "applied" set on purpose, so switching the
+     * rule off later does not unmute it.
+     */
+    public static void onDialogSettingsChanged(int account, long dialogId, long topicId) {
+        if (applying > 0 || topicId != 0 || !DialogObject.isUserDialog(dialogId) || !isEnabled(account)) return;
+        try {
+            MessagesController mc = MessagesController.getInstance(account);
+            TLRPC.User user = mc.getUser(dialogId);
+            if (user == null || !user.bot) return;
+            boolean except = !mc.isDialogMuted(dialogId, 0);
+            Set<Long> set = exceptions(account);
+            if (except == set.contains(dialogId)) return;
+            if (except) set.add(dialogId); else set.remove(dialogId);
+            writeIds(account, SvipeConfig.PREF_BOT_MUTE_EXCEPTIONS, set);
+            Set<Long> applied = readIds(account, SvipeConfig.PREF_BOT_MUTE_APPLIED);
+            if (applied.remove(dialogId)) {
+                writeIds(account, SvipeConfig.PREF_BOT_MUTE_APPLIED, applied);
+            }
+            touch(account);
+            SvipeSettingsSync.push(account);
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
     }
 
     /**
