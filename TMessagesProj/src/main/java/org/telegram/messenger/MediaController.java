@@ -3183,7 +3183,11 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
     
     // saved music lists are stored top to bottom, while chat playlists are stored oldest first
     private boolean isPlaylistOrderReversed() {
-        return currentSavedMusicList != null ? !SharedConfig.playOrderReversed : SharedConfig.playOrderReversed;
+        // Svipe: a SvipeMusicQueue is a SavedMusicList only to borrow its paging, but it is ordered like
+        // a chat playlist (play order = toward index 0, see SvipeMusicQueue), so it must not be flipped.
+        final boolean topToBottom = currentSavedMusicList != null
+            && !(currentSavedMusicList instanceof org.telegram.svipe.SvipeMusicQueue);
+        return topToBottom ? !SharedConfig.playOrderReversed : SharedConfig.playOrderReversed;
     }
 
     private boolean traversePlaylist(ArrayList<MessageObject> playlist, int direction) {
