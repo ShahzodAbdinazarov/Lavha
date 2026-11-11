@@ -54,6 +54,21 @@ public final class SvipeMusicFavourites {
                 f.username = ChatObject.getPublicUsername(chat);
             }
         }
+        // A catalog song liked from the notification while the app sits in the background: the
+        // channel is not in MessagesController (nobody is a member of a catalog channel), so the
+        // lookup above fails closed and the favourite was stored without a username — a card the
+        // list can never play. The queue that is playing it knows the public channel; use that.
+        if (f.username == null || f.username.isEmpty()) {
+            SvipeMusicQueue q = SvipeMusicQueue.getActive();
+            SvipeMusic.Track t = q != null ? q.trackFor(mo) : null;
+            if (t != null && t.username != null && !t.username.isEmpty()) {
+                f.username = t.username;
+                f.isPublic = true;
+                f.channelId = t.channelId;
+                f.messageId = t.messageId;
+                f.dialogId = -t.channelId;
+            }
+        }
         f.addedAt = System.currentTimeMillis();
         return f;
     }

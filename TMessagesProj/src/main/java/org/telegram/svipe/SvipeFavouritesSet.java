@@ -283,6 +283,19 @@ public class SvipeFavouritesSet {
             if (existing != null) {
                 existing.title = s.shownTitle();
                 existing.artist = s.shownArtist();
+                // Repair a favourite saved without a playable source (liked from the notification
+                // before that path knew the channel): the server copy carries its default track.
+                if ((existing.username == null || existing.username.isEmpty()) && s.defaultTrack != null
+                        && s.defaultTrack.username != null && !s.defaultTrack.username.isEmpty()) {
+                    existing.channelId = s.defaultTrack.channelId;
+                    existing.messageId = s.defaultTrack.messageId;
+                    existing.username = s.defaultTrack.username;
+                    existing.dialogId = -s.defaultTrack.channelId;
+                    existing.isPublic = true;
+                    if (existing.durationS <= 0) {
+                        existing.durationS = s.defaultTrack.durationS;
+                    }
+                }
                 continue;
             }
             SvipeFavourite f = SvipeFavourite.of(SvipeFavKey.song(s.id));
