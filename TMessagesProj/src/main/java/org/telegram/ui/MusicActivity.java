@@ -169,6 +169,7 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
     private final ArrayList<SvipeArtistFavourite> artistFavourites = new ArrayList<>();
     // Favourite key -> its entry in the CURRENT favQueue, so rows render as native audio cells.
     private final HashMap<String, MessageObject> favMo = new HashMap<>();
+    private final java.util.HashSet<String> favUsernameRepairTried = new java.util.HashSet<>();
     // Track.key() -> resolved channel message, kept across rebuilds so re-forming the queue is free.
     private final HashMap<String, TLRPC.Message> favResolvedMsgs = new HashMap<>();
     private SvipeMusicQueue favQueue;
@@ -1480,6 +1481,19 @@ public class MusicActivity extends BaseFragment implements NotificationCenter.No
         final ArrayList<SvipeFavourite> owners = new ArrayList<>();
         final ArrayList<SvipeMusic.Track> toResolve = new ArrayList<>();
         for (SvipeFavourite f : favourites) {
+            if ((f.username == null || f.username.isEmpty()) && f.channelId != 0 && f.messageId != 0
+                    && favUsernameRepairTried.add(f.key)) {
+                // Saved without the channel's username (e.g. liked from the notification while the
+                // app was in the background). If the channel is public after all, adopt its username
+                // — the set's change notification re-runs this and the row becomes playable.
+                final String key = f.key;
+                org.telegram.svipe.SvipeChannelResolve.lookup(currentAccount, f.channelId, chat -> {
+                    String username = chat != null ? org.telegram.messenger.ChatObject.getPublicUsername(chat) : null;
+                    if (username != null && !username.isEmpty()) {
+                        SvipeFavouritesSet.getInstance(currentAccount).repairUsername(key, username);
+                    }
+                });
+            }
             if (f.username == null || f.username.isEmpty() || f.channelId == 0 || f.messageId == 0) {
                 continue;   // private/unresolvable entries stay as cards
             }

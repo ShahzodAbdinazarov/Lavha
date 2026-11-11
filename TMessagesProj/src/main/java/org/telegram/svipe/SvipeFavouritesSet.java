@@ -131,6 +131,27 @@ public class SvipeFavouritesSet {
         return nowFavourite;
     }
 
+    /**
+     * Give a favourite stored without a channel username (so the list could only draw it as a card)
+     * the public username its channel turned out to have. No-op when the entry is gone or already has
+     * one.
+     */
+    public void repairUsername(String key, String username) {
+        if (key == null || username == null || username.isEmpty()) {
+            return;
+        }
+        synchronized (this) {
+            SvipeFavourite f = items.get(key);
+            if (f == null || (f.username != null && !f.username.isEmpty()) || f.channelId == 0) {
+                return;
+            }
+            f.username = username;
+            f.isPublic = true;
+            persistLocked();
+        }
+        notifyChanged();
+    }
+
     /** Adopt a catalog song id discovered after the fact, re-keying the entry from "msg:" to "song:". */
     synchronized SvipeFavourite get(String key) {
         return key != null ? items.get(key) : null;
